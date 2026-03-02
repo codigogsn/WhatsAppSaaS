@@ -19,8 +19,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
         public bool Welcomed { get; set; }
 
         public List<(string Name, int Quantity)> Items { get; } = new();
-        public string? DeliveryType { get; set; } // "pickup" | "delivery"
+
+        // "pickup" | "delivery"
+        public string? DeliveryType { get; set; }
+
+        // Planilla ya enviada 1 vez
         public bool RequestedDetailsForm { get; set; }
+
+        // El usuario ya mandó la planilla llena (heurístico)
+        public bool DetailsReceived { get; set; }
 
         public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     }
@@ -58,7 +65,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                     var conversationId = $"{message.From}:{phoneNumberId}";
 
-                    // Ensure conversation state exists
                     if (!_stateByConversation.TryGetValue(conversationId, out var state))
                     {
                         state = new ConversationState();
@@ -66,7 +72,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     }
                     state.UpdatedAtUtc = DateTime.UtcNow;
 
-                    var rawText = message.Text.Body;
+                    // ya validamos IsNullOrWhiteSpace arriba
+                    var rawText = message.Text!.Body!;
 
                     var parsed = await _aiParser.ParseAsync(
                         rawText,
@@ -100,7 +107,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // -------------------------
     private async Task<string> BuildReplyAsync(
         AiParseResult parsed,
-        string rawText,
+        string? rawText,
         string conversationId,
         string from,
         string phoneNumberId,
@@ -108,13 +115,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
     {
         var state = _stateByConversation[conversationId];
 
-        // ✅ Anti-loop / confirmación por texto:
-        // Si el usuario escribe algo que claramente implica pedido/reservación,
-        // lo tratamos como tal aunque el AI lo marque General.
-        // Evita el loop tipo: "hola que tal un pedido".
-        {
-            var t = (rawText ?? "").Trim().ToLowerInvariant();
+        var t = (rawText ?? "").Trim().ToLowerInvariant();
 
+        // ✅ Comando de cierre (siempre disponible)
+        if (t == "confirmar" || t == "confirmado" || t == "listo")
+        {
+            return await FinalizeOrderIfPossibleAsync(state, from, phoneNumberId, ct);
+        }
+
+        // ✅ Anti-loop: si intent=General pero el texto contiene "pedido"/"reserv"
+        if (parsed.Intent == RestaurantIntent.General && state.Items.Count == 0)
+        {
             var looksLikeOrder =
                 t.Contains("pedido") ||
                 t.Contains("orden") ||
@@ -128,55 +139,49 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 t.Contains("reservación") ||
                 t.Contains("reservacion");
 
-            // Solo forzamos cuando el intent es General y aún no hay items en estado (inicio)
-            if (parsed.Intent == RestaurantIntent.General && state.Items.Count == 0)
+            if (looksLikeOrder)
             {
-                if (looksLikeOrder)
-                {
-                    state.Welcomed = true; // por si venía de un saludo
-                    return await BuildOrderReplyAsync(parsed, conversationId, from, phoneNumberId, ct);
-                }
+                state.Welcomed = true;
+                return await BuildOrderReplyAsync(parsed, rawText, conversationId, from, phoneNumberId, ct);
+            }
 
-                if (looksLikeReservation)
-                {
-                    state.Welcomed = true;
-                    return BuildReservationReply(parsed);
-                }
+            if (looksLikeReservation)
+            {
+                state.Welcomed = true;
+                return BuildReservationReply(parsed);
             }
         }
 
-        // ✅ 1) Saludo inicial (solo 1 vez por conversación)
-        // Si el AI clasifica "General" y aún no hemos dado bienvenida, damos un arranque humano.
+        // ✅ Saludo inicial (solo 1 vez por conversación)
         if (!state.Welcomed && parsed.Intent == RestaurantIntent.General)
         {
             state.Welcomed = true;
-            return "¡Hola! 👋 ¿Cómo estás? Para ayudarte rápido: ¿deseas hacer un *pedido* o una *reservación*?";
+            return "¡Hola! 👋 Para ayudarte rápido: ¿deseas hacer un *pedido* o una *reservación*?";
         }
 
         return parsed.Intent switch
         {
-            RestaurantIntent.OrderCreate => await BuildOrderReplyAsync(parsed, conversationId, from, phoneNumberId, ct),
+            RestaurantIntent.OrderCreate => await BuildOrderReplyAsync(parsed, rawText, conversationId, from, phoneNumberId, ct),
             RestaurantIntent.ReservationCreate => BuildReservationReply(parsed),
             RestaurantIntent.HumanHandoff => "Te paso con un humano en un momento 🙌",
-            RestaurantIntent.General => "¿Deseas hacer un pedido o una reservación?",
+            RestaurantIntent.General => "¿Deseas hacer un *pedido* o una *reservación*?",
             _ => "Gracias por tu mensaje."
         };
     }
 
-    private async Task<string> BuildOrderReplyAsync(
+    // ⚠️ NO async: no necesita await
+    private Task<string> BuildOrderReplyAsync(
         AiParseResult parsed,
+        string? rawText,
         string conversationId,
         string from,
         string phoneNumberId,
         CancellationToken ct)
     {
         var state = _stateByConversation[conversationId];
+        var t = (rawText ?? "").Trim().ToLowerInvariant();
 
-        // ✅ Si no hay nada de orden, preguntamos qué desea ordenar
-        if (parsed.Args.Order is null && state.Items.Count == 0)
-            return "Perfecto 😊 ¿Qué deseas ordenar?";
-
-        // Merge new info from AI -> state
+        // 1) Merge info de AI -> state
         if (parsed.Args.Order is not null)
         {
             foreach (var item in parsed.Args.Order.Items)
@@ -187,58 +192,103 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
             if (!string.IsNullOrWhiteSpace(parsed.Args.Order.DeliveryType))
             {
-                state.DeliveryType = parsed.Args.Order.DeliveryType.Trim().ToLowerInvariant();
+                state.DeliveryType = NormalizeDeliveryType(parsed.Args.Order.DeliveryType);
             }
         }
 
-        state.UpdatedAtUtc = DateTime.UtcNow;
-
-        if (state.Items.Count == 0)
-            return "¿Qué deseas ordenar?";
-
-        // (MVP) pluralización naive con "s"
-        var itemsText = string.Join(", ",
-            state.Items.Select(i => i.Quantity > 1 ? $"{i.Quantity} {i.Name}s" : $"{i.Quantity} {i.Name}"));
-
-        // ✅ 2) Mensaje de recolección de data DESPUÉS de que el usuario dijo el pedido
-        // Lo mandamos 1 vez cuando ya tenemos items y todavía no lo hemos pedido
-        if (!state.RequestedDetailsForm)
+        // 2) Capturar delivery/pickup suelto
+        if (state.DeliveryType is null)
         {
-            state.RequestedDetailsForm = true;
+            var maybe = NormalizeDeliveryType(t);
+            if (maybe is not null) state.DeliveryType = maybe;
+        }
 
-            // OJO: tu mensaje + el pedido precargado
-            return
+        // 3) Heurística de planilla llena
+        if (state.RequestedDetailsForm && !state.DetailsReceived)
+        {
+            var looksLikeFilledForm =
+                t.Contains("nombre") &&
+                (t.Contains("ced") || t.Contains("céd")) &&
+                t.Contains("direc");
+
+            if (looksLikeFilledForm)
+            {
+                state.DetailsReceived = true;
+                return Task.FromResult("Recibido ✅ Cuando estés listo, escribe *CONFIRMAR* para finalizar el pedido.");
+            }
+        }
+
+        // 4) Si no hay items todavía
+        if (state.Items.Count == 0)
+            return Task.FromResult("Perfecto 😊 ¿Qué deseas ordenar?");
+
+        var itemsText = BuildItemsText(state);
+
+        // 5) Si falta deliveryType
+        if (string.IsNullOrWhiteSpace(state.DeliveryType))
+        {
+            return Task.FromResult($"Perfecto 👍 Tengo: {itemsText}\n\n¿Es *pick up* o *delivery*?");
+        }
+
+        // 6) Modo edición (si ya mandamos planilla)
+        if (state.RequestedDetailsForm)
+        {
+            if (parsed.Intent == RestaurantIntent.OrderCreate || LooksLikeNewItemText(t))
+            {
+                itemsText = BuildItemsText(state);
+                var prettyDelivery = state.DeliveryType == "pickup" ? "pick up" : "delivery";
+
+                return Task.FromResult(
+$@"Agregado ✅
+
+Pedido actual: {itemsText}
+Tipo: {prettyDelivery}
+
+Cuando termines, escribe *CONFIRMAR* para finalizar (o agrega más productos).");
+            }
+
+            return Task.FromResult("Cuando tengas todo listo, escribe *CONFIRMAR* para finalizar tu pedido (o agrega más productos).");
+        }
+
+        // 7) Primera vez: mandamos planilla UNA vez
+        state.RequestedDetailsForm = true;
+
+        var deliveryPretty = state.DeliveryType == "pickup" ? "pick up" : "delivery";
+
+        return Task.FromResult(
 $@"Perfecto 👍 Pedido recibido: {itemsText}.
+Tipo: {deliveryPretty}
 
-Para agilizar el proceso, y poder enviar a nuestro repartidor correctamente por favor envíenos lo siguiente: 
+Para agilizar el proceso, por favor envíanos lo siguiente (puedes responder copiando y llenando):
 
 👤 *Nombre y apellido*: 
 🪪 *Cédula de identidad*:
 ☎️ *Número de teléfono local*: 
-📱 *Número de teléfono celular* 
-🏡 *Dirección  escrita  (Nombre de residencia, calle y N° apto/casa):* 
+📱 *Número de teléfono celular*: 
+🏡 *Dirección escrita (Residencia, calle y N° apto/casa)*: 
 📝 *Pedido*: {itemsText}
-📦 *¿Recibe usted mismo/a?:* 
-💵 *Forma de Pago:* 
-📍 *Ubicación GPS*.
+📦 *¿Recibe usted mismo/a?*: 
+💵 *Forma de Pago*: 
+📍 *Ubicación GPS*: 
 
-Y porfa indícanos si es *pick up* o *delivery*.";
-        }
+Cuando termines, escribe *CONFIRMAR* para finalizar el pedido.");
+    }
 
-        // Si ya pidió la planilla una vez, aquí seguimos intentando completar delivery_type (si llegó suelto)
+    private async Task<string> FinalizeOrderIfPossibleAsync(
+        ConversationState state,
+        string from,
+        string phoneNumberId,
+        CancellationToken ct)
+    {
+        if (state.Items.Count == 0)
+            return "Aún no tengo productos en tu pedido. ¿Qué deseas ordenar?";
+
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
-        {
-            return "Listo ✅ ¿Es *pick up* o *delivery*?";
-        }
+            return $"Listo ✅ Tengo: {BuildItemsText(state)}\n\n¿Es *pick up* o *delivery*?";
 
-        var deliveryType = state.DeliveryType;
-        if (deliveryType != "pickup" && deliveryType != "delivery")
-        {
-            state.DeliveryType = null;
-            return "Disculpa 🙏 ¿Es *pick up* o *delivery*?";
-        }
+        var itemsText = BuildItemsText(state);
+        var deliveryType = state.DeliveryType!;
 
-        // Persist order (DB) vía repositorio
         var order = new Order
         {
             From = from,
@@ -254,14 +304,15 @@ Y porfa indícanos si es *pick up* o *delivery*.";
 
         await _orderRepository.AddOrderAsync(order, ct);
 
-        // Reset state for next order (but keep Welcomed)
+        // Reset state
         state.Items.Clear();
         state.DeliveryType = null;
         state.RequestedDetailsForm = false;
+        state.DetailsReceived = false;
         state.UpdatedAtUtc = DateTime.UtcNow;
 
         var prettyDelivery = deliveryType == "pickup" ? "pick up" : "delivery";
-        return $"Pedido confirmado ✅\n\nItems: {itemsText}\nTipo: {prettyDelivery}\n\n¿Algo más que quieras agregar?";
+        return $"Pedido confirmado ✅\n\nItems: {itemsText}\nTipo: {prettyDelivery}\n\n¿Quieres hacer otro pedido o una reservación?";
     }
 
     private static string BuildReservationReply(AiParseResult parsed)
@@ -270,5 +321,36 @@ Y porfa indícanos si es *pick up* o *delivery*.";
             return "Perfecto 😊 ¿Para qué fecha deseas reservar?";
 
         return $"Reserva recibida para {parsed.Args.Reservation.Date} a las {parsed.Args.Reservation.Time}. ¿Para cuántas personas?";
+    }
+
+    private static string BuildItemsText(ConversationState state)
+    {
+        return string.Join(", ",
+            state.Items.Select(i => i.Quantity > 1 ? $"{i.Quantity} {i.Name}s" : $"{i.Quantity} {i.Name}"));
+    }
+
+    private static string? NormalizeDeliveryType(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        var t = input.Trim().ToLowerInvariant();
+
+        if (t == "delivery" || t.Contains("domicilio") || t.Contains("enviar") || t.Contains("envio"))
+            return "delivery";
+
+        if (t == "pickup" || t == "pick up" || t.Contains("recoger") || t.Contains("retiro") || t.Contains("retirar") || t.Contains("buscar"))
+            return "pickup";
+
+        return null;
+    }
+
+    private static bool LooksLikeNewItemText(string t)
+    {
+        if (string.IsNullOrWhiteSpace(t)) return false;
+
+        if (t == "delivery" || t == "pickup" || t == "pick up" || t == "confirmar" || t == "confirmado" || t == "listo")
+            return false;
+
+        return t.Any(char.IsDigit);
     }
 }
