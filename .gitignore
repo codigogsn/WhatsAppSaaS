@@ -34,3 +34,4 @@ logs/
 out/
 bin/
 obj/
+src/Api/appsettings.Development.json
