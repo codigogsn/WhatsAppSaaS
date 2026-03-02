@@ -108,9 +108,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
     {
         var state = _stateByConversation[conversationId];
 
-        // ✅ Anti-loop: si el intent viene General pero el texto contiene intención clara,
-        // lo tratamos como confirmación (pedido/reservación) en vez de volver a preguntar.
-        if (parsed.Intent == RestaurantIntent.General)
+        // ✅ Anti-loop / confirmación por texto:
+        // Si el usuario escribe algo que claramente implica pedido/reservación,
+        // lo tratamos como tal aunque el AI lo marque General.
+        // Evita el loop tipo: "hola que tal un pedido".
         {
             var t = (rawText ?? "").Trim().ToLowerInvariant();
 
@@ -127,16 +128,20 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 t.Contains("reservación") ||
                 t.Contains("reservacion");
 
-            if (looksLikeOrder)
+            // Solo forzamos cuando el intent es General y aún no hay items en estado (inicio)
+            if (parsed.Intent == RestaurantIntent.General && state.Items.Count == 0)
             {
-                state.Welcomed = true; // por si venía de un saludo
-                return await BuildOrderReplyAsync(parsed, conversationId, from, phoneNumberId, ct);
-            }
+                if (looksLikeOrder)
+                {
+                    state.Welcomed = true; // por si venía de un saludo
+                    return await BuildOrderReplyAsync(parsed, conversationId, from, phoneNumberId, ct);
+                }
 
-            if (looksLikeReservation)
-            {
-                state.Welcomed = true;
-                return BuildReservationReply(parsed);
+                if (looksLikeReservation)
+                {
+                    state.Welcomed = true;
+                    return BuildReservationReply(parsed);
+                }
             }
         }
 
