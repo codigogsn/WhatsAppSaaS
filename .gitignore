@@ -1,0 +1,26 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.dll
+*.exe
+*.pdb
+
+## IDE
+.vs/
+.vscode/
+*.swp
+.idea/
+
+## Logs
+logs/
+
+## Environment
+.env
+appsettings.Production.json
+
+## OS
+.DS_Store
+Thumbs.db

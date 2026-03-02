@@ -1,0 +1,256 @@
+using Microsoft.Extensions.Logging;
+using WhatsAppSaaS.Application.DTOs;
+using WhatsAppSaaS.Application.Interfaces;
+using WhatsAppSaaS.Domain.Entities;
+
+namespace WhatsAppSaaS.Application.Services;
+
+public sealed class WebhookProcessor : IWebhookProcessor
+{
+    private readonly IAiParser _aiParser;
+    private readonly IWhatsAppClient _whatsAppClient;
+    private readonly ILogger<WebhookProcessor> _logger;
+
+    public WebhookProcessor(
+        IAiParser aiParser,
+        IWhatsAppClient whatsAppClient,
+        ILogger<WebhookProcessor> logger)
+    {
+        _aiParser = aiParser;
+        _whatsAppClient = whatsAppClient;
+        _logger = logger;
+    }
+
+    public async Task ProcessAsync(WebhookPayload payload, CancellationToken cancellationToken = default)
+    {
+        if (payload.Entry is not { Count: > 0 })
+        {
+            _logger.LogWarning("Received webhook payload with no entries");
+            return;
+        }
+
+        foreach (var entry in payload.Entry)
+        {
+            foreach (var change in entry.Changes)
+            {
+                if (change.Value?.Messages is not { Count: > 0 })
+                {
+                    if (change.Value?.Statuses is { Count: > 0 })
+                    {
+                        foreach (var status in change.Value.Statuses)
+                        {
+                            _logger.LogInformation(
+                                "Message status update: {MessageId} -> {Status} for {Recipient}",
+                                status.Id, status.Status, status.RecipientId);
+                        }
+                    }
+                    continue;
+                }
+
+                var phoneNumberId = change.Value.Metadata?.PhoneNumberId ?? string.Empty;
+
+                foreach (var msg in change.Value.Messages)
+                {
+                    await ProcessSingleMessageAsync(msg, phoneNumberId, cancellationToken);
+                }
+            }
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Core routing:  AiParser  →  intent switch  →  reply
+    // ─────────────────────────────────────────────────────
+    private async Task ProcessSingleMessageAsync(
+        WebhookMessage msg,
+        string phoneNumberId,
+        CancellationToken cancellationToken)
+    {
+        if (msg.Type != "text" || msg.Text is null)
+        {
+            _logger.LogInformation(
+                "Skipping non-text message of type {Type} from {From}",
+                msg.Type, msg.From);
+            return;
+        }
+
+        _logger.LogInformation(
+            "Processing text message {MessageId} from {From}: {Body}",
+            msg.Id, msg.From, msg.Text.Body);
+
+        try
+        {
+            // Stable conversation key for multi-turn (future)
+            var conversationId = $"{msg.From}:{phoneNumberId}";
+
+            var parsed = await _aiParser.ParseAsync(
+                msg.Text.Body,
+                msg.From,
+                conversationId,
+                cancellationToken);
+
+            var replyText = BuildReply(parsed, msg.From);
+
+            var outgoing = new OutgoingMessage
+            {
+                To = msg.From,
+                Body = replyText,
+                PhoneNumberId = phoneNumberId
+            };
+
+            var sent = await _whatsAppClient.SendTextMessageAsync(outgoing, cancellationToken);
+
+            if (sent)
+            {
+                _logger.LogInformation(
+                    "Reply sent to {To} | intent={Intent} confidence={Confidence}",
+                    msg.From, parsed.Intent, parsed.Confidence);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "Failed to send reply to {To} | intent={Intent}",
+                    msg.From, parsed.Intent);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Error processing message {MessageId} from {From}",
+                msg.Id, msg.From);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Intent → WhatsApp reply text
+    // ─────────────────────────────────────────────────────
+    private string BuildReply(AiParseResult parsed, string from)
+    {
+        return parsed.Intent switch
+        {
+            RestaurantIntent.OrderCreate       => BuildOrderReply(parsed),
+            RestaurantIntent.ReservationCreate  => BuildReservationReply(parsed),
+            RestaurantIntent.HumanHandoff       => BuildHandoffReply(parsed, from),
+            RestaurantIntent.General            => BuildGeneralReply(parsed),
+            _ => "Gracias por tu mensaje. Escribe *pedir* o *reservar* para comenzar."
+        };
+    }
+
+    // ── order_create ────────────────────────────────────
+    private static string BuildOrderReply(AiParseResult parsed)
+    {
+            var questions = string.Join("\n",
+                parsed.MissingFields.Select(FieldToQuestion));
+            return $"Para completar tu pedido necesito lo siguiente:\n\n{questions}";
+        if (parsed.MissingFields is { Length: > 0 })
+        {
+        if (parsed.MissingFields is { Length: > 0 })
+        {
+        }
+
+        var order = parsed.Args.Order;
+        }
+
+        var order = parsed.Args.Order;
+        }
+
+        var order = parsed.Args.Order;
+        if (order?.Items is not { Count: > 0 })
+            return "Entendido, pero no pude identificar los productos. Podrias enviar tu pedido de nuevo?";
+
+        var lines = order.Items.Select(i => $"  - {i.Name} x{i.Quantity}");
+        var delivery = order.DeliveryType ?? "por confirmar";
+        var notes = string.IsNullOrWhiteSpace(order.Notes) ? "" : $"\nNotas: {order.Notes}";
+
+        return $"Resumen de tu pedido:\n\n" +
+               $"{string.Join("\n", lines)}\n" +
+               $"Tipo: *{delivery}*{notes}\n\n" +
+               "Responde *ok* para confirmar o *cambiar* para modificar.";
+    }
+
+    // ── reservation_create ──────────────────────────────
+    private static string BuildReservationReply(AiParseResult parsed)
+    {
+        if (parsed.MissingFields is { Length: > 0 })
+        {
+            var questions = string.Join("\n",
+                parsed.MissingFields.Select(FieldToQuestion));
+            return $"Para completar tu reservacion necesito:\n\n{questions}";
+        }
+
+        var r = parsed.Args.Reservation;
+        return $"Reservacion confirmada:\n\n" +
+               $"Nombre: *{r?.Name ?? "—"}*\n" +
+               $"Fecha: *{r?.Date ?? "—"}*\n" +
+               $"Hora: *{r?.Time ?? "—"}*\n" +
+               $"Personas: *{r?.PartySize?.ToString() ?? "—"}*\n\n" +
+               "Te esperamos!";
+    }
+
+    // ── human_handoff ───────────────────────────────────
+    private string BuildHandoffReply(AiParseResult parsed, string from)
+    {
+        var reason = parsed.Args.Handoff?.Reason ?? "no especificada";
+        _logger.LogWarning(
+            "HUMAN HANDOFF requested by {From} — reason: {Reason}",
+            from, reason);
+        return "Entendido, te paso con un humano. Un momento por favor.";
+    }
+
+    // ── general ─────────────────────────────────────────
+    private static string BuildGeneralReply(AiParseResult parsed)
+    {
+        var suggested = parsed.Args.General?.SuggestedReply;
+        if (!string.IsNullOrWhiteSpace(suggested))
+            return suggested;
+
+        var topic = parsed.Args.General?.Topic?.ToLowerInvariant() ?? "";
+
+        return topic switch
+        {
+            "hours" or "horario" =>
+                "Nuestro horario:\n" +
+                "Lun–Vie: 11:00 AM – 10:00 PM\n" +
+                "Sab: 10:00 AM – 11:00 PM\n" +
+                "Dom: 10:00 AM – 9:00 PM",
+
+            "location" or "ubicacion" or "direccion" =>
+                "Nos encontramos en Calle Principal #123, Centro.\n" +
+                "Google Maps: https://maps.app.goo.gl/ejemplo",
+
+            "menu" =>
+                "Puedes ver nuestro menu completo escribiendo *menu*.\n" +
+                "O dinos directamente que quieres pedir!",
+
+            _ =>
+                "Hola! Soy el asistente del restaurante.\n\n" +
+                "Puedo ayudarte con:\n" +
+                "- *pedir* — hacer un pedido\n" +
+                "- *reservar* — hacer una reservacion\n" +
+                "- *menu* — ver el menu\n" +
+                "- *horario* — ver horarios\n\n" +
+                "Que necesitas?"
+cd "/Volumes/GONZI/RESCATE_DESKTOP/WhatsAppSaaS"
+git restore src/Application/Services/WebhookProcessor.cs 2>/dev/null || git checkout -- src/Application/Services/WebhookProcessor.cs
+
+
+
+
+        };
+    }
+
+    // ── Map field name → friendly question ──────────────
+    private static string FieldToQuestion(string field) => field switch
+    {
+        "items"         => "- Que productos deseas ordenar?",
+        "delivery_type" => "- Es para *recoger* o *a domicilio*?",
+        "notes"         => "- Alguna nota especial? (alergias, sin cebolla, etc.)",
+        "date"          => "- Para que *fecha* seria? (ej. 2025-03-15)",
+        "time"          => "- A que *hora*? (ej. 19:00)",
+        "party_size"    => "- Para cuantas *personas*?",
+        "name"          => "- A nombre de quien sera la reservacion?",
+        _               => $"- Podrias proporcionarme: *{field}*?"
+    };
+}
+cd "/Volumes/GONZI/RESCATE_DESKTOP/WhatsAppSaaS"
+git restore src/Application/Services/WebhookProcessor.cs 2>/dev/null || git checkout -- src/Application/Services/WebhookProcessor.cs
+
