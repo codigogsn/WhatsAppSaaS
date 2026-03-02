@@ -1,5 +1,4 @@
 using FluentAssertions;
-using Microsoft.Extensions.Logging;
 using Moq;
 using WhatsAppSaaS.Application.DTOs;
 using WhatsAppSaaS.Application.Interfaces;
@@ -12,17 +11,25 @@ public class WebhookProcessorTests
 {
     private readonly Mock<IAiParser> _aiParserMock;
     private readonly Mock<IWhatsAppClient> _whatsAppClientMock;
+    private readonly Mock<IOrderRepository> _orderRepositoryMock;
     private readonly WebhookProcessor _sut;
 
     public WebhookProcessorTests()
     {
         _aiParserMock = new Mock<IAiParser>();
         _whatsAppClientMock = new Mock<IWhatsAppClient>();
+        _orderRepositoryMock = new Mock<IOrderRepository>();
+
+        _orderRepositoryMock
+            .Setup(x => x.AddOrderAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
 
         _sut = new WebhookProcessor(
             _aiParserMock.Object,
-            _whatsAppClientMock.Object);
-}
+            _whatsAppClientMock.Object,
+            _orderRepositoryMock.Object);
+    }
+
     [Fact]
     public async Task ProcessAsync_WithTextMessage_CallsAiParserAndSendsReply()
     {
@@ -42,7 +49,7 @@ public class WebhookProcessorTests
                 {
                     Order = new OrderArgs
                     {
-                        Items = [new OrderItem { Name = "Hamburguesa", Quantity = 2 }],
+                        Items = [new WhatsAppSaaS.Application.DTOs.OrderItem { Name = "Hamburguesa", Quantity = 2 }],
                         DeliveryType = "pickup"
                     }
                 }
@@ -54,8 +61,10 @@ public class WebhookProcessorTests
 
         var payload = CreateTextMessagePayload("5511999999999", "quiero 2 hamburguesas para recoger");
 
+        // Act
         await _sut.ProcessAsync(payload);
 
+        // Assert
         _aiParserMock.Verify(
             x => x.ParseAsync(
                 "quiero 2 hamburguesas para recoger",
@@ -91,7 +100,7 @@ public class WebhookProcessorTests
                 {
                     Order = new OrderArgs
                     {
-                        Items = [new OrderItem { Name = "Pizza", Quantity = 1 }]
+                        Items = [new WhatsAppSaaS.Application.DTOs.OrderItem { Name = "Pizza", Quantity = 1 }]
                     }
                 }
             });
@@ -104,10 +113,12 @@ public class WebhookProcessorTests
 
         await _sut.ProcessAsync(payload);
 
+        // Tu bot pregunta explícitamente "pick up" o "delivery"
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(
                 It.Is<OutgoingMessage>(m =>
-                    m.Body.Contains("recoger") && m.Body.Contains("domicilio")),
+                    m.Body.ToLower().Contains("pick up") &&
+                    m.Body.ToLower().Contains("delivery")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }

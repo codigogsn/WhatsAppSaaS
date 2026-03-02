@@ -66,14 +66,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     }
                     state.UpdatedAtUtc = DateTime.UtcNow;
 
+                    var rawText = message.Text.Body;
+
                     var parsed = await _aiParser.ParseAsync(
-                        message.Text.Body,
+                        rawText,
                         message.From,
                         conversationId,
                         cancellationToken);
 
                     var replyText = await BuildReplyAsync(
                         parsed,
+                        rawText,
                         conversationId,
                         message.From,
                         phoneNumberId,
@@ -97,12 +100,45 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // -------------------------
     private async Task<string> BuildReplyAsync(
         AiParseResult parsed,
+        string rawText,
         string conversationId,
         string from,
         string phoneNumberId,
         CancellationToken ct)
     {
         var state = _stateByConversation[conversationId];
+
+        // ✅ Anti-loop: si el intent viene General pero el texto contiene intención clara,
+        // lo tratamos como confirmación (pedido/reservación) en vez de volver a preguntar.
+        if (parsed.Intent == RestaurantIntent.General)
+        {
+            var t = (rawText ?? "").Trim().ToLowerInvariant();
+
+            var looksLikeOrder =
+                t.Contains("pedido") ||
+                t.Contains("orden") ||
+                t.Contains("comprar") ||
+                t.Contains("quiero pedir") ||
+                t.Contains("quiero hacer un pedido");
+
+            var looksLikeReservation =
+                t.Contains("reserv") ||
+                t.Contains("mesa") ||
+                t.Contains("reservación") ||
+                t.Contains("reservacion");
+
+            if (looksLikeOrder)
+            {
+                state.Welcomed = true; // por si venía de un saludo
+                return await BuildOrderReplyAsync(parsed, conversationId, from, phoneNumberId, ct);
+            }
+
+            if (looksLikeReservation)
+            {
+                state.Welcomed = true;
+                return BuildReservationReply(parsed);
+            }
+        }
 
         // ✅ 1) Saludo inicial (solo 1 vez por conversación)
         // Si el AI clasifica "General" y aún no hemos dado bienvenida, damos un arranque humano.
