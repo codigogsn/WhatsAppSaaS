@@ -29,6 +29,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // El usuario ya mandó la planilla llena (heurístico)
         public bool DetailsReceived { get; set; }
 
+        // Guardamos el texto crudo de la planilla para imprimir "recibo"
+        public string? DetailsRaw { get; set; }
+
         public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     }
 
@@ -214,6 +217,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
             if (looksLikeFilledForm)
             {
                 state.DetailsReceived = true;
+
+                // ✅ Guardamos el texto crudo para imprimirlo al confirmar
+                state.DetailsRaw = rawText;
+
                 return Task.FromResult("Recibido ✅ Cuando estés listo, escribe *CONFIRMAR* para finalizar el pedido.");
             }
         }
@@ -304,15 +311,43 @@ Cuando termines, escribe *CONFIRMAR* para finalizar el pedido.");
 
         await _orderRepository.AddOrderAsync(order, ct);
 
+        // ✅ Mensaje final "recibo pro" (si hay planilla, la incluimos)
+        var prettyDelivery = deliveryType == "pickup" ? "pick up" : "delivery";
+
+        string reply;
+        if (!string.IsNullOrWhiteSpace(state.DetailsRaw))
+        {
+            reply =
+$@"Pedido confirmado ✅
+
+{state.DetailsRaw}
+
+🧾 Resumen:
+Items: {itemsText}
+Tipo: {prettyDelivery}
+
+¿Quieres hacer otro pedido o una reservación?";
+        }
+        else
+        {
+            reply =
+$@"Pedido confirmado ✅
+
+Items: {itemsText}
+Tipo: {prettyDelivery}
+
+¿Quieres hacer otro pedido o una reservación?";
+        }
+
         // Reset state
         state.Items.Clear();
         state.DeliveryType = null;
         state.RequestedDetailsForm = false;
         state.DetailsReceived = false;
+        state.DetailsRaw = null;
         state.UpdatedAtUtc = DateTime.UtcNow;
 
-        var prettyDelivery = deliveryType == "pickup" ? "pick up" : "delivery";
-        return $"Pedido confirmado ✅\n\nItems: {itemsText}\nTipo: {prettyDelivery}\n\n¿Quieres hacer otro pedido o una reservación?";
+        return reply;
     }
 
     private static string BuildReservationReply(AiParseResult parsed)
