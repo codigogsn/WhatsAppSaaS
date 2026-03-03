@@ -15,10 +15,35 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<Order>(b =>
         {
             b.HasKey(x => x.Id);
+
             b.Property(x => x.From).IsRequired();
             b.Property(x => x.PhoneNumberId).IsRequired();
             b.Property(x => x.DeliveryType).IsRequired();
             b.Property(x => x.CreatedAtUtc).IsRequired();
+
+            // ==============================
+            // PLANILLA / CHECKOUT DETAILS
+            // ==============================
+
+            // Nullable fields (no rompen flujo existente)
+            b.Property(x => x.CustomerName);
+            b.Property(x => x.CustomerIdNumber);
+            b.Property(x => x.CustomerPhone);
+            b.Property(x => x.Address);
+            b.Property(x => x.PaymentMethod);
+            b.Property(x => x.ReceiverName);
+            b.Property(x => x.AdditionalNotes);
+
+            b.Property(x => x.LocationText);
+
+            // decimal lat/lng: define precisión para PostgreSQL
+            b.Property(x => x.LocationLat).HasPrecision(9, 6);
+            b.Property(x => x.LocationLng).HasPrecision(9, 6);
+
+            // bool defaults: EF los maneja como required por ser no-nullable, pero lo dejamos explícito
+            b.Property(x => x.CheckoutFormSent).IsRequired();
+            b.Property(x => x.CheckoutCompleted).IsRequired();
+            b.Property(x => x.CheckoutCompletedAtUtc);
 
             b.HasMany(x => x.Items)
              .WithOne(i => i.Order)

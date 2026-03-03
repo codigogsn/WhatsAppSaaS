@@ -11,5 +11,26 @@ public class Order
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
+    // ==============================
+    // PLANILLA / CHECKOUT DETAILS
+    // ==============================
+
+    public string? CustomerName { get; set; }
+    public string? CustomerIdNumber { get; set; }
+    public string? CustomerPhone { get; set; }
+    public string? Address { get; set; }
+    public string? PaymentMethod { get; set; }
+    public string? ReceiverName { get; set; }
+    public string? AdditionalNotes { get; set; }
+
+    // GPS (si el usuario manda pin)
+    public decimal? LocationLat { get; set; }
+    public decimal? LocationLng { get; set; }
+    public string? LocationText { get; set; }
+
+    public bool CheckoutFormSent { get; set; }
+    public bool CheckoutCompleted { get; set; }
+    public DateTime? CheckoutCompletedAtUtc { get; set; }
+
     public List<OrderItem> Items { get; set; } = new();
 }
