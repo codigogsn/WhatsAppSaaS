@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using WhatsAppSaaS.Application.DTOs;
@@ -27,25 +28,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
         public List<(string Name, int Quantity)> Items { get; } = new();
         public string? DeliveryType { get; set; }
 
-        // Flags del flujo
-        public bool RequestedDetailsForm { get; set; } // planilla enviada
-        public bool DetailsReceived { get; set; }       // tenemos info suficiente para confirmar
+        // Checkout
+        public bool RequestedDetailsForm { get; set; }
+        public bool DetailsReceived { get; set; }
 
-        // ==============================
-        // PLANILLA / CHECKOUT (in-memory)
-        // ==============================
         public string? CustomerName { get; set; }
-        public string? CustomerIdNumber { get; set; }
-        public string? CustomerPhone { get; set; }
         public string? Address { get; set; }
         public string? PaymentMethod { get; set; }
-        public string? ReceiverName { get; set; }
-        public string? AdditionalNotes { get; set; }
 
-        // GPS (por ahora guardamos texto; luego si tu DTO trae lat/lng lo conectamos)
-        public decimal? LocationLat { get; set; }
-        public decimal? LocationLng { get; set; }
-        public string? LocationText { get; set; }
+        public string? LocationText { get; set; } // "GPS_PIN" o texto
 
         public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
     }
@@ -97,12 +88,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                     }
 
-                    // =========================
-                    // LOCATION PIN
-                    // =========================
+                    // PIN GPS (opcional)
                     if (message.Type == "location")
                     {
-                        // Tu DTO no trae message.Location -> guardamos un marcador de texto.
                         if (state.Items.Count > 0 && state.RequestedDetailsForm)
                         {
                             state.LocationText = "GPS_PIN";
@@ -126,11 +114,31 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     var rawText = message.Text.Body;
                     var normalized = Normalize(rawText);
 
-                    // Si el usuario está llenando planilla, capturamos datos ANTES de responder
+                    // Captura de planilla antes de responder
                     if (state.Items.Count > 0 && state.RequestedDetailsForm && !IsConfirmCommand(normalized))
                     {
-                        TryCaptureCheckoutFromText(state, rawText, message.From);
+                        TryCaptureCheckoutFromText(state, rawText);
                         state.DetailsReceived = HasMinimumCheckout(state);
+                    }
+
+                    // ✅ FALLBACK "modo edición" aunque la IA se equivoque:
+                    // Si ya hay items y el texto parece "agrega 2 cocacolas", lo aplicamos aquí.
+                    // Importante: lo hacemos ANTES de responder para que no mande mensajes raros.
+                    if (state.Items.Count > 0 && TryApplyManualAddItems(state, rawText))
+                    {
+                        // Si ya está en checkout, damos respuesta corta y seguimos.
+                        if (state.RequestedDetailsForm)
+                        {
+                            await _whatsAppClient.SendTextMessageAsync(
+                                new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = "Listo ✅ agregado. Escribe *CONFIRMAR* para finalizar.",
+                                    PhoneNumberId = phoneNumberId
+                                },
+                                cancellationToken);
+                            continue;
+                        }
                     }
 
                     var parsed = await _aiParser.ParseAsync(
@@ -174,33 +182,33 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (IsConfirmCommand(t))
             return await FinalizeOrderIfPossibleAsync(state, from, phoneNumberId, ct);
 
-        // Guard PRO anti-menú
-        if (state.Items.Count > 0 && state.RequestedDetailsForm && parsed.Intent == RestaurantIntent.General)
+        // Si estás en checkout, NO dejamos que nada te saque del flujo
+        if (state.Items.Count > 0 && state.RequestedDetailsForm && parsed.Intent != RestaurantIntent.OrderCreate)
         {
-            if (state.DetailsReceived)
-                return "Recibido ✅ Escribe *CONFIRMAR* para finalizar.";
-
-            return "Sigue llenando la planilla y luego escribe *CONFIRMAR*.";
+            return state.DetailsReceived
+                ? "Recibido ✅ Escribe *CONFIRMAR* para finalizar."
+                : "Sigue llenando la planilla y luego escribe *CONFIRMAR*.";
         }
 
+        // Bienvenida simple (SIN reservas)
         if (!state.Welcomed && parsed.Intent == RestaurantIntent.General)
         {
             state.Welcomed = true;
-            return "¡Hola! 👋 ¿Deseas hacer un *pedido* o una *reservación*?";
+            return "¡Hola! 👋 ¿Qué deseas ordenar?";
         }
 
-        return parsed.Intent switch
-        {
-            RestaurantIntent.OrderCreate => await BuildOrderReplyAsync(parsed, conversationId),
-            RestaurantIntent.ReservationCreate => "Perfecto 😊 ¿Para qué fecha deseas reservar?",
-            RestaurantIntent.HumanHandoff => "Te paso con un humano 🙌",
-            _ => "¿Deseas hacer un *pedido* o una *reservación*?"
-        };
+        // TODO lo que no sea OrderCreate se trata como General (SIN reservas)
+        if (parsed.Intent != RestaurantIntent.OrderCreate)
+            return "¿Qué deseas ordenar?";
+
+        return await BuildOrderReplyAsync(parsed, conversationId);
     }
 
     private Task<string> BuildOrderReplyAsync(AiParseResult parsed, string conversationId)
     {
         var state = _stateByConversation[conversationId];
+
+        var addedAny = false;
 
         if (parsed.Args?.Order != null)
         {
@@ -209,7 +217,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 if (!string.IsNullOrWhiteSpace(item.Name) && item.Quantity > 0)
                 {
                     if (!state.Items.Any(x => x.Name.Equals(item.Name, StringComparison.OrdinalIgnoreCase)))
+                    {
                         state.Items.Add((item.Name.Trim(), item.Quantity));
+                        addedAny = true;
+                    }
                 }
             }
 
@@ -223,6 +234,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
             return Task.FromResult("¿Es *pick up* o *delivery*?");
 
+        // Modo edición: si ya mandamos planilla y agrega items
+        if (state.RequestedDetailsForm && addedAny)
+        {
+            var last = state.Items.Last();
+            return Task.FromResult($"Listo ✅ agregué *{last.Quantity} {last.Name}*. Escribe *CONFIRMAR* para finalizar.");
+        }
+
         if (!state.RequestedDetailsForm)
         {
             state.RequestedDetailsForm = true;
@@ -231,21 +249,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
 @"Para finalizar envíanos:
 
 👤 Nombre:
-🪪 Cédula:
-📱 Teléfono:
 🏡 Dirección:
-💳 Forma de pago: (opcional)
-👥 Recibe: (opcional)
-📝 Notas: (opcional)
-📍 Ubicación GPS: (manda el pin)
+💳 Pago: *EFECTIVO* o *DIVISAS*
+📍 Ubicación GPS: (manda el pin) *(opcional)*
 
 Luego escribe *CONFIRMAR*.");
         }
 
-        if (state.DetailsReceived)
-            return Task.FromResult("Recibido ✅ Escribe *CONFIRMAR* para finalizar.");
-
-        return Task.FromResult("Sigue llenando la planilla y luego escribe *CONFIRMAR*.");
+        return state.DetailsReceived
+            ? Task.FromResult("Recibido ✅ Escribe *CONFIRMAR* para finalizar.")
+            : Task.FromResult("Sigue llenando la planilla y luego escribe *CONFIRMAR*.");
     }
 
     private async Task<string> FinalizeOrderIfPossibleAsync(
@@ -265,12 +278,10 @@ Luego escribe *CONFIRMAR*.");
             return
 @"Aún falta información para confirmar ✅
 
-Envíanos al menos:
+Envíanos:
 👤 Nombre
-🪪 Cédula
-📱 Teléfono
 🏡 Dirección
-📍 Ubicación GPS (pin) o escribe la ubicación en texto
+💳 Pago: EFECTIVO o DIVISAS
 
 Luego escribe *CONFIRMAR*.";
         }
@@ -282,24 +293,15 @@ Luego escribe *CONFIRMAR*.";
             DeliveryType = state.DeliveryType!,
             CreatedAtUtc = DateTime.UtcNow,
 
-            // ✅ planilla a DB
             CustomerName = state.CustomerName,
-            CustomerIdNumber = state.CustomerIdNumber,
-            CustomerPhone = string.IsNullOrWhiteSpace(state.CustomerPhone) ? from : state.CustomerPhone,
             Address = state.Address,
             PaymentMethod = state.PaymentMethod,
-            ReceiverName = state.ReceiverName,
-            AdditionalNotes = state.AdditionalNotes,
-
-            LocationLat = state.LocationLat,
-            LocationLng = state.LocationLng,
             LocationText = state.LocationText,
 
             CheckoutFormSent = state.RequestedDetailsForm,
             CheckoutCompleted = true,
             CheckoutCompletedAtUtc = DateTime.UtcNow,
 
-            // ✅ FIX: desambiguar OrderItem (Domain)
             Items = state.Items.Select(i => new WhatsAppSaaS.Domain.Entities.OrderItem
             {
                 Name = i.Name,
@@ -309,25 +311,21 @@ Luego escribe *CONFIRMAR*.";
 
         await _orderRepository.AddOrderAsync(order, ct);
 
+        var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
         var itemsText = string.Join(", ", state.Items.Select(i => $"{i.Quantity} {i.Name}"));
-        var gpsText =
-            (state.LocationLat.HasValue && state.LocationLng.HasValue)
-                ? $"{state.LocationLat.Value}, {state.LocationLng.Value}"
-                : (state.LocationText ?? "—");
 
         var receipt =
-$@"🧾 *PEDIDO CONFIRMADO* ✅
+$@"✅ *PEDIDO CONFIRMADO*
+🧾 Pedido: *#{orderNumber}*
 
-Items: {itemsText}
-Tipo: {state.DeliveryType}
-Nombre: {state.CustomerName ?? "—"}
-Tel: {(string.IsNullOrWhiteSpace(state.CustomerPhone) ? from : state.CustomerPhone)}
-Dir: {state.Address ?? "—"}
-GPS: {gpsText}
+👤 Nombre: {state.CustomerName ?? "—"}
+🍽️ Pedido: {itemsText}
+🏡 Dirección: {state.Address ?? "—"}
+💳 Pago: {state.PaymentMethod ?? "—"}
 
 Gracias 🙌";
 
-        // reset del estado
+        // Reset estado conversacional
         state.Items.Clear();
         state.DeliveryType = null;
 
@@ -335,20 +333,60 @@ Gracias 🙌";
         state.DetailsReceived = false;
 
         state.CustomerName = null;
-        state.CustomerIdNumber = null;
-        state.CustomerPhone = null;
         state.Address = null;
         state.PaymentMethod = null;
-        state.ReceiverName = null;
-        state.AdditionalNotes = null;
-        state.LocationLat = null;
-        state.LocationLng = null;
         state.LocationText = null;
 
         return receipt;
     }
 
-    private static void TryCaptureCheckoutFromText(ConversationState state, string rawText, string from)
+    // ============================
+    // ✅ MODO EDICIÓN MANUAL (fallback)
+    // ============================
+    // Acepta ejemplos:
+    // "agrega 2 cocacolas"
+    // "agregar 1 coca cola"
+    // "añade 3 papas"
+    // "+2 empanadas"
+    // "sumale 2 tequeños"
+    private static bool TryApplyManualAddItems(ConversationState state, string rawText)
+    {
+        var t = Normalize(rawText);
+
+        // Atajos tipo "+2 cocacolas"
+        if (t.StartsWith("+"))
+            t = "agrega " + t[1..].Trim();
+
+        // Necesita al menos un número
+        // Formato: (palabra acción) (cantidad) (producto...)
+        // Acción puede estar o no, porque la IA a veces manda solo "2 cocacolas"
+        var m = Regex.Match(t, @"^(agrega|agregar|añade|anade|sumale|súmale|sumar|agregame|agrégame)?\s*(\d+)\s+(.+)$",
+            RegexOptions.IgnoreCase);
+
+        if (!m.Success)
+            return false;
+
+        var qtyStr = m.Groups[2].Value;
+        var name = m.Groups[3].Value.Trim();
+
+        if (!int.TryParse(qtyStr, out var qty) || qty <= 0)
+            return false;
+
+        // evita capturar cosas tipo "2" sin nombre
+        if (string.IsNullOrWhiteSpace(name) || name.Length < 2)
+            return false;
+
+        // limpieza básica
+        name = name.Trim().Trim('.', ',', ';', ':');
+
+        // si ya existe, NO duplicamos (mantener simple)
+        if (!state.Items.Any(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+            state.Items.Add((name, qty));
+
+        return true;
+    }
+
+    private static void TryCaptureCheckoutFromText(ConversationState state, string rawText)
     {
         var lines = rawText
             .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -356,79 +394,59 @@ Gracias 🙌";
             .Where(l => l.Length > 0)
             .ToList();
 
-        if (lines.Count == 0) return;
-
-        foreach (var line in lines)
+        foreach (var original in lines)
         {
+            var line = StripLeadingNonAlnum(original);
             var lower = line.ToLowerInvariant();
-
-            if (lower.StartsWith("ubicacion") || lower.StartsWith("ubicación") || lower.StartsWith("gps"))
-            {
-                var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v))
-                    state.LocationText = v;
-                continue;
-            }
 
             if (lower.StartsWith("nombre"))
             {
                 var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v))
-                    state.CustomerName = v;
-                continue;
-            }
-
-            if (lower.StartsWith("cedula") || lower.StartsWith("cédula") || lower.StartsWith("id"))
-            {
-                var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v))
-                    state.CustomerIdNumber = v;
-                continue;
-            }
-
-            if (lower.StartsWith("telefono") || lower.StartsWith("teléfono") || lower.StartsWith("tlf") || lower.StartsWith("tel"))
-            {
-                var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v))
-                    state.CustomerPhone = v;
+                if (!string.IsNullOrWhiteSpace(v)) state.CustomerName = v;
                 continue;
             }
 
             if (lower.StartsWith("direccion") || lower.StartsWith("dirección") || lower.StartsWith("dir"))
             {
                 var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v))
-                    state.Address = v;
+                if (!string.IsNullOrWhiteSpace(v)) state.Address = v;
                 continue;
             }
 
-            if (lower.StartsWith("pago") || lower.StartsWith("forma de pago") || lower.StartsWith("metodo") || lower.StartsWith("método"))
+            if (lower.StartsWith("pago") || lower.StartsWith("forma de pago"))
             {
                 var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v))
-                    state.PaymentMethod = v;
+                if (!string.IsNullOrWhiteSpace(v)) state.PaymentMethod = v;
                 continue;
             }
 
-            if (lower.StartsWith("recibe"))
+            if (lower.StartsWith("ubicacion") || lower.StartsWith("ubicación") || lower.StartsWith("gps"))
             {
                 var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v))
-                    state.ReceiverName = v;
-                continue;
-            }
-
-            if (lower.StartsWith("nota") || lower.StartsWith("notas") || lower.StartsWith("observ"))
-            {
-                var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v))
-                    state.AdditionalNotes = v;
+                if (!string.IsNullOrWhiteSpace(v)) state.LocationText = v;
                 continue;
             }
         }
+    }
 
-        if (string.IsNullOrWhiteSpace(state.CustomerPhone))
-            state.CustomerPhone = from;
+    private static bool HasMinimumCheckout(ConversationState state)
+    {
+        if (string.IsNullOrWhiteSpace(state.CustomerName)) return false;
+        if (string.IsNullOrWhiteSpace(state.Address)) return false;
+        if (string.IsNullOrWhiteSpace(state.PaymentMethod)) return false;
+        return true;
+    }
+
+    private static string StripLeadingNonAlnum(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
+
+        var s = input.Trim();
+        var i = 0;
+        while (i < s.Length && !char.IsLetterOrDigit(s[i]))
+            i++;
+
+        return i >= s.Length ? string.Empty : s[i..].TrimStart();
     }
 
     private static string ExtractValue(string line)
@@ -442,19 +460,6 @@ Gracias 🙌";
             return line[(idx + 1)..].Trim();
 
         return string.Empty;
-    }
-
-    private static bool HasMinimumCheckout(ConversationState state)
-    {
-        if (string.IsNullOrWhiteSpace(state.CustomerName)) return false;
-        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) return false;
-        if (string.IsNullOrWhiteSpace(state.CustomerPhone)) return false;
-        if (string.IsNullOrWhiteSpace(state.Address)) return false;
-
-        var hasGps = state.LocationLat.HasValue && state.LocationLng.HasValue;
-        var hasLocationText = !string.IsNullOrWhiteSpace(state.LocationText);
-
-        return hasGps || hasLocationText;
     }
 
     private static string Normalize(string input)
