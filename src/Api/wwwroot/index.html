@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WhatsAppSaaS - Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
+    th { background: #f6f6f6; }
+    code { background:#f1f1f1; padding:2px 4px; }
+    button { padding: 6px 10px; cursor: pointer; }
+    select, input { padding: 6px; }
+    .muted { color:#666; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eee; }
+    .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <h2>Pedidos (MVP)</h2>
+    <div class="muted">API: <code id="baseUrl"></code></div>
+  </div>
+
+  <div class="row">
+    <label>Status:</label>
+    <select id="status">
+      <option value="">(Todos)</option>
+      <option>Pending</option>
+      <option>Preparing</option>
+      <option>OutForDelivery</option>
+      <option>Completed</option>
+      <option>Cancelled</option>
+    </select>
+
+    <label>Take:</label>
+    <input id="take" type="number" value="50" min="1" max="200" />
+
+    <button onclick="load()">Cargar</button>
+    <button onclick="load(true)">Auto (5s)</button>
+    <span class="muted" id="msg"></span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Fecha</th>
+        <th>ID</th>
+        <th>Status</th>
+        <th>Cliente</th>
+        <th>Pago</th>
+        <th>Pedido</th>
+        <th>Dirección / GPS</th>
+        <th>Acción</th>
+      </tr>
+    </thead>
+    <tbody id="tbody"></tbody>
+  </table>
+
+<script>
+let timer = null;
+
+function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
+
+async function load(auto=false) {
+  if (timer) { clearInterval(timer); timer = null; }
+  if (auto) timer = setInterval(load, 5000);
+
+  const status = document.getElementById('status').value;
+  const take = document.getElementById('take').value || 50;
+  const qs = new URLSearchParams();
+  if (status) qs.set('status', status);
+  qs.set('take', take);
+
+  document.getElementById('msg').textContent = 'Cargando...';
+
+  const res = await fetch('/api/orders?' + qs.toString());
+  if (!res.ok) {
+    document.getElementById('msg').textContent = 'Error cargando pedidos';
+    return;
+  }
+
+  const data = await res.json();
+
+  const tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+
+  for (const o of data) {
+    const items = (o.items || []).map(i => `${i.quantity} ${i.name}`).join(', ');
+    const gps = (o.locationLat != null && o.locationLng != null) ? `${o.locationLat}, ${o.locationLng}` : (o.locationText || '');
+    const tr = document.createElement('tr');
+
+    tr.innerHTML = `
+      <td>${new Date(o.createdAtUtc).toLocaleString()}</td>
+      <td><code>${esc(o.id)}</code></td>
+      <td><span class="pill">${esc(o.status)}</span></td>
+      <td>
+        <b>${esc(o.customerName)}</b><br/>
+        <span class="muted">${esc(o.customerPhone)}</span><br/>
+        <span class="muted">${esc(o.customerIdNumber)}</span>
+      </td>
+      <td>${esc(o.paymentMethod)}</td>
+      <td>${esc(items)}</td>
+      <td>
+        ${esc(o.address)}<br/>
+        <span class="muted">${esc(gps)}</span>
+      </td>
+      <td>
+        <select data-id="${esc(o.id)}">
+          <option ${o.status==='Pending'?'selected':''}>Pending</option>
+          <option ${o.status==='Preparing'?'selected':''}>Preparing</option>
+          <option ${o.status==='OutForDelivery'?'selected':''}>OutForDelivery</option>
+          <option ${o.status==='Completed'?'selected':''}>Completed</option>
+          <option ${o.status==='Cancelled'?'selected':''}>Cancelled</option>
+        </select>
+        <button onclick="updateStatus(this)">Guardar</button>
+      </td>
+    `;
+
+    tbody.appendChild(tr);
+  }
+
+  document.getElementById('msg').textContent = `Listo: ${data.length} pedidos`;
+}
+
+async function updateStatus(btn) {
+  const select = btn.parentElement.querySelector('select');
+  const id = select.getAttribute('data-id');
+  const status = select.value;
+
+  btn.disabled = true;
+  try {
+    const res = await fetch(`/api/orders/${id}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+
+    if (!res.ok) {
+      const t = await res.text();
+      alert('Error: ' + t);
+      return;
+    }
+  } finally {
+    btn.disabled = false;
+  }
+
+  await load();
+}
+
+document.getElementById('baseUrl').textContent = location.origin;
+
+load();
+</script>
+</body>
+</html>

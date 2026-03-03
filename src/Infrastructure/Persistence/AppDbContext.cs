@@ -21,11 +21,12 @@ public class AppDbContext : DbContext
             b.Property(x => x.DeliveryType).IsRequired();
             b.Property(x => x.CreatedAtUtc).IsRequired();
 
-            // ==============================
-            // PLANILLA / CHECKOUT DETAILS
-            // ==============================
+            // ✅ NUEVO: Status
+            b.Property(x => x.Status)
+                .IsRequired()
+                .HasDefaultValue("Pending");
 
-            // Nullable fields (no rompen flujo existente)
+            // Checkout / planilla
             b.Property(x => x.CustomerName);
             b.Property(x => x.CustomerIdNumber);
             b.Property(x => x.CustomerPhone);
@@ -34,13 +35,10 @@ public class AppDbContext : DbContext
             b.Property(x => x.ReceiverName);
             b.Property(x => x.AdditionalNotes);
 
-            b.Property(x => x.LocationText);
-
-            // decimal lat/lng: define precisión para PostgreSQL
             b.Property(x => x.LocationLat).HasPrecision(9, 6);
             b.Property(x => x.LocationLng).HasPrecision(9, 6);
+            b.Property(x => x.LocationText);
 
-            // bool defaults: EF los maneja como required por ser no-nullable, pero lo dejamos explícito
             b.Property(x => x.CheckoutFormSent).IsRequired();
             b.Property(x => x.CheckoutCompleted).IsRequired();
             b.Property(x => x.CheckoutCompletedAtUtc);

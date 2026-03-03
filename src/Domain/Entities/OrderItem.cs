@@ -1,12 +1,20 @@
-namespace WhatsAppSaaS.Domain.Entities;
+using System;
+using System.Text.Json.Serialization;
 
-public class OrderItem
+namespace WhatsAppSaaS.Domain.Entities
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
+    public sealed class OrderItem
+    {
+        public Guid Id { get; set; }
 
-    public Guid OrderId { get; set; }
-    public Order Order { get; set; } = default!;
+        public Guid OrderId { get; set; }
 
-    public string Name { get; set; } = default!;
-    public int Quantity { get; set; }
+        public string Name { get; set; } = string.Empty;
+
+        public int Quantity { get; set; }
+
+        // 🔥 Esto evita el loop JSON: Order -> Items -> Order -> Items...
+        [JsonIgnore]
+        public Order? Order { get; set; }
+    }
 }

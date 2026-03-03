@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
 using Serilog;
@@ -36,7 +37,15 @@ try
     // ────────────────────────────────────────
     // Services
     // ────────────────────────────────────────
-    builder.Services.AddControllers();
+    builder.Services
+        .AddControllers()
+        .AddJsonOptions(o =>
+        {
+            // Evita error de ciclos si algún Entity viene con navegación circular
+            o.JsonSerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
+            o.JsonSerializerOptions.DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull;
+        });
+
     builder.Services.AddEndpointsApiExplorer();
 
     // FluentValidation
@@ -90,6 +99,11 @@ try
     // ────────────────────────────────────────
     app.UseGlobalExceptionHandling();
     app.UseRequestLogging();
+
+    // ✅ Sirve wwwroot/index.html en "/"
+    app.UseDefaultFiles();
+    app.UseStaticFiles();
+
     app.MapControllers();
     app.MapHealthChecks("/health");
 
@@ -120,7 +134,7 @@ static string ConvertDatabaseUrlToNpgsql(string databaseUrl)
     var password = userInfo.Length > 1 ? Uri.UnescapeDataString(userInfo[1]) : "";
 
     var host = uri.Host;
-    var port = uri.Port > 0 ? uri.Port : 5432; // <-- FIX
+    var port = uri.Port > 0 ? uri.Port : 5432;
     var database = uri.AbsolutePath.TrimStart('/');
 
     return $"Host={host};Port={port};Database={database};Username={username};Password={password};Ssl Mode=Require;Trust Server Certificate=true";
@@ -131,4 +145,3 @@ namespace WhatsAppSaaS.Api
 {
     public partial class Program { }
 }
-

@@ -16,6 +16,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly IWhatsAppClient _whatsAppClient;
     private readonly IOrderRepository _orderRepository;
 
+    // In-memory conversation state (MVP). Luego se migra a Redis/DB.
     private static readonly Dictionary<string, ConversationState> _stateByConversation = new();
     private static readonly Dictionary<string, HashSet<string>> _processedMessageIdsByConversation = new();
 
@@ -23,22 +24,51 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     private sealed class ConversationState
     {
-        public bool Welcomed { get; set; }
+        public bool MenuSent { get; set; }
 
         public List<(string Name, int Quantity)> Items { get; } = new();
         public string? DeliveryType { get; set; }
 
-        // Checkout
-        public bool RequestedDetailsForm { get; set; }
-        public bool DetailsReceived { get; set; }
+        public bool CheckoutFormSent { get; set; }
 
+        // Captura de planilla
         public string? CustomerName { get; set; }
+        public string? CustomerIdNumber { get; set; }
+        public string? CustomerPhone { get; set; }
         public string? Address { get; set; }
-        public string? PaymentMethod { get; set; }
+        public string? PaymentMethod { get; set; } // "efectivo" | "divisas" | "pago_movil"
 
-        public string? LocationText { get; set; } // "GPS_PIN" o texto
+        // Ubicación (OBLIGATORIA): pin o texto
+        public bool GpsPinReceived { get; set; }
+        public string? LocationText { get; set; }
+
+        // Evidencia de pago (para humano)
+        public bool PaymentEvidenceRequested { get; set; }
+        public bool PaymentEvidenceReceived { get; set; }
 
         public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+
+        public void ResetAfterConfirm()
+        {
+            Items.Clear();
+            DeliveryType = null;
+
+            CheckoutFormSent = false;
+
+            CustomerName = null;
+            CustomerIdNumber = null;
+            CustomerPhone = null;
+            Address = null;
+            PaymentMethod = null;
+
+            GpsPinReceived = false;
+            LocationText = null;
+
+            PaymentEvidenceRequested = false;
+            PaymentEvidenceReceived = false;
+
+            // MenuSent se queda true para no spamear menú en el mismo hilo
+        }
     }
 
     public WebhookProcessor(
@@ -88,14 +118,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                     }
 
-                    // PIN GPS (opcional)
+                    // 1) Location pin (GPS) obligatorio: si llega pin, marcamos recibido
                     if (message.Type == "location")
                     {
-                        if (state.Items.Count > 0 && state.RequestedDetailsForm)
-                        {
-                            state.LocationText = "GPS_PIN";
-                            state.DetailsReceived = HasMinimumCheckout(state);
+                        state.GpsPinReceived = true;
 
+                        if (state.Items.Count > 0 && state.CheckoutFormSent)
+                        {
                             await _whatsAppClient.SendTextMessageAsync(
                                 new OutgoingMessage
                                 {
@@ -105,55 +134,165 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 },
                                 cancellationToken);
                         }
+
                         continue;
                     }
 
-                    if (message.Type != "text") continue;
-                    if (string.IsNullOrWhiteSpace(message.Text?.Body)) continue;
-
-                    var rawText = message.Text.Body;
-                    var normalized = Normalize(rawText);
-
-                    // Captura de planilla antes de responder
-                    if (state.Items.Count > 0 && state.RequestedDetailsForm && !IsConfirmCommand(normalized))
+                    // 2) Media: si estamos esperando evidencia de pago, marcar recibido (MVP)
+                    if (message.Type != "text")
                     {
-                        TryCaptureCheckoutFromText(state, rawText);
-                        state.DetailsReceived = HasMinimumCheckout(state);
-                    }
-
-                    // ✅ FALLBACK "modo edición" aunque la IA se equivoque:
-                    // Si ya hay items y el texto parece "agrega 2 cocacolas", lo aplicamos aquí.
-                    // Importante: lo hacemos ANTES de responder para que no mande mensajes raros.
-                    if (state.Items.Count > 0 && TryApplyManualAddItems(state, rawText))
-                    {
-                        // Si ya está en checkout, damos respuesta corta y seguimos.
-                        if (state.RequestedDetailsForm)
+                        if (state.PaymentEvidenceRequested && !state.PaymentEvidenceReceived)
                         {
+                            state.PaymentEvidenceReceived = true;
+
                             await _whatsAppClient.SendTextMessageAsync(
                                 new OutgoingMessage
                                 {
                                     To = message.From,
-                                    Body = "Listo ✅ agregado. Escribe *CONFIRMAR* para finalizar.",
+                                    Body = "Recibido ✅ Un operador verificará el pago y te confirmamos.",
                                     PhoneNumberId = phoneNumberId
                                 },
                                 cancellationToken);
-                            continue;
                         }
+
+                        continue;
                     }
 
-                    var parsed = await _aiParser.ParseAsync(
-                        rawText,
-                        message.From,
-                        conversationId,
-                        cancellationToken);
+                    if (string.IsNullOrWhiteSpace(message.Text?.Body)) continue;
 
-                    var reply = await BuildReplyAsync(
-                        parsed,
-                        rawText,
-                        conversationId,
-                        message.From,
-                        phoneNumberId,
-                        cancellationToken);
+                    var rawText = message.Text.Body;
+                    var t = Normalize(rawText);
+
+                    // A) Confirmar
+                    if (IsConfirmCommand(t))
+                    {
+                        var confirmReply = await FinalizeOrderIfPossibleAsync(state, message.From, phoneNumberId, cancellationToken);
+
+                        await _whatsAppClient.SendTextMessageAsync(
+                            new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = confirmReply,
+                                PhoneNumberId = phoneNumberId
+                            },
+                            cancellationToken);
+
+                        continue;
+                    }
+
+                    // B) Enviar menú apenas diga "hola"/"buenas" (dos mensajes: menú y luego “¿Qué deseas ordenar?”)
+                    if (!state.MenuSent && IsGreeting(t))
+                    {
+                        state.MenuSent = true;
+
+                        await _whatsAppClient.SendTextMessageAsync(
+                            new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body =
+@"📋 *MENÚ (DEMO)*
+1) Hamburguesa
+2) Coca Cola
+3) Papas
+
+(En producción aquí va foto/PDF del menú del restaurante)",
+                                PhoneNumberId = phoneNumberId
+                            },
+                            cancellationToken);
+
+                        await _whatsAppClient.SendTextMessageAsync(
+                            new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "¿Qué deseas ordenar?",
+                                PhoneNumberId = phoneNumberId
+                            },
+                            cancellationToken);
+
+                        continue;
+                    }
+
+                    // C) Modo edición: "agrega 2 cocacolas" suma items
+                    if (TryParseManualAddItem(rawText, out var addQty, out var addName))
+                    {
+                        AddOrIncreaseItem(state, addName, addQty);
+
+                        await _whatsAppClient.SendTextMessageAsync(
+                            new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "Listo ✅ agregado. Escribe *CONFIRMAR* para finalizar.",
+                                PhoneNumberId = phoneNumberId
+                            },
+                            cancellationToken);
+
+                        continue;
+                    }
+
+                    // D) Captura de planilla (texto) aunque tenga emojis
+                    if (state.CheckoutFormSent && TryParseCheckoutForm(rawText, out var form))
+                    {
+                        state.CustomerName ??= form.CustomerName;
+                        state.CustomerIdNumber ??= form.CustomerIdNumber;
+                        state.CustomerPhone ??= form.CustomerPhone;
+                        state.Address ??= form.Address;
+                        state.PaymentMethod ??= form.PaymentMethod;
+
+                        if (!string.IsNullOrWhiteSpace(form.LocationText))
+                        {
+                            state.LocationText ??= form.LocationText;
+                            state.GpsPinReceived = true; // ubicación textual cuenta como ubicación
+                        }
+
+                        // Si escogió pago movil o divisas, pedir evidencia (MVP)
+                        if (state.PaymentMethod is "pago_movil" or "divisas")
+                        {
+                            if (!state.PaymentEvidenceRequested)
+                            {
+                                state.PaymentEvidenceRequested = true;
+
+                                var msg = state.PaymentMethod == "pago_movil"
+                                    ? "Para *PAGO MÓVIL*, envía el *comprobante* (foto) ✅"
+                                    : "Para *DIVISAS*, envía una *foto de los billetes* ✅";
+
+                                await _whatsAppClient.SendTextMessageAsync(
+                                    new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = msg,
+                                        PhoneNumberId = phoneNumberId
+                                    },
+                                    cancellationToken);
+                            }
+                        }
+
+                        await _whatsAppClient.SendTextMessageAsync(
+                            new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "Perfecto ✅ Escribe *CONFIRMAR* para finalizar.",
+                                PhoneNumberId = phoneNumberId
+                            },
+                            cancellationToken);
+
+                        continue;
+                    }
+
+                    // E) IA parse (pedido)
+                    var parsed = await _aiParser.ParseAsync(rawText, message.From, conversationId, cancellationToken);
+
+                    // Intent efectivo (sin tocar parsed.Intent, porque es init-only)
+                    var effectiveIntent = parsed.Intent;
+
+                    // Quitamos reservas por ahora
+                    if (effectiveIntent == RestaurantIntent.ReservationCreate)
+                        effectiveIntent = RestaurantIntent.General;
+
+                    // Anti-loop: si dice General pero el texto suena a pedido, forzamos OrderCreate
+                    if (effectiveIntent == RestaurantIntent.General && LooksLikeOrderIntent(t))
+                        effectiveIntent = RestaurantIntent.OrderCreate;
+
+                    var reply = await BuildReplyAsync(effectiveIntent, parsed, rawText, conversationId);
 
                     await _whatsAppClient.SendTextMessageAsync(
                         new OutgoingMessage
@@ -168,60 +307,38 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
     }
 
-    private async Task<string> BuildReplyAsync(
+    private Task<string> BuildReplyAsync(
+        RestaurantIntent intent,
         AiParseResult parsed,
         string rawText,
-        string conversationId,
-        string from,
-        string phoneNumberId,
-        CancellationToken ct)
+        string conversationId)
     {
         var state = _stateByConversation[conversationId];
-        var t = Normalize(rawText);
 
-        if (IsConfirmCommand(t))
-            return await FinalizeOrderIfPossibleAsync(state, from, phoneNumberId, ct);
-
-        // Si estás en checkout, NO dejamos que nada te saque del flujo
-        if (state.Items.Count > 0 && state.RequestedDetailsForm && parsed.Intent != RestaurantIntent.OrderCreate)
+        // Si ya está en checkout, no volver a “qué deseas”
+        if (state.Items.Count > 0 && state.CheckoutFormSent && intent == RestaurantIntent.General)
         {
-            return state.DetailsReceived
-                ? "Recibido ✅ Escribe *CONFIRMAR* para finalizar."
-                : "Sigue llenando la planilla y luego escribe *CONFIRMAR*.";
+            return Task.FromResult("Sigue llenando la planilla y luego escribe *CONFIRMAR*.");
         }
 
-        // Bienvenida simple (SIN reservas)
-        if (!state.Welcomed && parsed.Intent == RestaurantIntent.General)
+        return intent switch
         {
-            state.Welcomed = true;
-            return "¡Hola! 👋 ¿Qué deseas ordenar?";
-        }
-
-        // TODO lo que no sea OrderCreate se trata como General (SIN reservas)
-        if (parsed.Intent != RestaurantIntent.OrderCreate)
-            return "¿Qué deseas ordenar?";
-
-        return await BuildOrderReplyAsync(parsed, conversationId);
+            RestaurantIntent.OrderCreate => BuildOrderReplyAsync(parsed, conversationId),
+            RestaurantIntent.HumanHandoff => Task.FromResult("Te paso con un humano 🙌"),
+            _ => Task.FromResult("¿Qué deseas ordenar?")
+        };
     }
 
     private Task<string> BuildOrderReplyAsync(AiParseResult parsed, string conversationId)
     {
         var state = _stateByConversation[conversationId];
 
-        var addedAny = false;
-
         if (parsed.Args?.Order != null)
         {
             foreach (var item in parsed.Args.Order.Items ?? [])
             {
                 if (!string.IsNullOrWhiteSpace(item.Name) && item.Quantity > 0)
-                {
-                    if (!state.Items.Any(x => x.Name.Equals(item.Name, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        state.Items.Add((item.Name.Trim(), item.Quantity));
-                        addedAny = true;
-                    }
-                }
+                    AddOrIncreaseItem(state, item.Name.Trim(), item.Quantity);
             }
 
             if (!string.IsNullOrWhiteSpace(parsed.Args.Order.DeliveryType))
@@ -234,31 +351,24 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
             return Task.FromResult("¿Es *pick up* o *delivery*?");
 
-        // Modo edición: si ya mandamos planilla y agrega items
-        if (state.RequestedDetailsForm && addedAny)
+        if (!state.CheckoutFormSent)
         {
-            var last = state.Items.Last();
-            return Task.FromResult($"Listo ✅ agregué *{last.Quantity} {last.Name}*. Escribe *CONFIRMAR* para finalizar.");
-        }
-
-        if (!state.RequestedDetailsForm)
-        {
-            state.RequestedDetailsForm = true;
+            state.CheckoutFormSent = true;
 
             return Task.FromResult(
 @"Para finalizar envíanos:
 
-👤 Nombre:
-🏡 Dirección:
-💳 Pago: *EFECTIVO* o *DIVISAS*
-📍 Ubicación GPS: (manda el pin) *(opcional)*
+👤 *Nombre:*
+🪪 *Cédula:*
+📱 *Teléfono:*
+🏡 *Dirección:*
+💵 *Pago:* EFECTIVO / DIVISAS / PAGO MÓVIL
+📍 *Ubicación GPS:* (manda el pin) ✅ *OBLIGATORIO*
 
 Luego escribe *CONFIRMAR*.");
         }
 
-        return state.DetailsReceived
-            ? Task.FromResult("Recibido ✅ Escribe *CONFIRMAR* para finalizar.")
-            : Task.FromResult("Sigue llenando la planilla y luego escribe *CONFIRMAR*.");
+        return Task.FromResult("Escribe *CONFIRMAR* para finalizar.");
     }
 
     private async Task<string> FinalizeOrderIfPossibleAsync(
@@ -273,15 +383,22 @@ Luego escribe *CONFIRMAR*.");
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
             return "Indica si es *pick up* o *delivery*.";
 
-        if (state.RequestedDetailsForm && !HasMinimumCheckout(state))
+        // Requeridos
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("Nombre");
+        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("Cédula");
+        if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("Teléfono");
+        if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("Dirección");
+        if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("Pago");
+        if (!state.GpsPinReceived) missing.Add("Ubicación GPS (pin)");
+
+        if (missing.Count > 0)
         {
             return
-@"Aún falta información para confirmar ✅
+$@"Aún falta información para confirmar ✅
 
-Envíanos:
-👤 Nombre
-🏡 Dirección
-💳 Pago: EFECTIVO o DIVISAS
+Envíanos al menos:
+- {string.Join("\n- ", missing)}
 
 Luego escribe *CONFIRMAR*.";
         }
@@ -294,13 +411,15 @@ Luego escribe *CONFIRMAR*.";
             CreatedAtUtc = DateTime.UtcNow,
 
             CustomerName = state.CustomerName,
+            CustomerIdNumber = state.CustomerIdNumber,
+            CustomerPhone = state.CustomerPhone,
             Address = state.Address,
             PaymentMethod = state.PaymentMethod,
             LocationText = state.LocationText,
 
-            CheckoutFormSent = state.RequestedDetailsForm,
             CheckoutCompleted = true,
             CheckoutCompletedAtUtc = DateTime.UtcNow,
+            CheckoutFormSent = state.CheckoutFormSent,
 
             Items = state.Items.Select(i => new WhatsAppSaaS.Domain.Entities.OrderItem
             {
@@ -314,159 +433,44 @@ Luego escribe *CONFIRMAR*.";
         var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
         var itemsText = string.Join(", ", state.Items.Select(i => $"{i.Quantity} {i.Name}"));
 
+        var payText = state.PaymentMethod switch
+        {
+            "pago_movil" => "PAGO MÓVIL (pendiente verificación)",
+            "divisas" => "DIVISAS (pendiente verificación)",
+            _ => "EFECTIVO"
+        };
+
         var receipt =
 $@"✅ *PEDIDO CONFIRMADO*
-🧾 Pedido: *#{orderNumber}*
+🧾 Pedido: #{orderNumber}
 
-👤 Nombre: {state.CustomerName ?? "—"}
+👤 Nombre: {state.CustomerName}
+🪪 Cédula: {state.CustomerIdNumber}
+📱 Teléfono: {state.CustomerPhone}
+
 🍽️ Pedido: {itemsText}
-🏡 Dirección: {state.Address ?? "—"}
-💳 Pago: {state.PaymentMethod ?? "—"}
+🏡 Dirección: {state.Address}
+💵 Pago: {payText}
 
 Gracias 🙌";
 
-        // Reset estado conversacional
-        state.Items.Clear();
-        state.DeliveryType = null;
-
-        state.RequestedDetailsForm = false;
-        state.DetailsReceived = false;
-
-        state.CustomerName = null;
-        state.Address = null;
-        state.PaymentMethod = null;
-        state.LocationText = null;
-
+        state.ResetAfterConfirm();
         return receipt;
     }
 
-    // ============================
-    // ✅ MODO EDICIÓN MANUAL (fallback)
-    // ============================
-    // Acepta ejemplos:
-    // "agrega 2 cocacolas"
-    // "agregar 1 coca cola"
-    // "añade 3 papas"
-    // "+2 empanadas"
-    // "sumale 2 tequeños"
-    private static bool TryApplyManualAddItems(ConversationState state, string rawText)
-    {
-        var t = Normalize(rawText);
-
-        // Atajos tipo "+2 cocacolas"
-        if (t.StartsWith("+"))
-            t = "agrega " + t[1..].Trim();
-
-        // Necesita al menos un número
-        // Formato: (palabra acción) (cantidad) (producto...)
-        // Acción puede estar o no, porque la IA a veces manda solo "2 cocacolas"
-        var m = Regex.Match(t, @"^(agrega|agregar|añade|anade|sumale|súmale|sumar|agregame|agrégame)?\s*(\d+)\s+(.+)$",
-            RegexOptions.IgnoreCase);
-
-        if (!m.Success)
-            return false;
-
-        var qtyStr = m.Groups[2].Value;
-        var name = m.Groups[3].Value.Trim();
-
-        if (!int.TryParse(qtyStr, out var qty) || qty <= 0)
-            return false;
-
-        // evita capturar cosas tipo "2" sin nombre
-        if (string.IsNullOrWhiteSpace(name) || name.Length < 2)
-            return false;
-
-        // limpieza básica
-        name = name.Trim().Trim('.', ',', ';', ':');
-
-        // si ya existe, NO duplicamos (mantener simple)
-        if (!state.Items.Any(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
-            state.Items.Add((name, qty));
-
-        return true;
-    }
-
-    private static void TryCaptureCheckoutFromText(ConversationState state, string rawText)
-    {
-        var lines = rawText
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(l => l.Trim())
-            .Where(l => l.Length > 0)
-            .ToList();
-
-        foreach (var original in lines)
-        {
-            var line = StripLeadingNonAlnum(original);
-            var lower = line.ToLowerInvariant();
-
-            if (lower.StartsWith("nombre"))
-            {
-                var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v)) state.CustomerName = v;
-                continue;
-            }
-
-            if (lower.StartsWith("direccion") || lower.StartsWith("dirección") || lower.StartsWith("dir"))
-            {
-                var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v)) state.Address = v;
-                continue;
-            }
-
-            if (lower.StartsWith("pago") || lower.StartsWith("forma de pago"))
-            {
-                var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v)) state.PaymentMethod = v;
-                continue;
-            }
-
-            if (lower.StartsWith("ubicacion") || lower.StartsWith("ubicación") || lower.StartsWith("gps"))
-            {
-                var v = ExtractValue(line);
-                if (!string.IsNullOrWhiteSpace(v)) state.LocationText = v;
-                continue;
-            }
-        }
-    }
-
-    private static bool HasMinimumCheckout(ConversationState state)
-    {
-        if (string.IsNullOrWhiteSpace(state.CustomerName)) return false;
-        if (string.IsNullOrWhiteSpace(state.Address)) return false;
-        if (string.IsNullOrWhiteSpace(state.PaymentMethod)) return false;
-        return true;
-    }
-
-    private static string StripLeadingNonAlnum(string input)
-    {
-        if (string.IsNullOrWhiteSpace(input)) return string.Empty;
-
-        var s = input.Trim();
-        var i = 0;
-        while (i < s.Length && !char.IsLetterOrDigit(s[i]))
-            i++;
-
-        return i >= s.Length ? string.Empty : s[i..].TrimStart();
-    }
-
-    private static string ExtractValue(string line)
-    {
-        var idx = line.IndexOf(':');
-        if (idx >= 0 && idx < line.Length - 1)
-            return line[(idx + 1)..].Trim();
-
-        idx = line.IndexOf('-');
-        if (idx >= 0 && idx < line.Length - 1)
-            return line[(idx + 1)..].Trim();
-
-        return string.Empty;
-    }
+    // Helpers
 
     private static string Normalize(string input)
         => input.Trim().ToLowerInvariant();
 
+    private static bool IsGreeting(string t)
+        => t == "hola" || t == "buenas" || t == "buenos dias" || t == "buen día" || t == "buenas tardes" || t == "buenas noches" || t.StartsWith("hola ");
+
     private static bool IsConfirmCommand(string t)
         => t == "confirmar" || t == "confirmado" || t == "listo";
+
+    private static bool LooksLikeOrderIntent(string t)
+        => t.Contains("pedido") || t.Contains("orden") || t.Contains("comprar") || t.Contains("quiero") || t.Contains("hamburg") || t.Contains("agrega") || t.Contains("agregar");
 
     private static string? NormalizeDeliveryType(string? input)
     {
@@ -477,10 +481,143 @@ Gracias 🙌";
         if (t.Contains("delivery") || t.Contains("domicilio"))
             return "delivery";
 
-        if (t.Contains("pick") || t.Contains("recoger"))
+        if (t.Contains("pick") || t.Contains("pickup") || t.Contains("recoger"))
             return "pickup";
 
         return null;
+    }
+
+    private static void AddOrIncreaseItem(ConversationState state, string name, int qty)
+    {
+        var idx = state.Items.FindIndex(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (idx >= 0)
+        {
+            var current = state.Items[idx];
+            state.Items[idx] = (current.Name, current.Quantity + qty);
+        }
+        else
+        {
+            state.Items.Add((name, qty));
+        }
+    }
+
+    private static bool TryParseManualAddItem(string rawText, out int qty, out string name)
+    {
+        qty = 0;
+        name = "";
+
+        var m = Regex.Match(rawText.Trim(), @"^(agrega|agregar)\s+(\d+)\s+(.+)$", RegexOptions.IgnoreCase);
+        if (!m.Success) return false;
+
+        if (!int.TryParse(m.Groups[2].Value, out qty)) return false;
+        name = m.Groups[3].Value.Trim();
+
+        return qty > 0 && !string.IsNullOrWhiteSpace(name);
+    }
+
+    private sealed class CheckoutForm
+    {
+        public string? CustomerName { get; set; }
+        public string? CustomerIdNumber { get; set; }
+        public string? CustomerPhone { get; set; }
+        public string? Address { get; set; }
+        public string? PaymentMethod { get; set; }
+        public string? LocationText { get; set; }
+    }
+
+    private static bool TryParseCheckoutForm(string rawText, out CheckoutForm form)
+    {
+        form = new CheckoutForm();
+
+        var text = StripEmojis(rawText);
+
+        var lines = text
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(l => l.Trim())
+            .ToList();
+
+        foreach (var lineRaw in lines)
+        {
+            var line = lineRaw.Trim();
+            var lower = line.ToLowerInvariant();
+
+            if (lower.Contains("nombre"))
+            {
+                var v = AfterSeparator(line);
+                if (!string.IsNullOrWhiteSpace(v)) form.CustomerName ??= v.Trim();
+            }
+
+            if (lower.Contains("cédula") || lower.Contains("cedula"))
+            {
+                var v = AfterSeparator(line);
+                if (!string.IsNullOrWhiteSpace(v)) form.CustomerIdNumber ??= v.Trim();
+            }
+
+            if (lower.Contains("teléfono") || lower.Contains("telefono"))
+            {
+                var v = AfterSeparator(line);
+                if (!string.IsNullOrWhiteSpace(v)) form.CustomerPhone ??= v.Trim();
+            }
+
+            if (lower.Contains("dirección") || lower.Contains("direccion"))
+            {
+                var v = AfterSeparator(line);
+                if (!string.IsNullOrWhiteSpace(v)) form.Address ??= v.Trim();
+            }
+
+            if (lower.Contains("pago"))
+            {
+                var v = AfterSeparator(line);
+                var p = Normalize(v);
+
+                if (p.Contains("pago movil") || p.Contains("pagomovil") || p.Contains("pago_movil"))
+                    form.PaymentMethod ??= "pago_movil";
+                else if (p.Contains("divisa") || p.Contains("dolar") || p.Contains("usd"))
+                    form.PaymentMethod ??= "divisas";
+                else if (p.Contains("efectivo") || p.Contains("cash"))
+                    form.PaymentMethod ??= "efectivo";
+            }
+
+            if (lower.Contains("ubicacion") || lower.Contains("ubicación"))
+            {
+                var v = AfterSeparator(line);
+                if (!string.IsNullOrWhiteSpace(v)) form.LocationText ??= v.Trim();
+            }
+        }
+
+        // consideramos planilla si trae >= 2 campos relevantes
+        var score = 0;
+        if (!string.IsNullOrWhiteSpace(form.CustomerName)) score++;
+        if (!string.IsNullOrWhiteSpace(form.CustomerIdNumber)) score++;
+        if (!string.IsNullOrWhiteSpace(form.CustomerPhone)) score++;
+        if (!string.IsNullOrWhiteSpace(form.Address)) score++;
+        if (!string.IsNullOrWhiteSpace(form.PaymentMethod)) score++;
+        if (!string.IsNullOrWhiteSpace(form.LocationText)) score++;
+
+        return score >= 2;
+    }
+
+    private static string AfterSeparator(string line)
+    {
+        var idx = line.IndexOf(':');
+        if (idx >= 0 && idx < line.Length - 1) return line[(idx + 1)..].Trim();
+
+        idx = line.IndexOf('-');
+        if (idx >= 0 && idx < line.Length - 1) return line[(idx + 1)..].Trim();
+
+        return line;
+    }
+
+    private static string StripEmojis(string input)
+    {
+        var filtered = new string(input.Where(c =>
+            char.IsLetterOrDigit(c) ||
+            char.IsWhiteSpace(c) ||
+            c == ':' || c == '-' || c == '/' || c == '.' || c == ',' || c == '_' ||
+            c == '(' || c == ')' || c == '#' || c == '*' || c == '+' || c == '@'
+        ).ToArray());
+
+        return filtered;
     }
 
     private static bool IsDuplicateMessage(string conversationId, string messageId)

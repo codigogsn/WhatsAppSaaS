@@ -9,12 +9,14 @@ public class Order
 
     public string DeliveryType { get; set; } = default!;   // "pickup" | "delivery"
 
+    // ✅ Fase 4A: estado del pedido (Pending, Accepted, InProgress, OnTheWay, Delivered, Cancelled, etc.)
+    public string Status { get; set; } = "Pending";
+
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
     // ==============================
     // PLANILLA / CHECKOUT DETAILS
     // ==============================
-
     public string? CustomerName { get; set; }
     public string? CustomerIdNumber { get; set; }
     public string? CustomerPhone { get; set; }
@@ -23,7 +25,7 @@ public class Order
     public string? ReceiverName { get; set; }
     public string? AdditionalNotes { get; set; }
 
-    // GPS (si el usuario manda pin)
+    // GPS (si el usuario manda pin) / o texto
     public decimal? LocationLat { get; set; }
     public decimal? LocationLng { get; set; }
     public string? LocationText { get; set; }
