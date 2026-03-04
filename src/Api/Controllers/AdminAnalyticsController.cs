@@ -1,58 +1,47 @@
-using System;
-using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Logging;
-using WhatsAppSaaS.Application.DTOs;
-using WhatsAppSaaS.Application.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Infrastructure.Persistence;
 
-namespace WhatsAppSaaS.Api.Controllers;
+namespace Api.Controllers;
 
 [ApiController]
 [Route("api/admin/analytics")]
-public sealed class AdminAnalyticsController : ControllerBase
+public class AdminAnalyticsController : ControllerBase
 {
-    private readonly IAdminAnalyticsService _service;
-    private readonly ILogger<AdminAnalyticsController> _logger;
+    private readonly AppDbContext _db;
 
-    public AdminAnalyticsController(
-        IAdminAnalyticsService service,
-        ILogger<AdminAnalyticsController> logger)
+    public AdminAnalyticsController(AppDbContext db)
     {
-        _service = service;
-        _logger = logger;
+        _db = db;
     }
 
     [HttpGet("summary")]
-    public async Task<ActionResult<AnalyticsSummaryDto>> GetSummary(CancellationToken ct)
+    public async Task<IActionResult> GetSummary()
     {
-        // Este ya te está funcionando, lo dejamos limpio
-        var dto = await _service.GetSummaryAsync(ct);
-        return Ok(dto);
-    }
+        var orders = await _db.Orders
+            .AsNoTracking()
+            .ToListAsync();
 
-    [HttpGet("top-products")]
-    public async Task<ActionResult<List<TopProductDto>>> GetTopProducts([FromQuery] int take = 10, CancellationToken ct = default)
-    {
-        try
-        {
-            var dto = await _service.GetTopProductsAsync(take, ct);
-            return Ok(dto);
-        }
-        catch (Exception ex)
-        {
-            // ✅ QUIRÚRGICO: nunca más 500 por este endpoint
-            _logger.LogError(ex, "Admin analytics top-products failed. Returning empty list (MVP safe).");
-            return Ok(new List<TopProductDto>());
-        }
-    }
+        var totalOrders = orders.Count;
 
-    [HttpGet("customers")]
-    public async Task<ActionResult<List<CustomerAnalyticsDto>>> GetCustomers([FromQuery] int take = 10, CancellationToken ct = default)
-    {
-        // Este ya te está funcionando, lo dejamos limpio
-        var dto = await _service.GetCustomersAsync(take, ct);
-        return Ok(dto);
+        var totalRevenue = orders.Sum(o => o.TotalAmount ?? 0);
+
+        var avgTicket = totalOrders == 0
+            ? 0
+            : totalRevenue / totalOrders;
+
+        var uniqueCustomers = orders
+            .Select(o => o.CustomerPhone)
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Distinct()
+            .Count();
+
+        return Ok(new
+        {
+            orders = totalOrders,
+            totalRevenue,
+            avgTicket,
+            uniqueCustomers
+        });
     }
 }
