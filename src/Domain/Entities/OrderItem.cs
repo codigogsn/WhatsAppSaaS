@@ -14,7 +14,12 @@ namespace WhatsAppSaaS.Domain.Entities
         public int Quantity { get; set; }
 
         // 🆕 Precio unitario guardado al momento de crear la orden
-        public decimal UnitPrice { get; set; }
+        // Nullable para ser compatible con la base actual y migraciones previas
+        public decimal? UnitPrice { get; set; }
+
+        // 🆕 Total de línea (Quantity * UnitPrice)
+        // Nullable para evitar conflictos con datos históricos
+        public decimal? LineTotal { get; set; }
 
         // 🔥 Esto evita el loop JSON: Order -> Items -> Order -> Items...
         [JsonIgnore]

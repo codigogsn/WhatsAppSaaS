@@ -45,9 +45,9 @@ public class Order
 
     public List<OrderItem> Items { get; set; } = new();
 
-    // 🧠 Helper para recalcular total
+    // 🧠 Helper para recalcular total (soporta UnitPrice nullable)
     public void RecalculateTotal()
     {
-        Total = Items.Sum(i => i.UnitPrice * i.Quantity);
+        Total = Items.Sum(i => (i.UnitPrice ?? 0m) * i.Quantity);
     }
 }
