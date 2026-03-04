@@ -21,7 +21,6 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
     public async Task<AnalyticsSummaryDto> GetSummaryAsync(CancellationToken ct)
     {
-        // Conteos simples (server-side)
         var totalOrdersTask = _db.Orders.AsNoTracking().CountAsync(ct);
         var completedOrdersTask = _db.Orders.AsNoTracking().CountAsync(o => o.CheckoutCompleted, ct);
         var totalCustomersTask = _db.Customers.AsNoTracking().CountAsync(ct);
@@ -31,8 +30,6 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         var totalOrders = totalOrdersTask.Result;
         var completedOrders = completedOrdersTask.Result;
 
-        // Revenue MVP: sum de TotalAmount (nullable) solo en completadas
-        // OJO: TotalAmount puede ser null => COALESCE a 0m
         var totalRevenue = await _db.Orders
             .AsNoTracking()
             .Where(o => o.CheckoutCompleted)
@@ -53,29 +50,32 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
     {
         take = ClampTake(take);
 
-        // ✅ Postgres-safe:
-        // - Agrupamos por Name normalizado
-        // - TotalQuantity = SUM(Quantity)
-        // - TotalRevenue = SUM(Quantity * COALESCE(UnitPrice, 0))
-        // - Todo se calcula server-side
-        var query = _db.OrderItems
+        // ✅ QUIRÚRGICO: evitamos 100% los peos de traducción LINQ->Postgres (GroupBy/Sum/decimal?)
+        // MVP: traemos los items y agregamos en memoria.
+        var rows = await _db.OrderItems
             .AsNoTracking()
-            .Where(oi => oi.Quantity > 0 && oi.Name != null && oi.Name != "")
-            .GroupBy(oi => oi.Name!.Trim().ToLower())
+            .Select(oi => new
+            {
+                oi.Name,
+                oi.Quantity,
+                oi.UnitPrice
+            })
+            .ToListAsync(ct);
+
+        var result = rows
+            .Where(x => !string.IsNullOrWhiteSpace(x.Name) && x.Quantity > 0)
+            .GroupBy(x => x.Name!.Trim().ToLowerInvariant())
             .Select(g => new TopProductDto
             {
                 Name = g.Key,
                 TotalQuantity = g.Sum(x => x.Quantity),
-                TotalRevenue = g.Sum(x => (x.UnitPrice ?? 0m) * (decimal)x.Quantity)
+                TotalRevenue = g.Sum(x => (x.UnitPrice ?? 0m) * x.Quantity)
             })
             .OrderByDescending(x => x.TotalQuantity)
             .ThenByDescending(x => x.TotalRevenue)
-            .Take(take);
+            .Take(take)
+            .ToList();
 
-        var result = await query.ToListAsync(ct);
-
-        // Si quieres el nombre "bonito" (sin lower), puedes TitleCase luego,
-        // pero NO lo hago aquí para no romper traducción EF.
         return result;
     }
 
@@ -83,7 +83,6 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
     {
         take = ClampTake(take);
 
-        // Ya te está funcionando, lo dejo simple y seguro
         return await _db.Customers
             .AsNoTracking()
             .OrderByDescending(c => c.LastPurchaseAtUtc ?? c.LastSeenAtUtc ?? c.FirstSeenAtUtc)
