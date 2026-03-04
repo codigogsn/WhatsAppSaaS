@@ -120,6 +120,44 @@ try
     app.UseGlobalExceptionHandling();
     app.UseRequestLogging();
 
+    // ────────────────────────────────────────
+    // ✅ Admin Auth (X-Admin-Key) - mínimo y rápido
+    // Protege: /api/admin/*
+    // Config: ENV var ADMIN_KEY (en Render y local)
+    // ────────────────────────────────────────
+    app.Use(async (context, next) =>
+    {
+        if (context.Request.Path.StartsWithSegments("/api/admin"))
+        {
+            var adminKey = builder.Configuration["ADMIN_KEY"]
+                           ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
+
+            // Si no está configurada la key, en Production BLOQUEAMOS
+            if (string.IsNullOrWhiteSpace(adminKey) &&
+                string.Equals(builder.Environment.EnvironmentName, "Production", StringComparison.OrdinalIgnoreCase))
+            {
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                await context.Response.WriteAsync("ADMIN_KEY is missing in Production.");
+                return;
+            }
+
+            // En dev, si no hay key, dejamos pasar (para no frenar)
+            if (!string.IsNullOrWhiteSpace(adminKey))
+            {
+                if (!context.Request.Headers.TryGetValue("X-Admin-Key", out var provided) ||
+                    provided.Count == 0 ||
+                    provided[0] != adminKey)
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    await context.Response.WriteAsync("Unauthorized");
+                    return;
+                }
+            }
+        }
+
+        await next();
+    });
+
     app.UseDefaultFiles();
     app.UseStaticFiles();
 
