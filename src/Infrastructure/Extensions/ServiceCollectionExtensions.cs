@@ -1,4 +1,3 @@
-using System;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WhatsAppSaaS.Application.Common;
@@ -46,13 +45,11 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.Add("Accept", "application/json");
         });
 
-        // ── Repos ───────────────────────────────────────
+        // ── Repos / infra services ──────────────────────
         services.AddScoped<IOrderRepository, OrderRepository>();
-
-        // ── Other infra services ────────────────────────
         services.AddScoped<ISignatureValidator, SignatureValidator>();
 
-        // ── ✅ Admin analytics (Paso 5 DI) ──────────────
+        // ── Admin Analytics (✅ FIX runtime 500) ─────────
         services.AddScoped<IAdminAnalyticsService, AdminAnalyticsService>();
 
         return services;
