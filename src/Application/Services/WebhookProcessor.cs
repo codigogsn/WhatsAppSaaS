@@ -403,6 +403,9 @@ Envíanos al menos:
 Luego escribe *CONFIRMAR*.";
         }
 
+        // ✅ Normalizamos teléfono a E.164 (para Customers)
+        var customerPhoneE164 = NormalizeToE164(state.CustomerPhone) ?? NormalizeToE164(from) ?? state.CustomerPhone;
+
         var order = new Order
         {
             From = from,
@@ -412,7 +415,7 @@ Luego escribe *CONFIRMAR*.";
 
             CustomerName = state.CustomerName,
             CustomerIdNumber = state.CustomerIdNumber,
-            CustomerPhone = state.CustomerPhone,
+            CustomerPhone = customerPhoneE164,
             Address = state.Address,
             PaymentMethod = state.PaymentMethod,
             LocationText = state.LocationText,
@@ -424,9 +427,13 @@ Luego escribe *CONFIRMAR*.";
             Items = state.Items.Select(i => new WhatsAppSaaS.Domain.Entities.OrderItem
             {
                 Name = i.Name,
-                Quantity = i.Quantity
+                Quantity = i.Quantity,
+                UnitPrice = 0m // MVP: luego lo conectamos a Products
             }).ToList()
         };
+
+        // Total MVP (si UnitPrice=0 => total=0; queda estable para analytics)
+        order.RecalculateTotal();
 
         await _orderRepository.AddOrderAsync(order, ct);
 
@@ -446,7 +453,7 @@ $@"✅ *PEDIDO CONFIRMADO*
 
 👤 Nombre: {state.CustomerName}
 🪪 Cédula: {state.CustomerIdNumber}
-📱 Teléfono: {state.CustomerPhone}
+📱 Teléfono: {customerPhoneE164}
 
 🍽️ Pedido: {itemsText}
 🏡 Dirección: {state.Address}
@@ -649,5 +656,33 @@ Gracias 🙌";
             _stateByConversation.Remove(key);
             _processedMessageIdsByConversation.Remove(key);
         }
+    }
+
+    // ✅ E.164 normalization (VE-first)
+    private static string? NormalizeToE164(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        var trimmed = input.Trim();
+
+        if (trimmed.StartsWith("+"))
+        {
+            var digits = new string(trimmed.Where(char.IsDigit).ToArray());
+            return digits.Length >= 8 ? $"+{digits}" : null;
+        }
+
+        var onlyDigits = new string(trimmed.Where(char.IsDigit).ToArray());
+        if (onlyDigits.Length < 8) return null;
+
+        // VE local "0414..." -> "+58" + "414..."
+        if (onlyDigits.StartsWith("0") && onlyDigits.Length >= 10)
+            return $"+58{onlyDigits[1..]}";
+
+        // WA often gives "58..."
+        if (onlyDigits.StartsWith("58"))
+            return $"+{onlyDigits}";
+
+        // fallback: assume already intl without '+'
+        return $"+{onlyDigits}";
     }
 }
