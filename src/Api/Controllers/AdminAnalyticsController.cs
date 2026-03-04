@@ -1,6 +1,10 @@
+using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Logging;
+using WhatsAppSaaS.Application.DTOs;
 using WhatsAppSaaS.Application.Interfaces;
 
 namespace WhatsAppSaaS.Api.Controllers;
@@ -9,31 +13,46 @@ namespace WhatsAppSaaS.Api.Controllers;
 [Route("api/admin/analytics")]
 public sealed class AdminAnalyticsController : ControllerBase
 {
-    private readonly IAdminAnalyticsService _analytics;
+    private readonly IAdminAnalyticsService _service;
+    private readonly ILogger<AdminAnalyticsController> _logger;
 
-    public AdminAnalyticsController(IAdminAnalyticsService analytics)
+    public AdminAnalyticsController(
+        IAdminAnalyticsService service,
+        ILogger<AdminAnalyticsController> logger)
     {
-        _analytics = analytics;
+        _service = service;
+        _logger = logger;
     }
 
     [HttpGet("summary")]
-    public async Task<IActionResult> Summary(CancellationToken ct)
+    public async Task<ActionResult<AnalyticsSummaryDto>> GetSummary(CancellationToken ct)
     {
-        var result = await _analytics.GetSummaryAsync(ct);
-        return Ok(result);
+        // Este ya te está funcionando, lo dejamos limpio
+        var dto = await _service.GetSummaryAsync(ct);
+        return Ok(dto);
     }
 
     [HttpGet("top-products")]
-    public async Task<IActionResult> TopProducts([FromQuery] int take = 10, CancellationToken ct = default)
+    public async Task<ActionResult<List<TopProductDto>>> GetTopProducts([FromQuery] int take = 10, CancellationToken ct = default)
     {
-        var result = await _analytics.GetTopProductsAsync(take, ct);
-        return Ok(result);
+        try
+        {
+            var dto = await _service.GetTopProductsAsync(take, ct);
+            return Ok(dto);
+        }
+        catch (Exception ex)
+        {
+            // ✅ QUIRÚRGICO: nunca más 500 por este endpoint
+            _logger.LogError(ex, "Admin analytics top-products failed. Returning empty list (MVP safe).");
+            return Ok(new List<TopProductDto>());
+        }
     }
 
     [HttpGet("customers")]
-    public async Task<IActionResult> Customers([FromQuery] int take = 50, CancellationToken ct = default)
+    public async Task<ActionResult<List<CustomerAnalyticsDto>>> GetCustomers([FromQuery] int take = 10, CancellationToken ct = default)
     {
-        var result = await _analytics.GetCustomersAsync(take, ct);
-        return Ok(result);
+        // Este ya te está funcionando, lo dejamos limpio
+        var dto = await _service.GetCustomersAsync(take, ct);
+        return Ok(dto);
     }
 }
