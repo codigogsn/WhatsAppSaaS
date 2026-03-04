@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using WhatsAppSaaS.Api.Extensions;
 using WhatsAppSaaS.Application.Validators;
@@ -85,6 +86,36 @@ try
     builder.Services.AddHealthChecks();
 
     var app = builder.Build();
+
+    // ────────────────────────────────────────
+    // ✅ AUTO-MIGRATE (solo cuando hay Postgres / Render)
+    // ────────────────────────────────────────
+    using (var scope = app.Services.CreateScope())
+    {
+        var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+
+        var databaseUrl = cfg["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
+
+        if (!string.IsNullOrWhiteSpace(databaseUrl))
+        {
+            try
+            {
+                Log.Information("Applying EF migrations (Postgres)...");
+                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+                db.Database.Migrate();
+                Log.Information("EF migrations applied successfully.");
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal(ex, "Failed applying EF migrations on startup.");
+                throw;
+            }
+        }
+        else
+        {
+            Log.Information("DATABASE_URL not present -> skipping auto-migrate (SQLite dev).");
+        }
+    }
 
     app.UseGlobalExceptionHandling();
     app.UseRequestLogging();
