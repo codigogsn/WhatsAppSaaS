@@ -10,6 +10,7 @@ public class Order
 
     public string From { get; set; } = default!;
     public string PhoneNumberId { get; set; } = default!;
+
     public string DeliveryType { get; set; } = default!;
 
     public string Status { get; set; } = "Pending";
@@ -39,18 +40,23 @@ public class Order
     public string? LastNotifiedStatus { get; set; }
     public DateTime? LastNotifiedAtUtc { get; set; }
 
-    // 👤 Link opcional a Customer (Paso 3)
+    // 👤 Link a Customer (nullable FK)
     public Guid? CustomerId { get; set; }
     public Customer? Customer { get; set; }
 
-    // 🆕 Total monetario de la orden (Paso 2)
-    public decimal Total { get; set; } = 0m;
+    // 🧾 Montos (MVP)
+    // OJO: mantenemos ambos por compat con tu migration AddCustomersAndAmounts
+    public decimal? SubtotalAmount { get; set; }
+    public decimal? TotalAmount { get; set; }
 
+    // Lista de items
     public List<OrderItem> Items { get; set; } = new();
 
-    // 🧠 Helper para recalcular total (seguro aunque UnitPrice sea 0)
+    // 🧠 Helper para recalcular montos (seguro con UnitPrice nullable)
     public void RecalculateTotal()
     {
-        Total = Items.Sum(i => i.UnitPrice * i.Quantity);
+        var subtotal = Items.Sum(i => (i.UnitPrice ?? 0m) * i.Quantity);
+        SubtotalAmount = subtotal;
+        TotalAmount = subtotal; // (si luego agregas delivery fee / tax, aquí se ajusta)
     }
 }
