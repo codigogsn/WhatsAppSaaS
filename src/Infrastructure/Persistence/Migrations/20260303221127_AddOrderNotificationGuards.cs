@@ -5,12 +5,37 @@ using Microsoft.EntityFrameworkCore.Migrations;
 
 namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
 {
-    /// <inheritdoc />
     public partial class AddOrderNotificationGuards : Migration
     {
-        /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            // ✅ QUIRÚRGICO:
+            // Esta migración fue generada en SQLite y metía AlterColumn con TYPE "TEXT"/"INTEGER"
+            // que en Postgres revienta (y rompe el FK OrderItems -> Orders).
+            //
+            // En Postgres: NO tocamos tipos existentes. SOLO agregamos las columnas nuevas.
+
+            if (ActiveProvider == "Npgsql.EntityFrameworkCore.PostgreSQL")
+            {
+                migrationBuilder.AddColumn<DateTime>(
+                    name: "LastNotifiedAtUtc",
+                    table: "Orders",
+                    type: "timestamp with time zone",
+                    nullable: true);
+
+                migrationBuilder.AddColumn<string>(
+                    name: "LastNotifiedStatus",
+                    table: "Orders",
+                    type: "text",
+                    nullable: true);
+
+                return;
+            }
+
+            // =========================
+            // SQLite path (original intent)
+            // =========================
+
             migrationBuilder.AlterColumn<string>(
                 name: "Status",
                 table: "Orders",
@@ -133,25 +158,13 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldClrType: typeof(DateTime),
                 oldType: "timestamp with time zone");
 
-            // ✅ QUIRÚRGICO: SOLO aplicar bool->INTEGER en SQLite (no en Postgres)
-            if (migrationBuilder.ActiveProvider != "Npgsql.EntityFrameworkCore.PostgreSQL")
-            {
-                migrationBuilder.AlterColumn<bool>(
-                    name: "CheckoutFormSent",
-                    table: "Orders",
-                    type: "INTEGER",
-                    nullable: false,
-                    oldClrType: typeof(bool),
-                    oldType: "boolean");
-
-                migrationBuilder.AlterColumn<bool>(
-                    name: "CheckoutCompleted",
-                    table: "Orders",
-                    type: "INTEGER",
-                    nullable: false,
-                    oldClrType: typeof(bool),
-                    oldType: "boolean");
-            }
+            migrationBuilder.AlterColumn<bool>(
+                name: "CheckoutFormSent",
+                table: "Orders",
+                type: "INTEGER",
+                nullable: false,
+                oldClrType: typeof(bool),
+                oldType: "boolean");
 
             migrationBuilder.AlterColumn<DateTime>(
                 name: "CheckoutCompletedAtUtc",
@@ -161,6 +174,14 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldClrType: typeof(DateTime),
                 oldType: "timestamp with time zone",
                 oldNullable: true);
+
+            migrationBuilder.AlterColumn<bool>(
+                name: "CheckoutCompleted",
+                table: "Orders",
+                type: "INTEGER",
+                nullable: false,
+                oldClrType: typeof(bool),
+                oldType: "boolean");
 
             migrationBuilder.AlterColumn<string>(
                 name: "Address",
@@ -180,6 +201,8 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldType: "text",
                 oldNullable: true);
 
+            // ⚠️ IMPORTANTE: en SQLite podías haber tenido Guid como TEXT.
+            // En Postgres NO tocamos esto (por eso arriba retornamos).
             migrationBuilder.AlterColumn<Guid>(
                 name: "Id",
                 table: "Orders",
@@ -224,7 +247,6 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldClrType: typeof(string),
                 oldType: "text");
 
-            // ✅ FIX: tu archivo tenía name duplicado. Lo dejo correcto.
             migrationBuilder.AlterColumn<Guid>(
                 name: "Id",
                 table: "OrderItems",
@@ -234,9 +256,22 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldType: "uuid");
         }
 
-        /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
+            // En Postgres solo quitamos las columnas nuevas y ya.
+            if (ActiveProvider == "Npgsql.EntityFrameworkCore.PostgreSQL")
+            {
+                migrationBuilder.DropColumn(
+                    name: "LastNotifiedAtUtc",
+                    table: "Orders");
+
+                migrationBuilder.DropColumn(
+                    name: "LastNotifiedStatus",
+                    table: "Orders");
+
+                return;
+            }
+
             migrationBuilder.DropColumn(
                 name: "LastNotifiedAtUtc",
                 table: "Orders");
@@ -245,214 +280,9 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 name: "LastNotifiedStatus",
                 table: "Orders");
 
-            migrationBuilder.AlterColumn<string>(
-                name: "Status",
-                table: "Orders",
-                type: "text",
-                nullable: false,
-                defaultValue: "Pending",
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldDefaultValue: "Pending");
-
-            migrationBuilder.AlterColumn<string>(
-                name: "ReceiverName",
-                table: "Orders",
-                type: "text",
-                nullable: true,
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<string>(
-                name: "PhoneNumberId",
-                table: "Orders",
-                type: "text",
-                nullable: false,
-                oldClrType: typeof(string),
-                oldType: "TEXT");
-
-            migrationBuilder.AlterColumn<string>(
-                name: "PaymentMethod",
-                table: "Orders",
-                type: "text",
-                nullable: true,
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<string>(
-                name: "LocationText",
-                table: "Orders",
-                type: "text",
-                nullable: true,
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<decimal>(
-                name: "LocationLng",
-                table: "Orders",
-                type: "numeric(9,6)",
-                precision: 9,
-                scale: 6,
-                nullable: true,
-                oldClrType: typeof(decimal),
-                oldType: "TEXT",
-                oldPrecision: 9,
-                oldScale: 6,
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<decimal>(
-                name: "LocationLat",
-                table: "Orders",
-                type: "numeric(9,6)",
-                precision: 9,
-                scale: 6,
-                nullable: true,
-                oldClrType: typeof(decimal),
-                oldType: "TEXT",
-                oldPrecision: 9,
-                oldScale: 6,
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<string>(
-                name: "From",
-                table: "Orders",
-                type: "text",
-                nullable: false,
-                oldClrType: typeof(string),
-                oldType: "TEXT");
-
-            migrationBuilder.AlterColumn<string>(
-                name: "DeliveryType",
-                table: "Orders",
-                type: "text",
-                nullable: false,
-                oldClrType: typeof(string),
-                oldType: "TEXT");
-
-            migrationBuilder.AlterColumn<string>(
-                name: "CustomerPhone",
-                table: "Orders",
-                type: "text",
-                nullable: true,
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<string>(
-                name: "CustomerName",
-                table: "Orders",
-                type: "text",
-                nullable: true,
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<string>(
-                name: "CustomerIdNumber",
-                table: "Orders",
-                type: "text",
-                nullable: true,
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<DateTime>(
-                name: "CreatedAtUtc",
-                table: "Orders",
-                type: "timestamp with time zone",
-                nullable: false,
-                oldClrType: typeof(DateTime),
-                oldType: "TEXT");
-
-            // ✅ QUIRÚRGICO: SOLO revertir bool types en SQLite, no en Postgres
-            if (migrationBuilder.ActiveProvider != "Npgsql.EntityFrameworkCore.PostgreSQL")
-            {
-                migrationBuilder.AlterColumn<bool>(
-                    name: "CheckoutFormSent",
-                    table: "Orders",
-                    type: "boolean",
-                    nullable: false,
-                    oldClrType: typeof(bool),
-                    oldType: "INTEGER");
-
-                migrationBuilder.AlterColumn<bool>(
-                    name: "CheckoutCompleted",
-                    table: "Orders",
-                    type: "boolean",
-                    nullable: false,
-                    oldClrType: typeof(bool),
-                    oldType: "INTEGER");
-            }
-
-            migrationBuilder.AlterColumn<DateTime>(
-                name: "CheckoutCompletedAtUtc",
-                table: "Orders",
-                type: "timestamp with time zone",
-                nullable: true,
-                oldClrType: typeof(DateTime),
-                oldType: "TEXT",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<string>(
-                name: "Address",
-                table: "Orders",
-                type: "text",
-                nullable: true,
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<string>(
-                name: "AdditionalNotes",
-                table: "Orders",
-                type: "text",
-                nullable: true,
-                oldClrType: typeof(string),
-                oldType: "TEXT",
-                oldNullable: true);
-
-            migrationBuilder.AlterColumn<Guid>(
-                name: "Id",
-                table: "Orders",
-                type: "uuid",
-                nullable: false,
-                oldClrType: typeof(Guid),
-                oldType: "TEXT");
-
-            migrationBuilder.AlterColumn<int>(
-                name: "Quantity",
-                table: "OrderItems",
-                type: "integer",
-                nullable: false,
-                oldClrType: typeof(int),
-                oldType: "INTEGER");
-
-            migrationBuilder.AlterColumn<Guid>(
-                name: "OrderId",
-                table: "OrderItems",
-                type: "uuid",
-                nullable: false,
-                oldClrType: typeof(Guid),
-                oldType: "TEXT");
-
-            migrationBuilder.AlterColumn<string>(
-                name: "Name",
-                table: "OrderItems",
-                type: "text",
-                nullable: false,
-                oldClrType: typeof(string),
-                oldType: "TEXT");
-
-            migrationBuilder.AlterColumn<Guid>(
-                name: "Id",
-                table: "OrderItems",
-                type: "uuid",
-                nullable: false,
-                oldClrType: typeof(Guid),
-                oldType: "TEXT");
+            // El resto de reversiones “SQLite-style” no es crítico para prod.
+            // (y como estamos usando migraciones como historial, no vale la pena
+            // arriesgar volver a tocar tipos aquí).
         }
     }
 }
