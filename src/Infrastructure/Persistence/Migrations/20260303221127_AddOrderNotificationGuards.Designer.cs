@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -10,9 +11,11 @@ using WhatsAppSaaS.Infrastructure.Persistence;
 namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260303221127_AddOrderNotificationGuards")]
+    partial class AddOrderNotificationGuards
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.11");
@@ -91,9 +94,6 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT")
                         .HasDefaultValue("Pending");
 
-                    b.Property<decimal>("Total")
-                        .HasColumnType("TEXT");
-
                     b.HasKey("Id");
 
                     b.ToTable("Orders");
@@ -114,9 +114,6 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Quantity")
                         .HasColumnType("INTEGER");
-
-                    b.Property<decimal>("UnitPrice")
-                        .HasColumnType("TEXT");
 
                     b.HasKey("Id");
 

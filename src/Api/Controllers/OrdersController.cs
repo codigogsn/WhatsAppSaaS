@@ -58,6 +58,8 @@ public sealed class OrdersController : ControllerBase
                 o.CheckoutFormSent,
                 o.CheckoutCompleted,
                 o.CheckoutCompletedAtUtc,
+                o.LastNotifiedStatus,
+                o.LastNotifiedAtUtc,
                 Items = o.Items.Select(i => new { i.Id, i.Name, i.Quantity })
             })
             .ToListAsync();
@@ -89,6 +91,8 @@ public sealed class OrdersController : ControllerBase
                 x.CheckoutFormSent,
                 x.CheckoutCompleted,
                 x.CheckoutCompletedAtUtc,
+                x.LastNotifiedStatus,
+                x.LastNotifiedAtUtc,
                 Items = x.Items.Select(i => new { i.Id, i.Name, i.Quantity })
             })
             .SingleOrDefaultAsync();
@@ -163,26 +167,65 @@ public sealed class OrdersController : ControllerBase
 
                 bool sendOk = false;
                 bool notified = false;
+                string? notifyReason = null;
 
-                if (shouldNotify && !string.IsNullOrWhiteSpace(order.From) && !string.IsNullOrWhiteSpace(order.PhoneNumberId))
+                // 🛡️ Blindaje anti doble notificación
+                // Solo enviar si shouldNotify AND LastNotifiedStatus != current Status
+                if (shouldNotify &&
+                    !string.IsNullOrWhiteSpace(order.From) &&
+                    !string.IsNullOrWhiteSpace(order.PhoneNumberId))
                 {
-                    try
+                    if (string.Equals(order.LastNotifiedStatus, order.Status, StringComparison.OrdinalIgnoreCase))
                     {
-                        sendOk = await _whatsAppClient.SendTextMessageAsync(
-                            new OutgoingMessage
-                            {
-                                To = order.From!,
-                                PhoneNumberId = order.PhoneNumberId!,
-                                Body = message
-                            });
-
-                        notified = sendOk;
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Failed sending WhatsApp notification for order {OrderId}", order.Id);
                         notified = false;
+                        sendOk = false;
+                        notifyReason = "already_notified_for_status";
                     }
+                    else
+                    {
+                        try
+                        {
+                            sendOk = await _whatsAppClient.SendTextMessageAsync(
+                                new OutgoingMessage
+                                {
+                                    To = order.From!,
+                                    PhoneNumberId = order.PhoneNumberId!,
+                                    Body = message
+                                });
+
+                            notified = sendOk;
+
+                            // ✅ Solo si se envió OK, persistimos el guard
+                            if (sendOk)
+                            {
+                                order.LastNotifiedStatus = order.Status;
+                                order.LastNotifiedAtUtc = DateTime.UtcNow;
+
+                                try
+                                {
+                                    await _context.SaveChangesAsync();
+                                }
+                                catch (Exception ex)
+                                {
+                                    // Best-effort: no tumbar el endpoint si falla guardar el guard
+                                    _logger.LogError(ex,
+                                        "WhatsApp sent but failed persisting notification guard for order {OrderId}",
+                                        order.Id);
+                                }
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Failed sending WhatsApp notification for order {OrderId}", order.Id);
+                            notified = false;
+                            sendOk = false;
+                            notifyReason = "send_exception";
+                        }
+                    }
+                }
+                else
+                {
+                    notifyReason = shouldNotify ? "missing_to_or_phoneNumberId" : "shouldNotify_false";
                 }
 
                 return Ok(new
@@ -193,7 +236,10 @@ public sealed class OrdersController : ControllerBase
                     notified,
                     to = order.From,
                     phoneNumberId = order.PhoneNumberId,
-                    sendOk
+                    sendOk,
+                    notifyReason,
+                    lastNotifiedStatus = order.LastNotifiedStatus,
+                    lastNotifiedAtUtc = order.LastNotifiedAtUtc
                 });
             }
             catch (Exception ex) when (IsTransientDb(ex))

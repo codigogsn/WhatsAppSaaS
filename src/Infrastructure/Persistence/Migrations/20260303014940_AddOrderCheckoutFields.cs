@@ -11,12 +11,12 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // ✅ Fix legacy schema in Postgres (columns created earlier as TEXT)
-            // We must CAST using USING, otherwise Postgres refuses the ALTER TYPE.
+            // ✅ Fix legacy schema ONLY in Postgres (columns created earlier as TEXT)
             // IMPORTANT: Drop FK first, then cast, then recreate FK.
-
-            // 1) Drop FK that depends on Orders.Id / OrderItems.OrderId types
-            migrationBuilder.Sql(@"
+            if (ActiveProvider == "Npgsql.EntityFrameworkCore.PostgreSQL")
+            {
+                // 1) Drop FK that depends on Orders.Id / OrderItems.OrderId types
+                migrationBuilder.Sql(@"
 DO $$
 BEGIN
     IF EXISTS (
@@ -29,24 +29,24 @@ BEGIN
 END $$;
 ");
 
-            // 2) Cast PK and FK columns to uuid
-            migrationBuilder.Sql(@"
+                // 2) Cast PK and FK columns to uuid
+                migrationBuilder.Sql(@"
 ALTER TABLE ""Orders""
   ALTER COLUMN ""Id"" TYPE uuid USING ""Id""::uuid;
 ");
 
-            migrationBuilder.Sql(@"
+                migrationBuilder.Sql(@"
 ALTER TABLE ""OrderItems""
   ALTER COLUMN ""Id"" TYPE uuid USING ""Id""::uuid;
 ");
 
-            migrationBuilder.Sql(@"
+                migrationBuilder.Sql(@"
 ALTER TABLE ""OrderItems""
   ALTER COLUMN ""OrderId"" TYPE uuid USING ""OrderId""::uuid;
 ");
 
-            // 3) Cast CreatedAtUtc from TEXT -> timestamptz safely
-            migrationBuilder.Sql(@"
+                // 3) Cast CreatedAtUtc from TEXT -> timestamptz safely
+                migrationBuilder.Sql(@"
 ALTER TABLE ""Orders""
   ALTER COLUMN ""CreatedAtUtc"" TYPE timestamp with time zone
   USING (
@@ -57,13 +57,14 @@ ALTER TABLE ""Orders""
   );
 ");
 
-            // 4) Recreate FK now that types match
-            migrationBuilder.Sql(@"
+                // 4) Recreate FK now that types match
+                migrationBuilder.Sql(@"
 ALTER TABLE ""OrderItems""
   ADD CONSTRAINT ""FK_OrderItems_Orders_OrderId""
   FOREIGN KEY (""OrderId"") REFERENCES ""Orders"" (""Id"")
   ON DELETE CASCADE;
 ");
+            }
 
             // ✅ New checkout fields
             migrationBuilder.AddColumn<string>(
