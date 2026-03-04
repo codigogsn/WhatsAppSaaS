@@ -1,8 +1,3 @@
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Application.DTOs;
 using WhatsAppSaaS.Application.Interfaces;
@@ -21,19 +16,20 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
     public async Task<AnalyticsSummaryDto> GetSummaryAsync(CancellationToken ct = default)
     {
-        var totalOrders = await _db.Orders.CountAsync(ct);
+        var totalOrders = await _db.Orders.AsNoTracking().CountAsync(ct);
 
-        var completedOrders = await _db.Orders
-            .Where(o => o.CheckoutCompleted)
-            .CountAsync(ct);
+        // Definimos "completed" como CheckoutCompleted == true (MVP)
+        var completedOrders = await _db.Orders.AsNoTracking()
+            .CountAsync(o => o.CheckoutCompleted, ct);
 
         var pendingOrders = totalOrders - completedOrders;
 
-        var totalRevenue = await _db.Orders
+        // TotalRevenue: usa TotalAmount si existe; si es null, cuenta 0
+        var totalRevenue = await _db.Orders.AsNoTracking()
             .Where(o => o.CheckoutCompleted)
-            .SumAsync(o => (decimal?)(o.TotalAmount ?? 0m), ct) ?? 0m;
+            .SumAsync(o => o.TotalAmount ?? 0m, ct);
 
-        var totalCustomers = await _db.Customers.CountAsync(ct);
+        var totalCustomers = await _db.Customers.AsNoTracking().CountAsync(ct);
 
         return new AnalyticsSummaryDto
         {
@@ -47,29 +43,50 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
     public async Task<List<TopProductDto>> GetTopProductsAsync(int take = 10, CancellationToken ct = default)
     {
-        take = Math.Clamp(take, 1, 100);
+        if (take <= 0) take = 10;
+        if (take > 100) take = 100;
 
-        var data = await _db.OrderItems
-            .GroupBy(i => i.Name)
-            .Select(g => new TopProductDto
+        // MVP: top-products sale de OrderItems (no dependemos de Products)
+        // IMPORTANT: UnitPrice/LineTotal pueden ser null => coalesce a 0
+        var rows = await _db.OrderItems
+            .AsNoTracking()
+            .Join(
+                _db.Orders.AsNoTracking(),
+                oi => oi.OrderId,
+                o => o.Id,
+                (oi, o) => new { oi, o }
+            )
+            .Where(x => x.o.CheckoutCompleted)
+            .GroupBy(x => x.oi.Name)
+            .Select(g => new
             {
                 Name = g.Key,
-                TotalQuantity = g.Sum(x => x.Quantity),
-                TotalRevenue = g.Sum(x => (x.UnitPrice ?? 0m) * x.Quantity)
+                TotalQuantity = g.Sum(x => (int?)x.oi.Quantity) ?? 0,
+                TotalRevenue = g.Sum(x =>
+                    ((x.oi.UnitPrice ?? 0m) * x.oi.Quantity)
+                )
             })
             .OrderByDescending(x => x.TotalQuantity)
             .ThenByDescending(x => x.TotalRevenue)
             .Take(take)
             .ToListAsync(ct);
 
-        return data;
+        return rows
+            .Select(x => new TopProductDto
+            {
+                Name = x.Name,
+                TotalQuantity = x.TotalQuantity,
+                TotalRevenue = x.TotalRevenue
+            })
+            .ToList();
     }
 
     public async Task<List<CustomerAnalyticsDto>> GetCustomersAsync(int take = 50, CancellationToken ct = default)
     {
-        take = Math.Clamp(take, 1, 200);
+        if (take <= 0) take = 50;
+        if (take > 200) take = 200;
 
-        var data = await _db.Customers
+        var rows = await _db.Customers.AsNoTracking()
             .OrderByDescending(c => c.TotalSpent)
             .ThenByDescending(c => c.OrdersCount)
             .Take(take)
@@ -85,6 +102,6 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             })
             .ToListAsync(ct);
 
-        return data;
+        return rows;
     }
 }
