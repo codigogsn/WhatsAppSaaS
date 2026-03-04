@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Application.DTOs;
 using WhatsAppSaaS.Application.Interfaces;
@@ -16,63 +21,72 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
     public async Task<AnalyticsSummaryDto> GetSummaryAsync(CancellationToken ct)
     {
-        // Orders
-        var totalOrders = await _db.Orders.AsNoTracking().CountAsync(ct);
-        var completedOrders = await _db.Orders.AsNoTracking()
-            .CountAsync(o => o.CheckoutCompleted, ct);
+        // Conteos simples (server-side)
+        var totalOrdersTask = _db.Orders.AsNoTracking().CountAsync(ct);
+        var completedOrdersTask = _db.Orders.AsNoTracking().CountAsync(o => o.CheckoutCompleted, ct);
+        var totalCustomersTask = _db.Customers.AsNoTracking().CountAsync(ct);
 
-        var pendingOrders = totalOrders - completedOrders;
+        await Task.WhenAll(totalOrdersTask, completedOrdersTask, totalCustomersTask);
 
-        // Revenue: usamos Orders.TotalAmount (nullable) y coalesce a 0
-        var totalRevenue = await _db.Orders.AsNoTracking()
-            .SumAsync(o => (decimal?)(o.TotalAmount ?? 0m), ct) ?? 0m;
+        var totalOrders = totalOrdersTask.Result;
+        var completedOrders = completedOrdersTask.Result;
 
-        // Customers
-        var totalCustomers = await _db.Customers.AsNoTracking().CountAsync(ct);
+        // Revenue MVP: sum de TotalAmount (nullable) solo en completadas
+        // OJO: TotalAmount puede ser null => COALESCE a 0m
+        var totalRevenue = await _db.Orders
+            .AsNoTracking()
+            .Where(o => o.CheckoutCompleted)
+            .Select(o => o.TotalAmount ?? 0m)
+            .SumAsync(ct);
 
         return new AnalyticsSummaryDto
         {
             TotalOrders = totalOrders,
             CompletedOrders = completedOrders,
-            PendingOrders = pendingOrders,
+            PendingOrders = Math.Max(0, totalOrders - completedOrders),
             TotalRevenue = totalRevenue,
-            TotalCustomers = totalCustomers
+            TotalCustomers = totalCustomersTask.Result
         };
     }
 
     public async Task<List<TopProductDto>> GetTopProductsAsync(int take, CancellationToken ct)
     {
-        if (take <= 0) take = 10;
+        take = ClampTake(take);
 
-        // IMPORTANTE:
-        // - agregamos por OrderItems.Name (lo que realmente existe hoy)
-        // - UnitPrice es nullable -> (UnitPrice ?? 0)
-        // - Revenue = Sum((UnitPrice ?? 0) * Quantity)
-        // - Todo 100% traducible a SQL en Npgsql
-        var query =
-            _db.OrderItems.AsNoTracking()
-                .Where(i => i.Name != null && i.Name != "")
-                .GroupBy(i => i.Name)
-                .Select(g => new TopProductDto
-                {
-                    Name = g.Key,
-                    TotalQuantity = g.Sum(x => x.Quantity),
-                    TotalRevenue = g.Sum(x => (x.UnitPrice ?? 0m) * x.Quantity)
-                })
-                .OrderByDescending(x => x.TotalRevenue)
-                .ThenByDescending(x => x.TotalQuantity)
-                .Take(take);
+        // ✅ Postgres-safe:
+        // - Agrupamos por Name normalizado
+        // - TotalQuantity = SUM(Quantity)
+        // - TotalRevenue = SUM(Quantity * COALESCE(UnitPrice, 0))
+        // - Todo se calcula server-side
+        var query = _db.OrderItems
+            .AsNoTracking()
+            .Where(oi => oi.Quantity > 0 && oi.Name != null && oi.Name != "")
+            .GroupBy(oi => oi.Name!.Trim().ToLower())
+            .Select(g => new TopProductDto
+            {
+                Name = g.Key,
+                TotalQuantity = g.Sum(x => x.Quantity),
+                TotalRevenue = g.Sum(x => (x.UnitPrice ?? 0m) * (decimal)x.Quantity)
+            })
+            .OrderByDescending(x => x.TotalQuantity)
+            .ThenByDescending(x => x.TotalRevenue)
+            .Take(take);
 
-        return await query.ToListAsync(ct);
+        var result = await query.ToListAsync(ct);
+
+        // Si quieres el nombre "bonito" (sin lower), puedes TitleCase luego,
+        // pero NO lo hago aquí para no romper traducción EF.
+        return result;
     }
 
     public async Task<List<CustomerAnalyticsDto>> GetCustomersAsync(int take, CancellationToken ct)
     {
-        if (take <= 0) take = 50;
+        take = ClampTake(take);
 
-        return await _db.Customers.AsNoTracking()
-            .OrderByDescending(c => c.TotalSpent)
-            .ThenByDescending(c => c.OrdersCount)
+        // Ya te está funcionando, lo dejo simple y seguro
+        return await _db.Customers
+            .AsNoTracking()
+            .OrderByDescending(c => c.LastPurchaseAtUtc ?? c.LastSeenAtUtc ?? c.FirstSeenAtUtc)
             .Take(take)
             .Select(c => new CustomerAnalyticsDto
             {
@@ -81,9 +95,16 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
                 TotalSpent = c.TotalSpent,
                 OrdersCount = c.OrdersCount,
                 FirstSeenAtUtc = c.FirstSeenAtUtc,
-                LastSeenAtUtc = c.LastSeenAtUtc,
-                LastPurchaseAtUtc = c.LastPurchaseAtUtc
+                LastSeenAtUtc = c.LastSeenAtUtc ?? c.FirstSeenAtUtc,
+                LastPurchaseAtUtc = c.LastPurchaseAtUtc ?? c.FirstSeenAtUtc
             })
             .ToListAsync(ct);
+    }
+
+    private static int ClampTake(int take)
+    {
+        if (take <= 0) return 10;
+        if (take > 100) return 100;
+        return take;
     }
 }
