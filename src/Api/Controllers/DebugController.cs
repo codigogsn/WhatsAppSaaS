@@ -1,30 +1,23 @@
 using Microsoft.AspNetCore.Mvc;
-using WhatsAppSaaS.Infrastructure.Persistence;
 
-namespace WhatsAppSaaS.Api.Controllers;
+namespace Api.Controllers;
 
 [ApiController]
 [Route("debug")]
 public class DebugController : ControllerBase
 {
-    [HttpGet("db")]
-    public IActionResult Db([FromServices] AppDbContext db)
+    [HttpGet("version")]
+    public IActionResult Version()
     {
-        var databaseUrl = Environment.GetEnvironmentVariable("DATABASE_URL");
+        // Render / Docker suele exponer RENDER_GIT_COMMIT, si no, mostramos "unknown"
+        var sha = Environment.GetEnvironmentVariable("RENDER_GIT_COMMIT")
+                  ?? Environment.GetEnvironmentVariable("GIT_COMMIT")
+                  ?? "unknown";
 
         return Ok(new
         {
-            env = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
-            databaseUrlPresent = !string.IsNullOrWhiteSpace(databaseUrl),
-            databaseUrlHost = TryGetHost(databaseUrl),
-            provider = db.Database.ProviderName
+            commit = sha,
+            utc = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
         });
     }
-
-    private static string? TryGetHost(string? url)
-    {
-        try { return string.IsNullOrWhiteSpace(url) ? null : new Uri(url).Host; }
-        catch { return "invalid DATABASE_URL"; }
-    }
 }
-
