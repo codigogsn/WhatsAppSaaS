@@ -1,3 +1,5 @@
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using WhatsAppSaaS.Application.Interfaces;
 
@@ -16,13 +18,22 @@ public sealed class AdminAnalyticsController : ControllerBase
 
     [HttpGet("summary")]
     public async Task<IActionResult> Summary(CancellationToken ct)
-        => Ok(await _analytics.GetSummaryAsync(ct));
+    {
+        var result = await _analytics.GetSummaryAsync(ct);
+        return Ok(result);
+    }
 
     [HttpGet("top-products")]
     public async Task<IActionResult> TopProducts([FromQuery] int take = 10, CancellationToken ct = default)
-        => Ok(await _analytics.GetTopProductsAsync(take, ct));
+    {
+        var result = await _analytics.GetTopProductsAsync(take, ct);
+        return Ok(result);
+    }
 
     [HttpGet("customers")]
     public async Task<IActionResult> Customers([FromQuery] int take = 50, CancellationToken ct = default)
-        => Ok(await _analytics.GetCustomersAsync(take, ct));
+    {
+        var result = await _analytics.GetCustomersAsync(take, ct);
+        return Ok(result);
+    }
 }

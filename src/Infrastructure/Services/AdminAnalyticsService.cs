@@ -1,3 +1,8 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Application.DTOs;
 using WhatsAppSaaS.Application.Interfaces;
@@ -16,70 +21,60 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
     public async Task<AnalyticsSummaryDto> GetSummaryAsync(CancellationToken ct = default)
     {
-        var ordersCount = await _db.Orders.AsNoTracking().CountAsync(ct);
-        var customersCount = await _db.Customers.AsNoTracking().CountAsync(ct);
+        var totalOrders = await _db.Orders.CountAsync(ct);
 
-        // 1) Preferir totals guardados (TotalAmount) si existen
-        var ordersRevenue = await _db.Orders
-            .AsNoTracking()
+        var completedOrders = await _db.Orders
+            .Where(o => o.CheckoutCompleted)
+            .CountAsync(ct);
+
+        var pendingOrders = totalOrders - completedOrders;
+
+        var totalRevenue = await _db.Orders
+            .Where(o => o.CheckoutCompleted)
             .SumAsync(o => (decimal?)(o.TotalAmount ?? 0m), ct) ?? 0m;
 
-        // 2) Fallback: calcular desde items si totals está en 0 (MVP para órdenes viejas)
-        decimal itemsRevenue = 0m;
-        if (ordersRevenue == 0m)
-        {
-            itemsRevenue = await _db.OrderItems
-                .AsNoTracking()
-                .SumAsync(i => (decimal?)((i.UnitPrice ?? 0m) * i.Quantity), ct) ?? 0m;
-        }
-
-        var totalRevenue = ordersRevenue > 0m ? ordersRevenue : itemsRevenue;
-        var avgOrderValue = ordersCount > 0 ? totalRevenue / ordersCount : 0m;
+        var totalCustomers = await _db.Customers.CountAsync(ct);
 
         return new AnalyticsSummaryDto
         {
-            OrdersCount = ordersCount,
-            CustomersCount = customersCount,
+            TotalOrders = totalOrders,
+            CompletedOrders = completedOrders,
+            PendingOrders = pendingOrders,
             TotalRevenue = totalRevenue,
-            AvgOrderValue = avgOrderValue
+            TotalCustomers = totalCustomers
         };
     }
 
     public async Task<List<TopProductDto>> GetTopProductsAsync(int take = 10, CancellationToken ct = default)
     {
-        if (take <= 0) take = 10;
-        if (take > 50) take = 50;
+        take = Math.Clamp(take, 1, 100);
 
-        var list = await _db.OrderItems
-            .AsNoTracking()
+        var data = await _db.OrderItems
             .GroupBy(i => i.Name)
             .Select(g => new TopProductDto
             {
                 Name = g.Key,
-                Quantity = g.Sum(x => x.Quantity),
-                Revenue = g.Sum(x => (x.UnitPrice ?? 0m) * x.Quantity)
+                TotalQuantity = g.Sum(x => x.Quantity),
+                TotalRevenue = g.Sum(x => (x.UnitPrice ?? 0m) * x.Quantity)
             })
-            .OrderByDescending(x => x.Quantity)
-            .ThenByDescending(x => x.Revenue)
+            .OrderByDescending(x => x.TotalQuantity)
+            .ThenByDescending(x => x.TotalRevenue)
             .Take(take)
             .ToListAsync(ct);
 
-        return list;
+        return data;
     }
 
     public async Task<List<CustomerAnalyticsDto>> GetCustomersAsync(int take = 50, CancellationToken ct = default)
     {
-        if (take <= 0) take = 50;
-        if (take > 200) take = 200;
+        take = Math.Clamp(take, 1, 200);
 
-        var list = await _db.Customers
-            .AsNoTracking()
+        var data = await _db.Customers
             .OrderByDescending(c => c.TotalSpent)
             .ThenByDescending(c => c.OrdersCount)
             .Take(take)
             .Select(c => new CustomerAnalyticsDto
             {
-                Id = c.Id,
                 PhoneE164 = c.PhoneE164,
                 Name = c.Name,
                 TotalSpent = c.TotalSpent,
@@ -90,6 +85,6 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             })
             .ToListAsync(ct);
 
-        return list;
+        return data;
     }
 }

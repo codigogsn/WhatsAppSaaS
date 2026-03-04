@@ -5,29 +5,31 @@ namespace WhatsAppSaaS.Application.DTOs;
 
 public sealed class AnalyticsSummaryDto
 {
-    public int OrdersCount { get; set; }
-    public int OrdersCompletedCount { get; set; }
-    public int CustomersCount { get; set; }
+    public int TotalOrders { get; set; }
+    public int CompletedOrders { get; set; }
+    public int PendingOrders { get; set; }
 
-    public decimal TotalRevenue { get; set; } // SUM(Orders.TotalAmount)
-    public decimal AvgOrderValue { get; set; } // TotalRevenue / OrdersCount
+    public decimal TotalRevenue { get; set; }
 
-    public DateTime? LastOrderAtUtc { get; set; }
+    public int TotalCustomers { get; set; }
 }
 
 public sealed class TopProductDto
 {
     public string Name { get; set; } = string.Empty;
-    public int QuantitySold { get; set; }
-    public decimal Revenue { get; set; }
+    public int TotalQuantity { get; set; }
+    public decimal TotalRevenue { get; set; }
 }
 
 public sealed class CustomerAnalyticsDto
 {
     public string PhoneE164 { get; set; } = string.Empty;
     public string? Name { get; set; }
+
     public decimal TotalSpent { get; set; }
     public int OrdersCount { get; set; }
+
     public DateTime FirstSeenAtUtc { get; set; }
+    public DateTime? LastSeenAtUtc { get; set; }
     public DateTime? LastPurchaseAtUtc { get; set; }
 }
