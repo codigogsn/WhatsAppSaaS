@@ -9,8 +9,8 @@ public class AppDbContext : DbContext
 
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
-    public DbSet<Product> Products => Set<Product>();
     public DbSet<Customer> Customers => Set<Customer>();
+    public DbSet<Product> Products => Set<Product>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -44,21 +44,26 @@ public class AppDbContext : DbContext
             b.Property(x => x.CheckoutCompleted).IsRequired();
             b.Property(x => x.CheckoutCompletedAtUtc);
 
+            // 🛡️ Anti doble notificación
+            b.Property(x => x.LastNotifiedStatus);
+            b.Property(x => x.LastNotifiedAtUtc);
+
+            // 🧾 Montos
+            b.Property(x => x.SubtotalAmount).HasPrecision(12, 2);
+            b.Property(x => x.TotalAmount).HasPrecision(12, 2);
+
+            // 👤 Customers link
+            b.Property(x => x.CustomerId);
+            b.HasOne(x => x.Customer)
+                .WithMany()
+                .HasForeignKey(x => x.CustomerId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            // Items
             b.HasMany(x => x.Items)
-             .WithOne(i => i.Order)
-             .HasForeignKey(i => i.OrderId);
-
-            // ✅ Montos (shadow props por nombre: NO revienta si no existen en Order.cs)
-            b.Property<decimal?>("SubtotalAmount").HasPrecision(12, 2);
-            b.Property<decimal?>("TotalAmount").HasPrecision(12, 2);
-
-            // ✅ Anti doble notificación (shadow props por nombre)
-            b.Property<string?>("LastNotifiedStatus");
-            b.Property<DateTime?>("LastNotifiedAtUtc");
-
-            // ✅ Multi-tenant futuro (shadow prop)
-            // b.Property<Guid?>("BusinessId");
-            // b.HasIndex("BusinessId", "CreatedAtUtc");
+                .WithOne(i => i.Order)
+                .HasForeignKey(i => i.OrderId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<OrderItem>(b =>
@@ -67,53 +72,32 @@ public class AppDbContext : DbContext
             b.Property(x => x.Name).IsRequired();
             b.Property(x => x.Quantity).IsRequired();
 
-            // ✅ Montos por nombre (shadow props)
-            b.Property<decimal?>("UnitPrice").HasPrecision(12, 2);
-            b.Property<decimal?>("LineTotal").HasPrecision(12, 2);
-
-            // ✅ Multi-tenant futuro (shadow prop)
-            // b.Property<Guid?>("BusinessId");
-            // b.HasIndex("BusinessId");
-        });
-
-        modelBuilder.Entity<Product>(b =>
-        {
-            b.ToTable("Products");
-            b.HasKey(x => x.Id);
-
-            // Deja Name required (esto sí existe seguro)
-            b.Property(x => x.Name).IsRequired();
-
-            // ✅ Campos por nombre (shadow props) para no depender de tu Product.cs actual
-            b.Property<decimal>("UnitPrice").HasPrecision(12, 2);
-            b.Property<bool>("IsActive").HasDefaultValue(true);
-            b.Property<DateTime>("CreatedAtUtc");
-
-            // ✅ Multi-tenant futuro
-            // b.Property<Guid?>("BusinessId");
-            // b.HasIndex("BusinessId", "Name").IsUnique();
+            // precios (nullable/precision para compat)
+            b.Property(x => x.UnitPrice).HasPrecision(12, 2);
+            b.Property(x => x.LineTotal).HasPrecision(12, 2);
         });
 
         modelBuilder.Entity<Customer>(b =>
         {
-            b.ToTable("Customers");
             b.HasKey(x => x.Id);
 
-            // ✅ Por nombre para que compile aunque cambies el modelo luego
-            b.Property<string>("PhoneE164").IsRequired();
-            b.Property<string?>("Name");
+            b.Property(x => x.BusinessId);
 
-            b.Property<decimal>("TotalSpent").HasPrecision(12, 2).HasDefaultValue(0m);
-            b.Property<int>("OrdersCount").HasDefaultValue(0);
+            b.Property(x => x.PhoneE164).IsRequired();
+            b.Property(x => x.Name);
 
-            b.Property<DateTime?>("LastPurchaseAtUtc");
+            b.Property(x => x.TotalSpent).HasPrecision(12, 2);
+            b.Property(x => x.OrdersCount);
 
-            // SQLite + Postgres friendly
-            b.Property<DateTime>("FirstSeenAtUtc").HasDefaultValueSql("CURRENT_TIMESTAMP");
+            b.Property(x => x.FirstSeenAtUtc).IsRequired();
+            b.Property(x => x.LastSeenAtUtc);
+            b.Property(x => x.LastPurchaseAtUtc);
 
-            // ✅ Multi-tenant futuro
-            // b.Property<Guid?>("BusinessId");
-            // b.HasIndex("BusinessId", "PhoneE164").IsUnique();
+            // ✅ Unicidad lógica (multi-tenant ready)
+            b.HasIndex(x => new { x.BusinessId, x.PhoneE164 }).IsUnique();
         });
+
+        // ✅ Product: sin configuración explícita para NO depender de props que cambian.
+        // EF lo mapeará por convención según tu Product actual.
     }
 }

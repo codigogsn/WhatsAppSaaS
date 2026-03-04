@@ -12,7 +12,6 @@ public class Order
     public string PhoneNumberId { get; set; } = default!;
 
     public string DeliveryType { get; set; } = default!;
-
     public string Status { get; set; } = "Pending";
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
@@ -40,14 +39,21 @@ public class Order
     public string? LastNotifiedStatus { get; set; }
     public DateTime? LastNotifiedAtUtc { get; set; }
 
-    // 🆕 Total monetario de la orden (Paso 2)
-    public decimal Total { get; set; }
+    // 🧾 Montos (Paso 2)
+    public decimal? SubtotalAmount { get; set; }
+    public decimal? TotalAmount { get; set; }
+
+    // 👤 Customers (Paso 3)
+    public Guid? CustomerId { get; set; }
+    public Customer? Customer { get; set; }
 
     public List<OrderItem> Items { get; set; } = new();
 
-    // 🧠 Helper para recalcular total (soporta UnitPrice nullable)
-    public void RecalculateTotal()
+    // 🧠 Helper: recalcular montos (null-safe)
+    public void RecalculateAmounts()
     {
-        Total = Items.Sum(i => (i.UnitPrice ?? 0m) * i.Quantity);
+        var subtotal = Items.Sum(i => i.UnitPrice.GetValueOrDefault() * i.Quantity);
+        SubtotalAmount = subtotal;
+        TotalAmount = subtotal; // luego metemos fees/delivery si aplica
     }
 }
