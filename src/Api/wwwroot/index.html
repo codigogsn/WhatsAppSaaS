@@ -16,15 +16,58 @@
     .muted { color:#666; }
     .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eee; }
     .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .card { border:1px solid #eee; border-radius:10px; padding:10px 12px; background:#fff; }
+    .kpi { display:flex; gap:10px; flex-wrap:wrap; }
+    .kpi .card { min-width: 160px; }
+    .danger { color:#b00020; }
+    .ok { color:#0a7a0a; }
+    .key { width: 360px; max-width: 100%; }
+    .small { font-size: 12px; }
   </style>
 </head>
 <body>
   <div class="top">
-    <h2>Pedidos (MVP)</h2>
-    <div class="muted">API: <code id="baseUrl"></code></div>
+    <div>
+      <h2 style="margin:0;">Pedidos (Admin Pro)</h2>
+      <div class="muted small">API: <code id="baseUrl"></code></div>
+    </div>
+
+    <div class="row">
+      <label class="muted small">X-Admin-Key:</label>
+      <input id="adminKey" class="key" placeholder="Pega tu ADMIN_KEY aquí (se guarda en este navegador)" />
+      <button onclick="saveKey()">Guardar</button>
+      <span id="keyMsg" class="muted small"></span>
+    </div>
   </div>
 
-  <div class="row">
+  <div class="kpi" style="margin-top:12px;">
+    <div class="card">
+      <div class="muted small">Cargados</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiTotal">0</div>
+    </div>
+    <div class="card">
+      <div class="muted small">Pending</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiPending">0</div>
+    </div>
+    <div class="card">
+      <div class="muted small">Preparing</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiPreparing">0</div>
+    </div>
+    <div class="card">
+      <div class="muted small">OutForDelivery</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiOut">0</div>
+    </div>
+    <div class="card">
+      <div class="muted small">Completed</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiCompleted">0</div>
+    </div>
+    <div class="card">
+      <div class="muted small">Cancelled</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiCancelled">0</div>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:12px;">
     <label>Status:</label>
     <select id="status">
       <option value="">(Todos)</option>
@@ -35,11 +78,18 @@
       <option>Cancelled</option>
     </select>
 
+    <label>Teléfono contiene:</label>
+    <input id="phone" placeholder="Ej: 0414 o +58414" />
+
     <label>Take:</label>
     <input id="take" type="number" value="50" min="1" max="200" />
 
     <button onclick="load()">Cargar</button>
     <button onclick="load(true)">Auto (5s)</button>
+
+    <button onclick="downloadOrdersCsv()">Descargar Orders CSV</button>
+    <button onclick="downloadCustomersCsv()">Descargar Customers CSV</button>
+
     <span class="muted" id="msg"></span>
   </div>
 
@@ -64,12 +114,46 @@ let timer = null;
 
 function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 
+function getAdminKey(){
+  return localStorage.getItem('ADMIN_KEY') || '';
+}
+
+function saveKey(){
+  const v = document.getElementById('adminKey').value.trim();
+  if (!v) {
+    localStorage.removeItem('ADMIN_KEY');
+    document.getElementById('keyMsg').innerHTML = '<span class="danger">Key borrada</span>';
+    return;
+  }
+  localStorage.setItem('ADMIN_KEY', v);
+  document.getElementById('keyMsg').innerHTML = '<span class="ok">Guardada</span>';
+}
+
+function adminHeaders(){
+  const key = getAdminKey();
+  return key ? { 'X-Admin-Key': key } : {};
+}
+
+function setKpis(list){
+  const c = { Pending:0, Preparing:0, OutForDelivery:0, Completed:0, Cancelled:0 };
+  for (const o of list) c[o.status] = (c[o.status] || 0) + 1;
+
+  document.getElementById('kpiTotal').textContent = list.length;
+  document.getElementById('kpiPending').textContent = c.Pending || 0;
+  document.getElementById('kpiPreparing').textContent = c.Preparing || 0;
+  document.getElementById('kpiOut').textContent = c.OutForDelivery || 0;
+  document.getElementById('kpiCompleted').textContent = c.Completed || 0;
+  document.getElementById('kpiCancelled').textContent = c.Cancelled || 0;
+}
+
 async function load(auto=false) {
   if (timer) { clearInterval(timer); timer = null; }
   if (auto) timer = setInterval(load, 5000);
 
   const status = document.getElementById('status').value;
   const take = document.getElementById('take').value || 50;
+  const phone = (document.getElementById('phone').value || '').trim();
+
   const qs = new URLSearchParams();
   if (status) qs.set('status', status);
   qs.set('take', take);
@@ -82,7 +166,15 @@ async function load(auto=false) {
     return;
   }
 
-  const data = await res.json();
+  let data = await res.json();
+
+  // Filtro por teléfono (front-end)
+  if (phone) {
+    const p = phone.toLowerCase();
+    data = data.filter(o => ((o.customerPhone || '') + '').toLowerCase().includes(p));
+  }
+
+  setKpis(data);
 
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
@@ -134,7 +226,7 @@ async function updateStatus(btn) {
   try {
     const res = await fetch(`/api/orders/${id}/status`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' }, // (aún no está protegido)
       body: JSON.stringify({ status })
     });
 
@@ -150,7 +242,44 @@ async function updateStatus(btn) {
   await load();
 }
 
+async function downloadOrdersCsv(){
+  const res = await fetch('/api/admin/exports/orders.csv?take=5000', { headers: adminHeaders() });
+  if (!res.ok) {
+    const t = await res.text();
+    alert('No se pudo descargar orders.csv: ' + t);
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'orders.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function downloadCustomersCsv(){
+  const res = await fetch('/api/admin/exports/customers.csv?take=5000', { headers: adminHeaders() });
+  if (!res.ok) {
+    const t = await res.text();
+    alert('No se pudo descargar customers.csv: ' + t);
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'customers.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
 document.getElementById('baseUrl').textContent = location.origin;
+document.getElementById('adminKey').value = getAdminKey();
 
 load();
 </script>
