@@ -41,6 +41,25 @@
   </div>
 
   <div class="kpi" style="margin-top:12px;">
+    <!-- KPIs de NEGOCIO (desde /api/admin/analytics/summary) -->
+    <div class="card">
+      <div class="muted small">Pedidos (Total)</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiOrdersTotal">-</div>
+    </div>
+    <div class="card">
+      <div class="muted small">Clientes únicos</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiUniqueCustomers">-</div>
+    </div>
+    <div class="card">
+      <div class="muted small">Ventas totales</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiTotalRevenue">-</div>
+    </div>
+    <div class="card">
+      <div class="muted small">Ticket promedio</div>
+      <div style="font-size:22px; font-weight:700;" id="kpiAvgTicket">-</div>
+    </div>
+
+    <!-- KPIs operativos (por status, sobre la lista cargada en pantalla) -->
     <div class="card">
       <div class="muted small">Cargados</div>
       <div style="font-size:22px; font-weight:700;" id="kpiTotal">0</div>
@@ -134,6 +153,34 @@ function adminHeaders(){
   return key ? { 'X-Admin-Key': key } : {};
 }
 
+// KPIs de negocio (desde /api/admin/analytics/summary)
+async function loadSummary(){
+  const key = getAdminKey();
+  if (!key) {
+    document.getElementById('kpiOrdersTotal').textContent = '-';
+    document.getElementById('kpiUniqueCustomers').textContent = '-';
+    document.getElementById('kpiTotalRevenue').textContent = '-';
+    document.getElementById('kpiAvgTicket').textContent = '-';
+    return;
+  }
+
+  const res = await fetch('/api/admin/analytics/summary?ts=' + Date.now(), { headers: adminHeaders() });
+  if (!res.ok) {
+    document.getElementById('kpiOrdersTotal').textContent = 'err';
+    document.getElementById('kpiUniqueCustomers').textContent = 'err';
+    document.getElementById('kpiTotalRevenue').textContent = 'err';
+    document.getElementById('kpiAvgTicket').textContent = 'err';
+    return;
+  }
+
+  const s = await res.json();
+  document.getElementById('kpiOrdersTotal').textContent = s.orders ?? 0;
+  document.getElementById('kpiUniqueCustomers').textContent = s.uniqueCustomers ?? 0;
+  document.getElementById('kpiTotalRevenue').textContent = (s.totalRevenue ?? 0).toString();
+  document.getElementById('kpiAvgTicket').textContent = (s.avgTicket ?? 0).toString();
+}
+
+// KPIs operativos (sobre la lista cargada)
 function setKpis(list){
   const c = { Pending:0, Preparing:0, OutForDelivery:0, Completed:0, Cancelled:0 };
   for (const o of list) c[o.status] = (c[o.status] || 0) + 1;
@@ -159,6 +206,9 @@ async function load(auto=false) {
   qs.set('take', take);
 
   document.getElementById('msg').textContent = 'Cargando...';
+
+  // KPIs de negocio (requiere key, pero si no hay, no rompe)
+  await loadSummary();
 
   const res = await fetch('/api/orders?' + qs.toString());
   if (!res.ok) {
@@ -226,7 +276,7 @@ async function updateStatus(btn) {
   try {
     const res = await fetch(`/api/orders/${id}/status`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' }, // (aún no está protegido)
+      headers: { 'Content-Type': 'application/json' }, // (este endpoint aún no está protegido)
       body: JSON.stringify({ status })
     });
 
