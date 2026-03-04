@@ -16,84 +16,80 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
     public async Task<AnalyticsSummaryDto> GetSummaryAsync(CancellationToken ct = default)
     {
-        var ordersQuery = _db.Orders.AsNoTracking();
-
-        var ordersCount = await ordersQuery.CountAsync(ct);
-        var completedCount = await ordersQuery.Where(o => o.CheckoutCompleted).CountAsync(ct);
-
+        var ordersCount = await _db.Orders.AsNoTracking().CountAsync(ct);
         var customersCount = await _db.Customers.AsNoTracking().CountAsync(ct);
 
-        var totalRevenue = await ordersQuery
-            .Where(o => o.TotalAmount != null)
-            .SumAsync(o => o.TotalAmount ?? 0m, ct);
+        // 1) Preferir totals guardados (TotalAmount) si existen
+        var ordersRevenue = await _db.Orders
+            .AsNoTracking()
+            .SumAsync(o => (decimal?)(o.TotalAmount ?? 0m), ct) ?? 0m;
 
-        var lastOrderAt = await ordersQuery
-            .OrderByDescending(o => o.CreatedAtUtc)
-            .Select(o => (DateTime?)o.CreatedAtUtc)
-            .FirstOrDefaultAsync(ct);
+        // 2) Fallback: calcular desde items si totals está en 0 (MVP para órdenes viejas)
+        decimal itemsRevenue = 0m;
+        if (ordersRevenue == 0m)
+        {
+            itemsRevenue = await _db.OrderItems
+                .AsNoTracking()
+                .SumAsync(i => (decimal?)((i.UnitPrice ?? 0m) * i.Quantity), ct) ?? 0m;
+        }
 
-        var avg = ordersCount > 0 ? (totalRevenue / ordersCount) : 0m;
+        var totalRevenue = ordersRevenue > 0m ? ordersRevenue : itemsRevenue;
+        var avgOrderValue = ordersCount > 0 ? totalRevenue / ordersCount : 0m;
 
         return new AnalyticsSummaryDto
         {
             OrdersCount = ordersCount,
-            OrdersCompletedCount = completedCount,
             CustomersCount = customersCount,
             TotalRevenue = totalRevenue,
-            AvgOrderValue = avg,
-            LastOrderAtUtc = lastOrderAt
+            AvgOrderValue = avgOrderValue
         };
     }
 
     public async Task<List<TopProductDto>> GetTopProductsAsync(int take = 10, CancellationToken ct = default)
     {
-        take = take <= 0 ? 10 : take;
-        take = take > 50 ? 50 : take;
+        if (take <= 0) take = 10;
+        if (take > 50) take = 50;
 
-        // Top por quantity sold; revenue por LineTotal (si existe) sino UnitPrice*Quantity
-        var items = await _db.OrderItems
+        var list = await _db.OrderItems
             .AsNoTracking()
-            .Select(i => new
-            {
-                i.Name,
-                i.Quantity,
-                Line = (i.LineTotal ?? ((i.UnitPrice ?? 0m) * i.Quantity))
-            })
-            .ToListAsync(ct);
-
-        return items
-            .GroupBy(x => x.Name.Trim().ToLowerInvariant())
+            .GroupBy(i => i.Name)
             .Select(g => new TopProductDto
             {
-                Name = g.First().Name,
-                QuantitySold = g.Sum(x => x.Quantity),
-                Revenue = g.Sum(x => x.Line)
+                Name = g.Key,
+                Quantity = g.Sum(x => x.Quantity),
+                Revenue = g.Sum(x => (x.UnitPrice ?? 0m) * x.Quantity)
             })
-            .OrderByDescending(x => x.QuantitySold)
+            .OrderByDescending(x => x.Quantity)
             .ThenByDescending(x => x.Revenue)
             .Take(take)
-            .ToList();
+            .ToListAsync(ct);
+
+        return list;
     }
 
     public async Task<List<CustomerAnalyticsDto>> GetCustomersAsync(int take = 50, CancellationToken ct = default)
     {
-        take = take <= 0 ? 50 : take;
-        take = take > 200 ? 200 : take;
+        if (take <= 0) take = 50;
+        if (take > 200) take = 200;
 
-        return await _db.Customers
+        var list = await _db.Customers
             .AsNoTracking()
             .OrderByDescending(c => c.TotalSpent)
             .ThenByDescending(c => c.OrdersCount)
             .Take(take)
             .Select(c => new CustomerAnalyticsDto
             {
+                Id = c.Id,
                 PhoneE164 = c.PhoneE164,
                 Name = c.Name,
                 TotalSpent = c.TotalSpent,
                 OrdersCount = c.OrdersCount,
                 FirstSeenAtUtc = c.FirstSeenAtUtc,
+                LastSeenAtUtc = c.LastSeenAtUtc,
                 LastPurchaseAtUtc = c.LastPurchaseAtUtc
             })
             .ToListAsync(ct);
+
+        return list;
     }
 }

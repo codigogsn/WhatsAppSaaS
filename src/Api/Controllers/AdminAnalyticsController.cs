@@ -7,31 +7,22 @@ namespace WhatsAppSaaS.Api.Controllers;
 [Route("api/admin/analytics")]
 public sealed class AdminAnalyticsController : ControllerBase
 {
-    private readonly IAdminAnalyticsService _svc;
+    private readonly IAdminAnalyticsService _analytics;
 
-    public AdminAnalyticsController(IAdminAnalyticsService svc)
+    public AdminAnalyticsController(IAdminAnalyticsService analytics)
     {
-        _svc = svc;
+        _analytics = analytics;
     }
 
     [HttpGet("summary")]
     public async Task<IActionResult> Summary(CancellationToken ct)
-    {
-        var res = await _svc.GetSummaryAsync(ct);
-        return Ok(res);
-    }
+        => Ok(await _analytics.GetSummaryAsync(ct));
 
     [HttpGet("top-products")]
     public async Task<IActionResult> TopProducts([FromQuery] int take = 10, CancellationToken ct = default)
-    {
-        var res = await _svc.GetTopProductsAsync(take, ct);
-        return Ok(res);
-    }
+        => Ok(await _analytics.GetTopProductsAsync(take, ct));
 
     [HttpGet("customers")]
     public async Task<IActionResult> Customers([FromQuery] int take = 50, CancellationToken ct = default)
-    {
-        var res = await _svc.GetCustomersAsync(take, ct);
-        return Ok(res);
-    }
+        => Ok(await _analytics.GetCustomersAsync(take, ct));
 }

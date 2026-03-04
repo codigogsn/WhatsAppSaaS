@@ -1,11 +1,13 @@
+using System;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using WhatsAppSaaS.Application.Common;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Infrastructure.Ai;
-using WhatsAppSaaS.Infrastructure.WhatsApp;
 using WhatsAppSaaS.Infrastructure.Repositories;
+using WhatsAppSaaS.Infrastructure.Services;
+using WhatsAppSaaS.Infrastructure.WhatsApp;
 
 namespace WhatsAppSaaS.Infrastructure.Extensions;
 
@@ -44,9 +46,14 @@ public static class ServiceCollectionExtensions
             client.DefaultRequestHeaders.Add("Accept", "application/json");
         });
 
-        // ── Other infra services ────────────────────────
+        // ── Repos ───────────────────────────────────────
         services.AddScoped<IOrderRepository, OrderRepository>();
+
+        // ── Other infra services ────────────────────────
         services.AddScoped<ISignatureValidator, SignatureValidator>();
+
+        // ── ✅ Admin analytics (Paso 5 DI) ──────────────
+        services.AddScoped<IAdminAnalyticsService, AdminAnalyticsService>();
 
         return services;
     }
