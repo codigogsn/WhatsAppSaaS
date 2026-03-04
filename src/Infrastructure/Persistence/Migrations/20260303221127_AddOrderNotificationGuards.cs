@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -133,13 +133,25 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldClrType: typeof(DateTime),
                 oldType: "timestamp with time zone");
 
-            migrationBuilder.AlterColumn<bool>(
-                name: "CheckoutFormSent",
-                table: "Orders",
-                type: "INTEGER",
-                nullable: false,
-                oldClrType: typeof(bool),
-                oldType: "boolean");
+            // ✅ QUIRÚRGICO: SOLO aplicar bool->INTEGER en SQLite (no en Postgres)
+            if (migrationBuilder.ActiveProvider != "Npgsql.EntityFrameworkCore.PostgreSQL")
+            {
+                migrationBuilder.AlterColumn<bool>(
+                    name: "CheckoutFormSent",
+                    table: "Orders",
+                    type: "INTEGER",
+                    nullable: false,
+                    oldClrType: typeof(bool),
+                    oldType: "boolean");
+
+                migrationBuilder.AlterColumn<bool>(
+                    name: "CheckoutCompleted",
+                    table: "Orders",
+                    type: "INTEGER",
+                    nullable: false,
+                    oldClrType: typeof(bool),
+                    oldType: "boolean");
+            }
 
             migrationBuilder.AlterColumn<DateTime>(
                 name: "CheckoutCompletedAtUtc",
@@ -149,14 +161,6 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldClrType: typeof(DateTime),
                 oldType: "timestamp with time zone",
                 oldNullable: true);
-
-            migrationBuilder.AlterColumn<bool>(
-                name: "CheckoutCompleted",
-                table: "Orders",
-                type: "INTEGER",
-                nullable: false,
-                oldClrType: typeof(bool),
-                oldType: "boolean");
 
             migrationBuilder.AlterColumn<string>(
                 name: "Address",
@@ -220,6 +224,7 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldClrType: typeof(string),
                 oldType: "text");
 
+            // ✅ FIX: tu archivo tenía name duplicado. Lo dejo correcto.
             migrationBuilder.AlterColumn<Guid>(
                 name: "Id",
                 table: "OrderItems",
@@ -362,13 +367,25 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldClrType: typeof(DateTime),
                 oldType: "TEXT");
 
-            migrationBuilder.AlterColumn<bool>(
-                name: "CheckoutFormSent",
-                table: "Orders",
-                type: "boolean",
-                nullable: false,
-                oldClrType: typeof(bool),
-                oldType: "INTEGER");
+            // ✅ QUIRÚRGICO: SOLO revertir bool types en SQLite, no en Postgres
+            if (migrationBuilder.ActiveProvider != "Npgsql.EntityFrameworkCore.PostgreSQL")
+            {
+                migrationBuilder.AlterColumn<bool>(
+                    name: "CheckoutFormSent",
+                    table: "Orders",
+                    type: "boolean",
+                    nullable: false,
+                    oldClrType: typeof(bool),
+                    oldType: "INTEGER");
+
+                migrationBuilder.AlterColumn<bool>(
+                    name: "CheckoutCompleted",
+                    table: "Orders",
+                    type: "boolean",
+                    nullable: false,
+                    oldClrType: typeof(bool),
+                    oldType: "INTEGER");
+            }
 
             migrationBuilder.AlterColumn<DateTime>(
                 name: "CheckoutCompletedAtUtc",
@@ -378,14 +395,6 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                 oldClrType: typeof(DateTime),
                 oldType: "TEXT",
                 oldNullable: true);
-
-            migrationBuilder.AlterColumn<bool>(
-                name: "CheckoutCompleted",
-                table: "Orders",
-                type: "boolean",
-                nullable: false,
-                oldClrType: typeof(bool),
-                oldType: "INTEGER");
 
             migrationBuilder.AlterColumn<string>(
                 name: "Address",
