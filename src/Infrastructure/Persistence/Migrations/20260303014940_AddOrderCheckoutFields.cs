@@ -11,58 +11,74 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // ✅ Fix legacy schema ONLY in Postgres (columns created earlier as TEXT)
-            // IMPORTANT: Drop FK first, then cast, then recreate FK.
+            // ✅ Fix legacy schema ONLY in Postgres (cuando columnas quedaron como TEXT/VARCHAR)
+            // Importante: NO tocamos ni recreamos FK aquí (eso fue lo que explotó en Render).
             if (ActiveProvider == "Npgsql.EntityFrameworkCore.PostgreSQL")
             {
-                // 1) Drop FK that depends on Orders.Id / OrderItems.OrderId types
                 migrationBuilder.Sql(@"
 DO $$
 BEGIN
+    -- Orders.Id -> uuid (solo si hoy está como text/varchar)
     IF EXISTS (
         SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'FK_OrderItems_Orders_OrderId'
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'Orders'
+          AND column_name = 'Id'
+          AND data_type IN ('text', 'character varying')
     ) THEN
-        ALTER TABLE ""OrderItems"" DROP CONSTRAINT ""FK_OrderItems_Orders_OrderId"";
+        ALTER TABLE ""Orders""
+          ALTER COLUMN ""Id"" TYPE uuid USING ""Id""::uuid;
     END IF;
+
+    -- OrderItems.Id -> uuid (solo si hoy está como text/varchar)
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'OrderItems'
+          AND column_name = 'Id'
+          AND data_type IN ('text', 'character varying')
+    ) THEN
+        ALTER TABLE ""OrderItems""
+          ALTER COLUMN ""Id"" TYPE uuid USING ""Id""::uuid;
+    END IF;
+
+    -- OrderItems.OrderId -> uuid (solo si hoy está como text/varchar)
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'OrderItems'
+          AND column_name = 'OrderId'
+          AND data_type IN ('text', 'character varying')
+    ) THEN
+        ALTER TABLE ""OrderItems""
+          ALTER COLUMN ""OrderId"" TYPE uuid USING ""OrderId""::uuid;
+    END IF;
+
+    -- Orders.CreatedAtUtc -> timestamptz (solo si hoy está como text/varchar)
+    IF EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'public'
+          AND table_name = 'Orders'
+          AND column_name = 'CreatedAtUtc'
+          AND data_type IN ('text', 'character varying')
+    ) THEN
+        ALTER TABLE ""Orders""
+          ALTER COLUMN ""CreatedAtUtc"" TYPE timestamp with time zone
+          USING (
+            CASE
+              WHEN ""CreatedAtUtc"" IS NULL OR ""CreatedAtUtc"" = '' THEN NOW()
+              ELSE ""CreatedAtUtc""::timestamp with time zone
+            END
+          );
+    END IF;
+
+EXCEPTION WHEN OTHERS THEN
+    RAISE NOTICE 'Skip legacy schema fix in AddOrderCheckoutFields: %', SQLERRM;
 END $$;
-");
-
-                // 2) Cast PK and FK columns to uuid
-                migrationBuilder.Sql(@"
-ALTER TABLE ""Orders""
-  ALTER COLUMN ""Id"" TYPE uuid USING ""Id""::uuid;
-");
-
-                migrationBuilder.Sql(@"
-ALTER TABLE ""OrderItems""
-  ALTER COLUMN ""Id"" TYPE uuid USING ""Id""::uuid;
-");
-
-                migrationBuilder.Sql(@"
-ALTER TABLE ""OrderItems""
-  ALTER COLUMN ""OrderId"" TYPE uuid USING ""OrderId""::uuid;
-");
-
-                // 3) Cast CreatedAtUtc from TEXT -> timestamptz safely
-                migrationBuilder.Sql(@"
-ALTER TABLE ""Orders""
-  ALTER COLUMN ""CreatedAtUtc"" TYPE timestamp with time zone
-  USING (
-    CASE
-      WHEN ""CreatedAtUtc"" IS NULL OR ""CreatedAtUtc"" = '' THEN NOW()
-      ELSE ""CreatedAtUtc""::timestamp with time zone
-    END
-  );
-");
-
-                // 4) Recreate FK now that types match
-                migrationBuilder.Sql(@"
-ALTER TABLE ""OrderItems""
-  ADD CONSTRAINT ""FK_OrderItems_Orders_OrderId""
-  FOREIGN KEY (""OrderId"") REFERENCES ""Orders"" (""Id"")
-  ON DELETE CASCADE;
 ");
             }
 
@@ -207,7 +223,7 @@ ALTER TABLE ""OrderItems""
                 name: "ReceiverName",
                 table: "Orders");
 
-            // Nota: No revertimos uuid/timestamptz a TEXT en Down.
+            // Nota: no revertimos uuid/timestamptz a TEXT en Down.
         }
     }
 }
