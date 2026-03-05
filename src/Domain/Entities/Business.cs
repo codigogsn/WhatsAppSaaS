@@ -1,0 +1,22 @@
+namespace WhatsAppSaaS.Domain.Entities;
+
+public class Business
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+
+    // Nombre visible del negocio
+    public string Name { get; set; } = "";
+
+    // Meta WhatsApp Cloud API phone_number_id (clave para resolver tenant desde webhook)
+    public string PhoneNumberId { get; set; } = "";
+
+    // Token de acceso (System User permanent token). Más adelante lo ciframos/guardamos mejor.
+    public string AccessToken { get; set; } = "";
+
+    // Admin key por negocio (para dashboard/admin). Esto sustituye el single ADMIN_KEY global.
+    public string AdminKey { get; set; } = "";
+
+    public bool IsActive { get; set; } = true;
+
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}

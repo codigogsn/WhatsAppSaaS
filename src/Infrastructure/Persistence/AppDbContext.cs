@@ -11,6 +11,7 @@ public class AppDbContext : DbContext
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Product> Products => Set<Product>();
+    public DbSet<Business> Businesses => Set<Business>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -99,5 +100,31 @@ public class AppDbContext : DbContext
 
         // ✅ Product: sin configuración explícita para NO depender de props que cambian.
         // EF lo mapeará por convención según tu Product actual.
+
+        modelBuilder.Entity<Business>(b =>
+        {
+            b.HasKey(x => x.Id);
+
+            b.Property(x => x.Name).IsRequired();
+
+            b.Property(x => x.PhoneNumberId)
+                .IsRequired();
+
+            b.Property(x => x.AccessToken)
+                .IsRequired();
+
+            b.Property(x => x.AdminKey)
+                .IsRequired();
+
+            b.Property(x => x.IsActive)
+                .IsRequired();
+
+            b.Property(x => x.CreatedAtUtc)
+                .IsRequired();
+
+            // cada phone_number_id debe ser único
+            b.HasIndex(x => x.PhoneNumberId)
+                .IsUnique();
+        });
     }
 }
