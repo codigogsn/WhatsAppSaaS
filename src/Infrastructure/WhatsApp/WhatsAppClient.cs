@@ -27,27 +27,36 @@ public sealed class WhatsAppClient : IWhatsAppClient
 
     public async Task<bool> SendTextMessageAsync(OutgoingMessage message, CancellationToken cancellationToken = default)
     {
-        // PhoneNumberId: message > env > options
-        var envPhoneNumberId = Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID");
-        var phoneNumberId = !string.IsNullOrWhiteSpace(message.PhoneNumberId)
-            ? message.PhoneNumberId
-            : (!string.IsNullOrWhiteSpace(envPhoneNumberId) ? envPhoneNumberId : _options.PhoneNumberId);
-
-        // AccessToken: env > options
-        var envToken = Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN")
-                      ?? Environment.GetEnvironmentVariable("META_ACCESS_TOKEN");
-
-        var accessToken = !string.IsNullOrWhiteSpace(envToken) ? envToken : _options.AccessToken;
+        var phoneNumberId = message.PhoneNumberId;
 
         if (string.IsNullOrWhiteSpace(phoneNumberId))
         {
-            _logger.LogError("WhatsApp send aborted: missing PhoneNumberId (message/options/env).");
+            phoneNumberId = Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID");
+        }
+        if (string.IsNullOrWhiteSpace(phoneNumberId))
+        {
+            phoneNumberId = _options.PhoneNumberId;
+        }
+
+        if (string.IsNullOrWhiteSpace(phoneNumberId))
+        {
+            _logger.LogError("WhatsApp send aborted: missing PhoneNumberId (message/env/options).");
             return false;
         }
 
+        // Token resolution order: env var > message.AccessToken (per-business) > appsettings
+        var accessToken = Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN")
+                          ?? Environment.GetEnvironmentVariable("META_ACCESS_TOKEN");
+
         if (string.IsNullOrWhiteSpace(accessToken))
+            accessToken = message.AccessToken;
+
+        if (string.IsNullOrWhiteSpace(accessToken))
+            accessToken = _options.AccessToken;
+
+        if (string.IsNullOrWhiteSpace(accessToken) || accessToken == "your-access-token-here")
         {
-            _logger.LogError("WhatsApp send aborted: missing AccessToken. Set WHATSAPP_ACCESS_TOKEN (or META_ACCESS_TOKEN) env var, or configure WhatsAppOptions.AccessToken.");
+            _logger.LogWarning("WhatsApp send skipped: no valid AccessToken configured. Set WHATSAPP_ACCESS_TOKEN env var, or configure per-business token, or configure WhatsApp:AccessToken in appsettings.");
             return false;
         }
 

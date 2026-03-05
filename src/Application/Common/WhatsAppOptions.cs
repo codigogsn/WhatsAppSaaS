@@ -6,13 +6,11 @@ public sealed class WhatsAppOptions
 {
     public const string SectionName = "WhatsApp";
 
-    [Required]
     public string VerifyToken { get; set; } = string.Empty;
 
-    [Required]
+    // Not [Required] — can be provided via env var WHATSAPP_ACCESS_TOKEN or per-Business in DB
     public string AccessToken { get; set; } = string.Empty;
 
-    [Required]
     public string PhoneNumberId { get; set; } = string.Empty;
 
     public string ApiVersion { get; set; } = "v21.0";

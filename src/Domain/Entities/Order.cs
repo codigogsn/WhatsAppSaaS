@@ -8,6 +8,8 @@ public class Order
 {
     public Guid Id { get; set; } = Guid.NewGuid();
 
+    public Guid? BusinessId { get; set; }
+
     public string From { get; set; } = default!;
     public string PhoneNumberId { get; set; } = default!;
 
@@ -44,19 +46,23 @@ public class Order
     public Guid? CustomerId { get; set; }
     public Customer? Customer { get; set; }
 
-    // 🧾 Montos (MVP)
-    // OJO: mantenemos ambos por compat con tu migration AddCustomersAndAmounts
+    // 🧾 Montos
     public decimal? SubtotalAmount { get; set; }
+    public decimal? DeliveryFee { get; set; }
     public decimal? TotalAmount { get; set; }
+
+    // ⏱️ Operational timestamps
+    public DateTime? AcceptedAtUtc { get; set; }
+    public DateTime? PreparingAtUtc { get; set; }
+    public DateTime? DeliveredAtUtc { get; set; }
 
     // Lista de items
     public List<OrderItem> Items { get; set; } = new();
 
-    // 🧠 Helper para recalcular montos (seguro con UnitPrice nullable)
     public void RecalculateTotal()
     {
         var subtotal = Items.Sum(i => (i.UnitPrice ?? 0m) * i.Quantity);
         SubtotalAmount = subtotal;
-        TotalAmount = subtotal; // (si luego agregas delivery fee / tax, aquí se ajusta)
+        TotalAmount = subtotal + (DeliveryFee ?? 0m);
     }
 }

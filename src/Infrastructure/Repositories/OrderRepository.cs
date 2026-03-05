@@ -23,15 +23,15 @@ public sealed class OrderRepository : IOrderRepository
 
         var now = DateTime.UtcNow;
 
-        // Buscar customer existente
+        // Buscar customer existente (scoped to business)
         var customer = await _db.Customers
-            .FirstOrDefaultAsync(c => c.BusinessId == null && c.PhoneE164 == phoneE164, ct);
+            .FirstOrDefaultAsync(c => c.BusinessId == order.BusinessId && c.PhoneE164 == phoneE164, ct);
 
         if (customer == null)
         {
             customer = new Customer
             {
-                BusinessId = null,
+                BusinessId = order.BusinessId,
                 PhoneE164 = phoneE164,
                 Name = string.IsNullOrWhiteSpace(order.CustomerName) ? null : order.CustomerName.Trim(),
                 TotalSpent = 0m,

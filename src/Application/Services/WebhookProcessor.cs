@@ -1,9 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
+using WhatsAppSaaS.Application.Common;
 using WhatsAppSaaS.Application.DTOs;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Domain.Entities;
@@ -15,83 +19,36 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly IAiParser _aiParser;
     private readonly IWhatsAppClient _whatsAppClient;
     private readonly IOrderRepository _orderRepository;
-
-    // In-memory conversation state (MVP). Luego se migra a Redis/DB.
-    private static readonly Dictionary<string, ConversationState> _stateByConversation = new();
-    private static readonly Dictionary<string, HashSet<string>> _processedMessageIdsByConversation = new();
-
-    private static readonly TimeSpan StateTtl = TimeSpan.FromHours(6);
-
-    private sealed class ConversationState
-    {
-        public bool MenuSent { get; set; }
-
-        public List<(string Name, int Quantity)> Items { get; } = new();
-        public string? DeliveryType { get; set; }
-
-        public bool CheckoutFormSent { get; set; }
-
-        // Captura de planilla
-        public string? CustomerName { get; set; }
-        public string? CustomerIdNumber { get; set; }
-        public string? CustomerPhone { get; set; }
-        public string? Address { get; set; }
-        public string? PaymentMethod { get; set; } // "efectivo" | "divisas" | "pago_movil"
-
-        // Ubicación (OBLIGATORIA): pin o texto
-        public bool GpsPinReceived { get; set; }
-        public string? LocationText { get; set; }
-
-        // Evidencia de pago (para humano)
-        public bool PaymentEvidenceRequested { get; set; }
-        public bool PaymentEvidenceReceived { get; set; }
-
-        public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
-
-        public void ResetAfterConfirm()
-        {
-            Items.Clear();
-            DeliveryType = null;
-
-            CheckoutFormSent = false;
-
-            CustomerName = null;
-            CustomerIdNumber = null;
-            CustomerPhone = null;
-            Address = null;
-            PaymentMethod = null;
-
-            GpsPinReceived = false;
-            LocationText = null;
-
-            PaymentEvidenceRequested = false;
-            PaymentEvidenceReceived = false;
-
-            // MenuSent se queda true para no spamear menú en el mismo hilo
-        }
-    }
+    private readonly IConversationStateStore _stateStore;
+    private readonly ILogger<WebhookProcessor> _logger;
 
     public WebhookProcessor(
         IAiParser aiParser,
         IWhatsAppClient whatsAppClient,
-        IOrderRepository orderRepository)
+        IOrderRepository orderRepository,
+        IConversationStateStore stateStore,
+        ILogger<WebhookProcessor> logger)
     {
         _aiParser = aiParser;
         _whatsAppClient = whatsAppClient;
         _orderRepository = orderRepository;
+        _stateStore = stateStore;
+        _logger = logger;
     }
 
-    public async Task ProcessAsync(WebhookPayload payload, CancellationToken cancellationToken = default)
+    private const int MaxMessageLength = 4096;
+
+    public async Task ProcessAsync(WebhookPayload payload, BusinessContext businessContext, CancellationToken cancellationToken = default)
     {
         if (payload?.Entry is null) return;
 
-        PurgeOldState();
-
         foreach (var entry in payload.Entry)
         {
-            foreach (var change in entry.Changes ?? [])
+            if (entry?.Changes is null) continue;
+
+            foreach (var change in entry.Changes)
             {
-                var value = change.Value;
+                var value = change?.Value;
                 if (value?.Messages is null) continue;
 
                 var phoneNumberId = value.Metadata?.PhoneNumberId;
@@ -99,62 +56,72 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                 foreach (var message in value.Messages)
                 {
+                    if (message is null) continue;
                     if (string.IsNullOrWhiteSpace(message.From)) continue;
+                    if (string.IsNullOrWhiteSpace(message.Type)) continue;
+
+                    // Truncate extremely long text messages
+                    if (message.Text?.Body != null && message.Text.Body.Length > MaxMessageLength)
+                        message.Text.Body = message.Text.Body[..MaxMessageLength];
 
                     var conversationId = $"{message.From}:{phoneNumberId}";
 
-                    if (!_stateByConversation.TryGetValue(conversationId, out var state))
+                    _logger.LogInformation(
+                        "Processing message: id={MessageId} from={From} type={Type} conversationId={ConversationId}",
+                        message.Id, message.From, message.Type, conversationId);
+
+                    try
                     {
-                        state = new ConversationState();
-                        _stateByConversation[conversationId] = state;
-                    }
+                    // Ensure conversation row exists before idempotency check (FK dependency)
+                    var state = await _stateStore.GetOrCreateAsync(conversationId, businessContext.BusinessId, cancellationToken);
 
-                    state.UpdatedAtUtc = DateTime.UtcNow;
-
+                    // Idempotency check
                     var msgId = message.Id;
                     if (!string.IsNullOrWhiteSpace(msgId))
                     {
-                        if (IsDuplicateMessage(conversationId, msgId))
+                        if (await _stateStore.IsMessageProcessedAsync(conversationId, msgId, cancellationToken))
                             continue;
+
+                        await _stateStore.MarkMessageProcessedAsync(conversationId, msgId, cancellationToken);
                     }
 
-                    // 1) Location pin (GPS) obligatorio: si llega pin, marcamos recibido
+                    // 1) Location pin (GPS)
                     if (message.Type == "location")
                     {
                         state.GpsPinReceived = true;
 
                         if (state.Items.Count > 0 && state.CheckoutFormSent)
                         {
-                            await _whatsAppClient.SendTextMessageAsync(
-                                new OutgoingMessage
-                                {
-                                    To = message.From,
-                                    Body = "Recibido ✅ Escribe *CONFIRMAR* para finalizar.",
-                                    PhoneNumberId = phoneNumberId
-                                },
-                                cancellationToken);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "Recibido. Escribe *CONFIRMAR* para finalizar.",
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
                         }
 
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
 
-                    // 2) Media: si estamos esperando evidencia de pago, marcar recibido (MVP)
+                    // 2) Media: payment evidence
                     if (message.Type != "text")
                     {
                         if (state.PaymentEvidenceRequested && !state.PaymentEvidenceReceived)
                         {
                             state.PaymentEvidenceReceived = true;
 
-                            await _whatsAppClient.SendTextMessageAsync(
-                                new OutgoingMessage
-                                {
-                                    To = message.From,
-                                    Body = "Recibido ✅ Un operador verificará el pago y te confirmamos.",
-                                    PhoneNumberId = phoneNumberId
-                                },
-                                cancellationToken);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "Recibido. Un operador verificara el pago y te confirmamos.",
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
                         }
 
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
 
@@ -166,70 +133,69 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // A) Confirmar
                     if (IsConfirmCommand(t))
                     {
-                        var confirmReply = await FinalizeOrderIfPossibleAsync(state, message.From, phoneNumberId, cancellationToken);
+                        var confirmReply = await FinalizeOrderIfPossibleAsync(state, message.From, phoneNumberId, businessContext.BusinessId, cancellationToken);
 
-                        await _whatsAppClient.SendTextMessageAsync(
-                            new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = confirmReply,
-                                PhoneNumberId = phoneNumberId
-                            },
-                            cancellationToken);
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = confirmReply,
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
 
-                    // B) Enviar menú apenas diga "hola"/"buenas" (dos mensajes: menú y luego “¿Qué deseas ordenar?”)
+                    // B) Greeting -> menu
                     if (!state.MenuSent && IsGreeting(t))
                     {
                         state.MenuSent = true;
 
-                        await _whatsAppClient.SendTextMessageAsync(
-                            new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body =
-@"📋 *MENÚ (DEMO)*
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body =
+@"MENU (DEMO)
 1) Hamburguesa
 2) Coca Cola
 3) Papas
 
-(En producción aquí va foto/PDF del menú del restaurante)",
-                                PhoneNumberId = phoneNumberId
-                            },
-                            cancellationToken);
+(En produccion aqui va foto/PDF del menu del restaurante)",
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
 
-                        await _whatsAppClient.SendTextMessageAsync(
-                            new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = "¿Qué deseas ordenar?",
-                                PhoneNumberId = phoneNumberId
-                            },
-                            cancellationToken);
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = "Que deseas ordenar?",
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
 
-                    // C) Modo edición: "agrega 2 cocacolas" suma items
+                    // C) Manual add: "agrega 2 cocacolas"
                     if (TryParseManualAddItem(rawText, out var addQty, out var addName))
                     {
                         AddOrIncreaseItem(state, addName, addQty);
 
-                        await _whatsAppClient.SendTextMessageAsync(
-                            new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = "Listo ✅ agregado. Escribe *CONFIRMAR* para finalizar.",
-                                PhoneNumberId = phoneNumberId
-                            },
-                            cancellationToken);
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = "Listo, agregado. Escribe *CONFIRMAR* para finalizar.",
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
 
-                    // D) Captura de planilla (texto) aunque tenga emojis
+                    // D) Checkout form capture
                     if (state.CheckoutFormSent && TryParseCheckoutForm(rawText, out var form))
                     {
                         state.CustomerName ??= form.CustomerName;
@@ -241,10 +207,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         if (!string.IsNullOrWhiteSpace(form.LocationText))
                         {
                             state.LocationText ??= form.LocationText;
-                            state.GpsPinReceived = true; // ubicación textual cuenta como ubicación
+                            state.GpsPinReceived = true;
                         }
 
-                        // Si escogió pago movil o divisas, pedir evidencia (MVP)
                         if (state.PaymentMethod is "pago_movil" or "divisas")
                         {
                             if (!state.PaymentEvidenceRequested)
@@ -252,87 +217,144 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 state.PaymentEvidenceRequested = true;
 
                                 var msg = state.PaymentMethod == "pago_movil"
-                                    ? "Para *PAGO MÓVIL*, envía el *comprobante* (foto) ✅"
-                                    : "Para *DIVISAS*, envía una *foto de los billetes* ✅";
+                                    ? "Para *PAGO MOVIL*, envia el *comprobante* (foto)"
+                                    : "Para *DIVISAS*, envia una *foto de los billetes*";
 
-                                await _whatsAppClient.SendTextMessageAsync(
-                                    new OutgoingMessage
-                                    {
-                                        To = message.From,
-                                        Body = msg,
-                                        PhoneNumberId = phoneNumberId
-                                    },
-                                    cancellationToken);
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = msg,
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
                             }
                         }
 
-                        await _whatsAppClient.SendTextMessageAsync(
-                            new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = "Perfecto ✅ Escribe *CONFIRMAR* para finalizar.",
-                                PhoneNumberId = phoneNumberId
-                            },
-                            cancellationToken);
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = "Perfecto. Escribe *CONFIRMAR* para finalizar.",
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
 
-                    // E) IA parse (pedido)
+                    // E0) Quick parse (no AI)
+                    if (TryParseQuickOrder(rawText, out var quickItems, out var quickDelivery))
+                    {
+                        foreach (var (name, qty) in quickItems)
+                            AddOrIncreaseItem(state, name, qty);
+
+                        if (!string.IsNullOrWhiteSpace(quickDelivery))
+                            state.DeliveryType = quickDelivery;
+
+                        var quickReply = BuildOrderReplyFromState(state);
+
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = quickReply,
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
+                    // E1) Deterministic ordering-intent detection (no AI needed)
+                    if (IsOrderingIntent(t))
+                    {
+                        if (!state.MenuSent)
+                        {
+                            state.MenuSent = true;
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body =
+@"MENU (DEMO)
+1) Hamburguesa
+2) Coca Cola
+3) Papas
+
+(En produccion aqui va foto/PDF del menu del restaurante)",
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
+
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = "Que deseas ordenar?",
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
+                    // E) AI parse
+                    _logger.LogInformation(
+                        "No quick-match for message in {ConversationId}, falling through to AI parse. Text={Text}",
+                        conversationId, rawText.Length > 200 ? rawText[..200] : rawText);
                     var parsed = await _aiParser.ParseAsync(rawText, message.From, conversationId, cancellationToken);
 
-                    // Intent efectivo (sin tocar parsed.Intent, porque es init-only)
                     var effectiveIntent = parsed.Intent;
 
-                    // Quitamos reservas por ahora
                     if (effectiveIntent == RestaurantIntent.ReservationCreate)
                         effectiveIntent = RestaurantIntent.General;
 
-                    // Anti-loop: si dice General pero el texto suena a pedido, forzamos OrderCreate
                     if (effectiveIntent == RestaurantIntent.General && LooksLikeOrderIntent(t))
                         effectiveIntent = RestaurantIntent.OrderCreate;
 
-                    var reply = await BuildReplyAsync(effectiveIntent, parsed, rawText, conversationId);
+                    var reply = BuildReply(effectiveIntent, parsed, state);
 
-                    await _whatsAppClient.SendTextMessageAsync(
-                        new OutgoingMessage
-                        {
-                            To = message.From,
-                            Body = reply,
-                            PhoneNumberId = phoneNumberId
-                        },
-                        cancellationToken);
+                    await SendAsync(new OutgoingMessage
+                    {
+                        To = message.From,
+                        Body = reply,
+                        PhoneNumberId = phoneNumberId,
+                        AccessToken = businessContext.AccessToken
+                    }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                    await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex,
+                            "Failed processing message {MessageId} in conversation {ConversationId}",
+                            message.Id, conversationId);
+                    }
                 }
             }
         }
     }
 
-    private Task<string> BuildReplyAsync(
+    private string BuildReply(
         RestaurantIntent intent,
         AiParseResult parsed,
-        string rawText,
-        string conversationId)
+        ConversationFields state)
     {
-        var state = _stateByConversation[conversationId];
-
-        // Si ya está en checkout, no volver a “qué deseas”
         if (state.Items.Count > 0 && state.CheckoutFormSent && intent == RestaurantIntent.General)
         {
-            return Task.FromResult("Sigue llenando la planilla y luego escribe *CONFIRMAR*.");
+            return "Sigue llenando la planilla y luego escribe *CONFIRMAR*.";
         }
 
         return intent switch
         {
-            RestaurantIntent.OrderCreate => BuildOrderReplyAsync(parsed, conversationId),
-            RestaurantIntent.HumanHandoff => Task.FromResult("Te paso con un humano 🙌"),
-            _ => Task.FromResult("¿Qué deseas ordenar?")
+            RestaurantIntent.OrderCreate => BuildOrderReply(parsed, state),
+            RestaurantIntent.HumanHandoff => "Te paso con un humano",
+            _ => "Que deseas ordenar?"
         };
     }
 
-    private Task<string> BuildOrderReplyAsync(AiParseResult parsed, string conversationId)
+    private string BuildOrderReply(AiParseResult parsed, ConversationFields state)
     {
-        var state = _stateByConversation[conversationId];
-
         if (parsed.Args?.Order != null)
         {
             foreach (var item in parsed.Args.Order.Items ?? [])
@@ -345,36 +367,42 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 state.DeliveryType = NormalizeDeliveryType(parsed.Args.Order.DeliveryType);
         }
 
+        return BuildOrderReplyFromState(state);
+    }
+
+    private static string BuildOrderReplyFromState(ConversationFields state)
+    {
         if (state.Items.Count == 0)
-            return Task.FromResult("¿Qué deseas ordenar?");
+            return "Que deseas ordenar?";
 
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
-            return Task.FromResult("¿Es *pick up* o *delivery*?");
+            return "Es *pick up* o *delivery*?";
 
         if (!state.CheckoutFormSent)
         {
             state.CheckoutFormSent = true;
 
-            return Task.FromResult(
-@"Para finalizar envíanos:
+            return
+@"Para finalizar envianos:
 
-👤 *Nombre:*
-🪪 *Cédula:*
-📱 *Teléfono:*
-🏡 *Dirección:*
-💵 *Pago:* EFECTIVO / DIVISAS / PAGO MÓVIL
-📍 *Ubicación GPS:* (manda el pin) ✅ *OBLIGATORIO*
+*Nombre:*
+*Cedula:*
+*Telefono:*
+*Direccion:*
+*Pago:* EFECTIVO / DIVISAS / PAGO MOVIL
+*Ubicacion GPS:* (manda el pin) *OBLIGATORIO*
 
-Luego escribe *CONFIRMAR*.");
+Luego escribe *CONFIRMAR*.";
         }
 
-        return Task.FromResult("Escribe *CONFIRMAR* para finalizar.");
+        return "Escribe *CONFIRMAR* para finalizar.";
     }
 
     private async Task<string> FinalizeOrderIfPossibleAsync(
-        ConversationState state,
+        ConversationFields state,
         string from,
         string phoneNumberId,
+        Guid businessId,
         CancellationToken ct)
     {
         if (state.Items.Count == 0)
@@ -383,31 +411,30 @@ Luego escribe *CONFIRMAR*.");
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
             return "Indica si es *pick up* o *delivery*.";
 
-        // Requeridos
         var missing = new List<string>();
         if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("Nombre");
-        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("Cédula");
-        if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("Teléfono");
-        if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("Dirección");
+        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("Cedula");
+        if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("Telefono");
+        if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("Direccion");
         if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("Pago");
-        if (!state.GpsPinReceived) missing.Add("Ubicación GPS (pin)");
+        if (!state.GpsPinReceived) missing.Add("Ubicacion GPS (pin)");
 
         if (missing.Count > 0)
         {
             return
-$@"Aún falta información para confirmar ✅
+$@"Aun falta informacion para confirmar.
 
-Envíanos al menos:
+Envianos al menos:
 - {string.Join("\n- ", missing)}
 
 Luego escribe *CONFIRMAR*.";
         }
 
-        // ✅ Normalizamos teléfono a E.164 (para Customers)
         var customerPhoneE164 = NormalizeToE164(state.CustomerPhone) ?? NormalizeToE164(from) ?? state.CustomerPhone;
 
         var order = new Order
         {
+            BusinessId = businessId,
             From = from,
             PhoneNumberId = phoneNumberId,
             DeliveryType = state.DeliveryType!,
@@ -428,11 +455,10 @@ Luego escribe *CONFIRMAR*.";
             {
                 Name = i.Name,
                 Quantity = i.Quantity,
-                UnitPrice = 0m // MVP: luego lo conectamos a Products
+                UnitPrice = 0m
             }).ToList()
         };
 
-        // Total MVP (si UnitPrice=0 => total=0; queda estable para analytics)
         order.RecalculateTotal();
 
         await _orderRepository.AddOrderAsync(order, ct);
@@ -442,42 +468,105 @@ Luego escribe *CONFIRMAR*.";
 
         var payText = state.PaymentMethod switch
         {
-            "pago_movil" => "PAGO MÓVIL (pendiente verificación)",
-            "divisas" => "DIVISAS (pendiente verificación)",
+            "pago_movil" => "PAGO MOVIL (pendiente verificacion)",
+            "divisas" => "DIVISAS (pendiente verificacion)",
             _ => "EFECTIVO"
         };
 
         var receipt =
-$@"✅ *PEDIDO CONFIRMADO*
-🧾 Pedido: #{orderNumber}
+$@"*PEDIDO CONFIRMADO*
+Pedido: #{orderNumber}
 
-👤 Nombre: {state.CustomerName}
-🪪 Cédula: {state.CustomerIdNumber}
-📱 Teléfono: {customerPhoneE164}
+Nombre: {state.CustomerName}
+Cedula: {state.CustomerIdNumber}
+Telefono: {customerPhoneE164}
 
-🍽️ Pedido: {itemsText}
-🏡 Dirección: {state.Address}
-💵 Pago: {payText}
+Pedido: {itemsText}
+Direccion: {state.Address}
+Pago: {payText}
 
-Gracias 🙌";
+Gracias!";
 
         state.ResetAfterConfirm();
         return receipt;
     }
 
+    // ──────────────────────────────────────────
+    // Send helper — never silent on failure
+    // ──────────────────────────────────────────
+
+    private async Task SendAsync(OutgoingMessage msg, Guid businessId, string conversationId, CancellationToken ct)
+    {
+        var sent = await _whatsAppClient.SendTextMessageAsync(msg, ct);
+        if (!sent)
+        {
+            _logger.LogError(
+                "SEND FAILED: to={To} phoneNumberId={PhoneNumberId} businessId={BusinessId} conversation={ConversationId} hasToken={HasToken}",
+                msg.To, msg.PhoneNumberId, businessId, conversationId,
+                !string.IsNullOrWhiteSpace(msg.AccessToken));
+        }
+    }
+
+    // ──────────────────────────────────────────
     // Helpers
+    // ──────────────────────────────────────────
 
     private static string Normalize(string input)
         => input.Trim().ToLowerInvariant();
 
+    private static string StripAccents(string input)
+    {
+        var normalized = input.Normalize(NormalizationForm.FormD);
+        var sb = new StringBuilder(normalized.Length);
+        foreach (var c in normalized)
+        {
+            if (CharUnicodeInfo.GetUnicodeCategory(c) != UnicodeCategory.NonSpacingMark)
+                sb.Append(c);
+        }
+        return sb.ToString().Normalize(NormalizationForm.FormC);
+    }
+
     private static bool IsGreeting(string t)
-        => t == "hola" || t == "buenas" || t == "buenos dias" || t == "buen día" || t == "buenas tardes" || t == "buenas noches" || t.StartsWith("hola ");
+    {
+        var s = StripAccents(t);
+
+        // Exact matches
+        if (s is "hola" or "buenas" or "buenos dias" or "buen dia"
+            or "buenas tardes" or "buenas noches" or "hey" or "epa"
+            or "saludos" or "que tal" or "como estas")
+            return true;
+
+        // Starts-with (e.g. "hola buenas", "que tal como estas")
+        if (s.StartsWith("hola ") || s.StartsWith("que tal")
+            || s.StartsWith("como estas") || s.StartsWith("buenas ")
+            || s.StartsWith("buenos ") || s.StartsWith("saludos "))
+            return true;
+
+        return false;
+    }
+
+    private static bool IsOrderingIntent(string t)
+    {
+        var s = StripAccents(t);
+        return s.Contains("quisiera") || s.Contains("hacer un pedido")
+            || s.Contains("quiero pedir") || s.Contains("para llevar")
+            || s.Contains("quiero ordenar") || s.Contains("me gustaria ordenar")
+            || s.Contains("me gustaria pedir");
+    }
 
     private static bool IsConfirmCommand(string t)
         => t == "confirmar" || t == "confirmado" || t == "listo";
 
     private static bool LooksLikeOrderIntent(string t)
-        => t.Contains("pedido") || t.Contains("orden") || t.Contains("comprar") || t.Contains("quiero") || t.Contains("hamburg") || t.Contains("agrega") || t.Contains("agregar");
+        => t.Contains("pedido")
+           || t.Contains("orden")
+           || t.Contains("comprar")
+           || t.Contains("quiero")
+           || t.Contains("hamburg")
+           || t.Contains("coca")
+           || t.Contains("papas")
+           || t.Contains("agrega")
+           || t.Contains("agregar");
 
     private static string? NormalizeDeliveryType(string? input)
     {
@@ -494,17 +583,16 @@ Gracias 🙌";
         return null;
     }
 
-    private static void AddOrIncreaseItem(ConversationState state, string name, int qty)
+    private static void AddOrIncreaseItem(ConversationFields state, string name, int qty)
     {
-        var idx = state.Items.FindIndex(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
-        if (idx >= 0)
+        var existing = state.Items.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        if (existing != null)
         {
-            var current = state.Items[idx];
-            state.Items[idx] = (current.Name, current.Quantity + qty);
+            existing.Quantity += qty;
         }
         else
         {
-            state.Items.Add((name, qty));
+            state.Items.Add(new ConversationItemEntry { Name = name, Quantity = qty });
         }
     }
 
@@ -519,7 +607,10 @@ Gracias 🙌";
         if (!int.TryParse(m.Groups[2].Value, out qty)) return false;
         name = m.Groups[3].Value.Trim();
 
-        return qty > 0 && !string.IsNullOrWhiteSpace(name);
+        if (qty <= 0) return false;
+        if (string.IsNullOrWhiteSpace(name)) return false;
+
+        return true;
     }
 
     private sealed class CheckoutForm
@@ -536,153 +627,127 @@ Gracias 🙌";
     {
         form = new CheckoutForm();
 
-        var text = StripEmojis(rawText);
+        var lines = rawText
+            .Replace("\r\n", "\n")
+            .Replace("\r", "\n")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
-        var lines = text
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Select(l => l.Trim())
-            .ToList();
+        if (lines.Length == 0) return false;
 
-        foreach (var lineRaw in lines)
+        string? GetValue(string key)
         {
-            var line = lineRaw.Trim();
-            var lower = line.ToLowerInvariant();
-
-            if (lower.Contains("nombre"))
+            foreach (var line in lines)
             {
-                var v = AfterSeparator(line);
-                if (!string.IsNullOrWhiteSpace(v)) form.CustomerName ??= v.Trim();
-            }
+                var l = line.Trim();
+                var ln = l.ToLowerInvariant();
 
-            if (lower.Contains("cédula") || lower.Contains("cedula"))
-            {
-                var v = AfterSeparator(line);
-                if (!string.IsNullOrWhiteSpace(v)) form.CustomerIdNumber ??= v.Trim();
-            }
+                if (ln.StartsWith(key))
+                {
+                    var idx = l.IndexOf(':');
+                    if (idx < 0) idx = l.IndexOf('-');
+                    if (idx < 0) idx = l.IndexOf('=');
 
-            if (lower.Contains("teléfono") || lower.Contains("telefono"))
-            {
-                var v = AfterSeparator(line);
-                if (!string.IsNullOrWhiteSpace(v)) form.CustomerPhone ??= v.Trim();
+                    if (idx >= 0 && idx + 1 < l.Length)
+                        return l[(idx + 1)..].Trim();
+                }
             }
-
-            if (lower.Contains("dirección") || lower.Contains("direccion"))
-            {
-                var v = AfterSeparator(line);
-                if (!string.IsNullOrWhiteSpace(v)) form.Address ??= v.Trim();
-            }
-
-            if (lower.Contains("pago"))
-            {
-                var v = AfterSeparator(line);
-                var p = Normalize(v);
-
-                if (p.Contains("pago movil") || p.Contains("pagomovil") || p.Contains("pago_movil"))
-                    form.PaymentMethod ??= "pago_movil";
-                else if (p.Contains("divisa") || p.Contains("dolar") || p.Contains("usd"))
-                    form.PaymentMethod ??= "divisas";
-                else if (p.Contains("efectivo") || p.Contains("cash"))
-                    form.PaymentMethod ??= "efectivo";
-            }
-
-            if (lower.Contains("ubicacion") || lower.Contains("ubicación"))
-            {
-                var v = AfterSeparator(line);
-                if (!string.IsNullOrWhiteSpace(v)) form.LocationText ??= v.Trim();
-            }
+            return null;
         }
 
-        // consideramos planilla si trae >= 2 campos relevantes
-        var score = 0;
-        if (!string.IsNullOrWhiteSpace(form.CustomerName)) score++;
-        if (!string.IsNullOrWhiteSpace(form.CustomerIdNumber)) score++;
-        if (!string.IsNullOrWhiteSpace(form.CustomerPhone)) score++;
-        if (!string.IsNullOrWhiteSpace(form.Address)) score++;
-        if (!string.IsNullOrWhiteSpace(form.PaymentMethod)) score++;
-        if (!string.IsNullOrWhiteSpace(form.LocationText)) score++;
+        form.CustomerName = GetValue("nombre");
+        form.CustomerIdNumber = GetValue("cedula") ?? GetValue("c\u00e9dula");
+        form.CustomerPhone = GetValue("telefono") ?? GetValue("tel\u00e9fono");
+        form.Address = GetValue("direccion") ?? GetValue("direcci\u00f3n");
+        var pay = GetValue("pago");
+        var loc = GetValue("ubicacion") ?? GetValue("ubicaci\u00f3n");
 
-        return score >= 2;
-    }
+        form.LocationText = string.IsNullOrWhiteSpace(loc) ? null : loc;
 
-    private static string AfterSeparator(string line)
-    {
-        var idx = line.IndexOf(':');
-        if (idx >= 0 && idx < line.Length - 1) return line[(idx + 1)..].Trim();
-
-        idx = line.IndexOf('-');
-        if (idx >= 0 && idx < line.Length - 1) return line[(idx + 1)..].Trim();
-
-        return line;
-    }
-
-    private static string StripEmojis(string input)
-    {
-        var filtered = new string(input.Where(c =>
-            char.IsLetterOrDigit(c) ||
-            char.IsWhiteSpace(c) ||
-            c == ':' || c == '-' || c == '/' || c == '.' || c == ',' || c == '_' ||
-            c == '(' || c == ')' || c == '#' || c == '*' || c == '+' || c == '@'
-        ).ToArray());
-
-        return filtered;
-    }
-
-    private static bool IsDuplicateMessage(string conversationId, string messageId)
-    {
-        if (!_processedMessageIdsByConversation.TryGetValue(conversationId, out var set))
+        if (!string.IsNullOrWhiteSpace(pay))
         {
-            set = new HashSet<string>();
-            _processedMessageIdsByConversation[conversationId] = set;
+            var p = pay.Trim().ToLowerInvariant();
+
+            if (p.Contains("pago") && p.Contains("mov"))
+                form.PaymentMethod = "pago_movil";
+            else if (p.Contains("divis") || p.Contains("usd") || p.Contains("dolar"))
+                form.PaymentMethod = "divisas";
+            else if (p.Contains("efect"))
+                form.PaymentMethod = "efectivo";
+            else
+                form.PaymentMethod = p.Replace(" ", "_");
         }
 
-        if (set.Contains(messageId))
-            return true;
+        var filled =
+            (string.IsNullOrWhiteSpace(form.CustomerName) ? 0 : 1)
+            + (string.IsNullOrWhiteSpace(form.CustomerIdNumber) ? 0 : 1)
+            + (string.IsNullOrWhiteSpace(form.CustomerPhone) ? 0 : 1)
+            + (string.IsNullOrWhiteSpace(form.Address) ? 0 : 1)
+            + (string.IsNullOrWhiteSpace(form.PaymentMethod) ? 0 : 1)
+            + (string.IsNullOrWhiteSpace(form.LocationText) ? 0 : 1);
 
-        set.Add(messageId);
-        return false;
+        return filled >= 3;
     }
 
-    private static void PurgeOldState()
+    private static string? NormalizeToE164(string? phone)
     {
-        var now = DateTime.UtcNow;
+        if (string.IsNullOrWhiteSpace(phone)) return null;
 
-        var stale = _stateByConversation
-            .Where(kvp => now - kvp.Value.UpdatedAtUtc > StateTtl)
-            .Select(kvp => kvp.Key)
-            .ToList();
+        var digits = new string(phone.Where(char.IsDigit).ToArray());
+        if (string.IsNullOrWhiteSpace(digits)) return null;
 
-        foreach (var key in stale)
+        if (phone.Trim().StartsWith("+"))
+            return "+" + digits;
+
+        if (digits.StartsWith("58"))
+            return "+" + digits;
+
+        if (digits.Length >= 10 && (digits.StartsWith("0") || digits.StartsWith("4")))
         {
-            _stateByConversation.Remove(key);
-            _processedMessageIdsByConversation.Remove(key);
+            digits = digits.TrimStart('0');
+            return "+58" + digits;
         }
+
+        return "+" + digits;
     }
 
-    // ✅ E.164 normalization (VE-first)
-    private static string? NormalizeToE164(string? input)
+    // Quick parse (no AI)
+    private static bool TryParseQuickOrder(
+        string rawText,
+        out List<(string Name, int Quantity)> items,
+        out string? deliveryType)
     {
-        if (string.IsNullOrWhiteSpace(input)) return null;
+        items = new List<(string, int)>();
+        deliveryType = null;
 
-        var trimmed = input.Trim();
+        var t = rawText.ToLowerInvariant();
 
-        if (trimmed.StartsWith("+"))
+        if (t.Contains("delivery") || t.Contains("domicilio"))
+            deliveryType = "delivery";
+        else if (t.Contains("pick up") || t.Contains("pickup") || t.Contains("recoger"))
+            deliveryType = "pickup";
+
+        var matches = Regex.Matches(
+            t,
+            @"(\d+)\s*(hamburguesas?|coca\s*cola|cocacola|coca|papas|papitas)",
+            RegexOptions.IgnoreCase);
+
+        foreach (Match m in matches)
         {
-            var digits = new string(trimmed.Where(char.IsDigit).ToArray());
-            return digits.Length >= 8 ? $"+{digits}" : null;
+            if (!int.TryParse(m.Groups[1].Value, out var qty)) continue;
+            var key = m.Groups[2].Value.Trim().ToLowerInvariant();
+
+            var name =
+                key.StartsWith("hamburg") ? "Hamburguesa" :
+                key.Contains("coca") ? "Coca Cola" :
+                (key.StartsWith("papa") || key.StartsWith("papit")) ? "Papas" :
+                null;
+
+            if (name is null) continue;
+            if (qty <= 0) continue;
+
+            items.Add((name, qty));
         }
 
-        var onlyDigits = new string(trimmed.Where(char.IsDigit).ToArray());
-        if (onlyDigits.Length < 8) return null;
-
-        // VE local "0414..." -> "+58" + "414..."
-        if (onlyDigits.StartsWith("0") && onlyDigits.Length >= 10)
-            return $"+58{onlyDigits[1..]}";
-
-        // WA often gives "58..."
-        if (onlyDigits.StartsWith("58"))
-            return $"+{onlyDigits}";
-
-        // fallback: assume already intl without '+'
-        return $"+{onlyDigits}";
+        return items.Count > 0;
     }
 }

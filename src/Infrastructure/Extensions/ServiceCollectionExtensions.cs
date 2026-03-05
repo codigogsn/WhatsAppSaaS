@@ -4,6 +4,7 @@ using WhatsAppSaaS.Application.Common;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Infrastructure.Ai;
+using WhatsAppSaaS.Infrastructure.Persistence;
 using WhatsAppSaaS.Infrastructure.Repositories;
 using WhatsAppSaaS.Infrastructure.Services;
 using WhatsAppSaaS.Infrastructure.WhatsApp;
@@ -18,9 +19,7 @@ public static class ServiceCollectionExtensions
     {
         // ── WhatsApp options ────────────────────────────
         services.AddOptions<WhatsAppOptions>()
-            .Bind(configuration.GetSection(WhatsAppOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+            .Bind(configuration.GetSection(WhatsAppOptions.SectionName));
 
         // ── AiParser options ────────────────────────────
         services.AddOptions<AiParserOptions>()
@@ -47,6 +46,7 @@ public static class ServiceCollectionExtensions
 
         // ── Repos / infra services ──────────────────────
         services.AddScoped<IOrderRepository, OrderRepository>();
+        services.AddScoped<IConversationStateStore, ConversationStateStore>();
         services.AddScoped<ISignatureValidator, SignatureValidator>();
 
         // ── Admin Analytics (✅ FIX runtime 500) ─────────

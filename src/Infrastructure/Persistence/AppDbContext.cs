@@ -12,6 +12,8 @@ public class AppDbContext : DbContext
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Product> Products => Set<Product>();
     public DbSet<Business> Businesses => Set<Business>();
+    public DbSet<ConversationState> ConversationStates => Set<ConversationState>();
+    public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -19,6 +21,7 @@ public class AppDbContext : DbContext
         {
             b.HasKey(x => x.Id);
 
+            b.Property(x => x.BusinessId);
             b.Property(x => x.From).IsRequired();
             b.Property(x => x.PhoneNumberId).IsRequired();
             b.Property(x => x.DeliveryType).IsRequired();
@@ -51,7 +54,18 @@ public class AppDbContext : DbContext
 
             // 🧾 Montos
             b.Property(x => x.SubtotalAmount).HasPrecision(12, 2);
+            b.Property(x => x.DeliveryFee).HasPrecision(12, 2);
             b.Property(x => x.TotalAmount).HasPrecision(12, 2);
+
+            // ⏱️ Operational timestamps
+            b.Property(x => x.AcceptedAtUtc);
+            b.Property(x => x.PreparingAtUtc);
+            b.Property(x => x.DeliveredAtUtc);
+
+            // 📊 Analytics indexes
+            b.HasIndex(x => x.BusinessId);
+            b.HasIndex(x => x.CreatedAtUtc);
+            b.HasIndex(x => new { x.BusinessId, x.CheckoutCompleted });
 
             // 👤 Customers link
             b.Property(x => x.CustomerId);
@@ -73,9 +87,10 @@ public class AppDbContext : DbContext
             b.Property(x => x.Name).IsRequired();
             b.Property(x => x.Quantity).IsRequired();
 
-            // precios (nullable/precision para compat)
             b.Property(x => x.UnitPrice).HasPrecision(12, 2);
             b.Property(x => x.LineTotal).HasPrecision(12, 2);
+
+            b.HasIndex(x => x.OrderId);
         });
 
         modelBuilder.Entity<Customer>(b =>
@@ -125,6 +140,30 @@ public class AppDbContext : DbContext
             // cada phone_number_id debe ser único
             b.HasIndex(x => x.PhoneNumberId)
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<ConversationState>(b =>
+        {
+            b.HasKey(x => x.ConversationId);
+            b.Property(x => x.ConversationId).HasMaxLength(256);
+            b.Property(x => x.BusinessId);
+            b.Property(x => x.UpdatedAtUtc).IsRequired();
+            b.Property(x => x.StateJson).IsRequired();
+
+            b.HasMany(x => x.ProcessedMessages)
+                .WithOne(p => p.Conversation)
+                .HasForeignKey(p => p.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ProcessedMessage>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.ConversationId).HasMaxLength(256).IsRequired();
+            b.Property(x => x.MessageId).HasMaxLength(256).IsRequired();
+            b.Property(x => x.CreatedAtUtc).IsRequired();
+
+            b.HasIndex(x => new { x.ConversationId, x.MessageId }).IsUnique();
         });
     }
 }

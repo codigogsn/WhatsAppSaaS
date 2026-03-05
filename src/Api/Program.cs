@@ -1,7 +1,13 @@
+using System;
+using System.IO;
 using System.Text.Json.Serialization;
 using FluentValidation;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Serilog;
 using WhatsAppSaaS.Api.Extensions;
 using WhatsAppSaaS.Application.Validators;
@@ -13,7 +19,7 @@ using WhatsAppSaaS.Infrastructure.Persistence;
 // ──────────────────────────────────────────
 Log.Logger = new LoggerConfiguration()
     .WriteTo.Console()
-    .CreateBootstrapLogger();
+    .CreateLogger();
 
 try
 {
@@ -30,9 +36,8 @@ try
     // ────────────────────────────────────────
     // Serilog
     // ────────────────────────────────────────
-    builder.Host.UseSerilog((context, services, configuration) => configuration
-        .ReadFrom.Configuration(context.Configuration)
-        .ReadFrom.Services(services)
+    builder.Services.AddSerilog(configuration => configuration
+        .ReadFrom.Configuration(builder.Configuration)
         .Enrich.FromLogContext()
         .Enrich.WithProperty("Application", "WhatsAppSaaS")
         .WriteTo.Console()
@@ -58,7 +63,7 @@ try
     // ────────────────────────────────────────
     // DbContext
     // ────────────────────────────────────────
-    builder.Services.AddDbContextPool<AppDbContext>(options =>
+    builder.Services.AddDbContext<AppDbContext>(options =>
     {
         var env = builder.Environment.EnvironmentName;
 
@@ -77,43 +82,66 @@ try
             throw new InvalidOperationException("DATABASE_URL is missing in Production.");
         }
 
-        // ✅ SQLite fijo y consistente
-        options.UseSqlite("Data Source=app.db");
+        // ✅ SQLite ABSOLUTO: SIEMPRE apunta a src/Api/app.db
+        var sqlitePath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "app.db"));
+        options.UseSqlite($"Data Source={sqlitePath}");
     });
 
+    builder.Services.AddScoped<Api.Services.IBusinessResolver, Api.Services.BusinessResolver>();
     builder.Services.AddApplicationServices();
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.AddHealthChecks();
+    builder.Services.AddHostedService<WhatsAppSaaS.Api.Services.ConversationCleanupService>();
 
     var app = builder.Build();
 
     // ────────────────────────────────────────
-    // ✅ AUTO-MIGRATE (solo cuando hay Postgres / Render)
+    // ✅ DEBUG: ver exactamente qué DB está usando el proceso
+    // ────────────────────────────────────────
+    app.MapGet("/debug/db", (IHostEnvironment env, AppDbContext db) =>
+    {
+        var conn = db.Database.GetDbConnection();
+        var expected = Path.GetFullPath(Path.Combine(env.ContentRootPath, "app.db"));
+
+        // Intento extra para SQLite: DataSource (si aplica)
+        string? sqliteDataSource = null;
+        try
+        {
+            // Requiere paquete Microsoft.Data.Sqlite (ya lo tienes porque usas UseSqlite)
+            if (conn is Microsoft.Data.Sqlite.SqliteConnection sqliteConn)
+                sqliteDataSource = sqliteConn.DataSource;
+        }
+        catch { }
+
+        return Results.Ok(new
+        {
+            env = env.EnvironmentName,
+            provider = db.Database.ProviderName,
+            connectionString = conn.ConnectionString,
+            sqliteDataSource,
+            contentRoot = env.ContentRootPath,
+            cwd = Directory.GetCurrentDirectory(),
+            expectedAppDb = expected,
+            expectedAppDbExists = File.Exists(expected)
+        });
+    });
+
+    // ────────────────────────────────────────
+    // ✅ AUTO-MIGRATE (both SQLite and Postgres)
     // ────────────────────────────────────────
     using (var scope = app.Services.CreateScope())
     {
-        var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
-
-        var databaseUrl = cfg["DATABASE_URL"] ?? Environment.GetEnvironmentVariable("DATABASE_URL");
-
-        if (!string.IsNullOrWhiteSpace(databaseUrl))
+        try
         {
-            try
-            {
-                Log.Information("Applying EF migrations (Postgres)...");
-                var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-                db.Database.Migrate();
-                Log.Information("EF migrations applied successfully.");
-            }
-            catch (Exception ex)
-            {
-                Log.Fatal(ex, "Failed applying EF migrations on startup.");
-                throw;
-            }
+            Log.Information("Applying EF migrations...");
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            db.Database.Migrate();
+            Log.Information("EF migrations applied successfully.");
         }
-        else
+        catch (Exception ex)
         {
-            Log.Information("DATABASE_URL not present -> skipping auto-migrate (SQLite dev).");
+            Log.Fatal(ex, "Failed applying EF migrations on startup.");
+            throw;
         }
     }
 
@@ -126,13 +154,7 @@ try
     app.MapControllers();
     app.MapHealthChecks("/health");
 
-    // ✅ EF Tools guard:
-    // Cuando ejecutamos "dotnet ef", NO levantamos el servidor.
-    // EF tools solo necesita construir el host para acceder al DbContext.
-    var isEfTooling = args.Any(a => a.Equals("ef", StringComparison.OrdinalIgnoreCase))
-                      || Environment.GetEnvironmentVariable("DOTNET_EF") == "1";
-
-    if (!isEfTooling)
+    if (!EF.IsDesignTime)
     {
         app.Run();
     }

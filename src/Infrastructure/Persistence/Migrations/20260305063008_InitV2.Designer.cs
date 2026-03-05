@@ -11,14 +11,71 @@ using WhatsAppSaaS.Infrastructure.Persistence;
 namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    [Migration("20260304172258_FixPriceColumnsToNumeric")]
-    partial class FixPriceColumnsToNumeric
+    [Migration("20260305063008_InitV2")]
+    partial class InitV2
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder.HasAnnotation("ProductVersion", "8.0.11");
+
+            modelBuilder.Entity("WhatsAppSaaS.Domain.Entities.Business", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AccessToken")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("AdminKey")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("PhoneNumberId")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PhoneNumberId")
+                        .IsUnique();
+
+                    b.ToTable("Businesses");
+                });
+
+            modelBuilder.Entity("WhatsAppSaaS.Domain.Entities.ConversationState", b =>
+                {
+                    b.Property<string>("ConversationId")
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("BusinessId")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("StateJson")
+                        .IsRequired()
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("ConversationId");
+
+                    b.ToTable("ConversationStates");
+                });
 
             modelBuilder.Entity("WhatsAppSaaS.Domain.Entities.Customer", b =>
                 {
@@ -70,6 +127,9 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                         .HasColumnType("TEXT");
 
                     b.Property<string>("Address")
+                        .HasColumnType("TEXT");
+
+                    b.Property<Guid?>("BusinessId")
                         .HasColumnType("TEXT");
 
                     b.Property<bool>("CheckoutCompleted")
@@ -183,6 +243,33 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                     b.ToTable("OrderItems");
                 });
 
+            modelBuilder.Entity("WhatsAppSaaS.Domain.Entities.ProcessedMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("ConversationId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("MessageId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ConversationId", "MessageId")
+                        .IsUnique();
+
+                    b.ToTable("ProcessedMessages");
+                });
+
             modelBuilder.Entity("WhatsAppSaaS.Domain.Entities.Product", b =>
                 {
                     b.Property<Guid>("Id")
@@ -220,6 +307,22 @@ namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("Order");
+                });
+
+            modelBuilder.Entity("WhatsAppSaaS.Domain.Entities.ProcessedMessage", b =>
+                {
+                    b.HasOne("WhatsAppSaaS.Domain.Entities.ConversationState", "Conversation")
+                        .WithMany("ProcessedMessages")
+                        .HasForeignKey("ConversationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Conversation");
+                });
+
+            modelBuilder.Entity("WhatsAppSaaS.Domain.Entities.ConversationState", b =>
+                {
+                    b.Navigation("ProcessedMessages");
                 });
 
             modelBuilder.Entity("WhatsAppSaaS.Domain.Entities.Order", b =>

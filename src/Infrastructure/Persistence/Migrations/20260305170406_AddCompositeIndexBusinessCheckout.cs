@@ -5,24 +5,22 @@
 namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
 {
     /// <inheritdoc />
-    public partial class AddOrderStatus : Migration
+    public partial class AddCompositeIndexBusinessCheckout : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.AddColumn<string>(
-                name: "Status",
+            migrationBuilder.CreateIndex(
+                name: "IX_Orders_BusinessId_CheckoutCompleted",
                 table: "Orders",
-                type: "text",
-                nullable: false,
-                defaultValue: "Pending");
+                columns: new[] { "BusinessId", "CheckoutCompleted" });
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropColumn(
-                name: "Status",
+            migrationBuilder.DropIndex(
+                name: "IX_Orders_BusinessId_CheckoutCompleted",
                 table: "Orders");
         }
     }
