@@ -29,6 +29,7 @@ public class Order
     public string? PaymentMethod { get; set; }
     public string? ReceiverName { get; set; }
     public string? AdditionalNotes { get; set; }
+    public string? SpecialInstructions { get; set; }
 
     public decimal? LocationLat { get; set; }
     public decimal? LocationLng { get; set; }

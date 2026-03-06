@@ -121,7 +121,8 @@
         <th>Cliente</th>
         <th>Pago</th>
         <th>Pedido</th>
-        <th>Dirección / GPS</th>
+        <th>Obs.</th>
+        <th>Direcci&oacute;n / GPS</th>
         <th>Acción</th>
       </tr>
     </thead>
@@ -245,6 +246,7 @@ async function load(auto=false) {
       </td>
       <td>${esc(o.paymentMethod)}</td>
       <td>${esc(items)}</td>
+      <td class="muted small">${esc(o.specialInstructions)}</td>
       <td>
         ${esc(o.address)}<br/>
         <span class="muted">${esc(gps)}</span>

@@ -39,6 +39,7 @@ public class AppDbContext : DbContext
             b.Property(x => x.PaymentMethod);
             b.Property(x => x.ReceiverName);
             b.Property(x => x.AdditionalNotes);
+            b.Property(x => x.SpecialInstructions);
 
             b.Property(x => x.LocationLat).HasPrecision(9, 6);
             b.Property(x => x.LocationLng).HasPrecision(9, 6);

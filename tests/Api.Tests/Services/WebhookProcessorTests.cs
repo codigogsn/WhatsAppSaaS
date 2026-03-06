@@ -283,6 +283,8 @@ public class WebhookProcessorTests
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
         state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -696,6 +698,8 @@ public class WebhookProcessorTests
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
         state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -984,6 +988,8 @@ public class WebhookProcessorTests
         state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 3 });
         state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 6 });
         state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
         state.CheckoutFormSent = true;
         state.CustomerName = "Juan";
         state.CustomerIdNumber = "12345678";
@@ -1018,5 +1024,331 @@ public class WebhookProcessorTests
         receipt.Should().NotContain("hamburgueAs");
         receipt.Should().NotContain("porfavor");
         receipt.Should().Contain("PEDIDO CONFIRMADO");
+    }
+
+    // ══════════════════════════════════════════════
+    // OBSERVATION / SPECIAL INSTRUCTIONS TESTS
+    // ══════════════════════════════════════════════
+
+    [Fact]
+    public void BuildOrderReply_AfterDeliveryType_ShowsObservationPrompt()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        reply.Should().Contain("observaci\u00f3n especial");
+        reply.Should().Contain("NO");
+        state.ObservationPromptSent.Should().BeTrue();
+    }
+
+    [Fact]
+    public void BuildOrderReply_WithExistingObservation_ShowsDetected()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.SpecialInstructions = "sin cebolla";
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        reply.Should().Contain("sin cebolla");
+        reply.Should().Contain("Observaci\u00f3n detectada");
+    }
+
+    [Fact]
+    public async Task ObservationAnswer_No_ContinuesWithoutObservation()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        string? sentBody = null;
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentBody = msg.Body)
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "no"), _testBusiness);
+
+        state.ObservationAnswered.Should().BeTrue();
+        state.SpecialInstructions.Should().BeNull();
+        // Should show checkout form
+        sentBody.Should().Contain("Nombre");
+        sentBody.Should().Contain("CONFIRMAR");
+    }
+
+    [Fact]
+    public async Task ObservationAnswer_FreeText_StoresObservation()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "1 sin cebolla, 1 con extra queso"), _testBusiness);
+
+        state.ObservationAnswered.Should().BeTrue();
+        state.SpecialInstructions.Should().Be("1 sin cebolla, 1 con extra queso");
+    }
+
+    [Fact]
+    public async Task ObservationAnswer_AppendsToExisting()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.SpecialInstructions = "sin cebolla";
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "extra queso"), _testBusiness);
+
+        state.SpecialInstructions.Should().Be("sin cebolla; extra queso");
+    }
+
+    // ── Embedded observation detection ──
+
+    [Theory]
+    [InlineData("1 hamburguesa sin cebolla", "sin cebolla")]
+    [InlineData("2 hamburguesas con extra queso", "con extra queso")]
+    [InlineData("1 coca cola sin hielo", "sin hielo")]
+    public void ExtractEmbeddedObservation_DetectsModifiers(string input, string expected)
+    {
+        var result = WebhookProcessor.ExtractEmbeddedObservation(input);
+        result.Should().NotBeNull();
+        result.Should().Contain(expected);
+    }
+
+    [Fact]
+    public void ExtractEmbeddedObservation_NoModifier_ReturnsNull()
+    {
+        var result = WebhookProcessor.ExtractEmbeddedObservation("2 hamburguesas delivery");
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task QuickOrder_WithEmbeddedObservation_StoresIt()
+    {
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "1 hamburguesa sin cebolla delivery"), _testBusiness);
+
+        state.Items.Should().HaveCount(1);
+        state.Items.First().Name.Should().Be("Hamburguesa");
+        state.SpecialInstructions.Should().Contain("sin cebolla");
+    }
+
+    // ── Final receipt includes observation ──
+
+    [Fact]
+    public async Task FinalReceipt_IncludesObservationWhenPresent()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.SpecialInstructions = "1 sin cebolla, 1 con extra queso";
+        state.CheckoutFormSent = true;
+        state.CustomerName = "Ana";
+        state.CustomerIdNumber = "12345678";
+        state.CustomerPhone = "04141234567";
+        state.Address = "Calle 2";
+        state.PaymentMethod = "efectivo";
+        state.GpsPinReceived = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var sentBodies = new List<string>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentBodies.Add(msg.Body))
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        var receipt = sentBodies.Last();
+        receipt.Should().Contain("PEDIDO CONFIRMADO");
+        receipt.Should().Contain("Observaci\u00f3n: 1 sin cebolla, 1 con extra queso");
+    }
+
+    [Fact]
+    public async Task FinalReceipt_NoObservationLine_WhenEmpty()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.CheckoutFormSent = true;
+        state.CustomerName = "Ana";
+        state.CustomerIdNumber = "12345678";
+        state.CustomerPhone = "04141234567";
+        state.Address = "Calle 2";
+        state.PaymentMethod = "efectivo";
+        state.GpsPinReceived = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var sentBodies = new List<string>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentBodies.Add(msg.Body))
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        var receipt = sentBodies.Last();
+        receipt.Should().Contain("PEDIDO CONFIRMADO");
+        receipt.Should().NotContain("Observaci\u00f3n");
+    }
+
+    // ── Human handoff ──
+
+    [Theory]
+    [InlineData("humano")]
+    [InlineData("agente")]
+    [InlineData("asesor")]
+    [InlineData("persona")]
+    [InlineData("soporte")]
+    public void IsHumanHandoffRequest_DetectsCorrectly(string input)
+    {
+        WebhookProcessor.IsHumanHandoffRequest(input).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("hola")]
+    [InlineData("confirmar")]
+    [InlineData("2 hamburguesas")]
+    public void IsHumanHandoffRequest_RejectsNonHandoff(string input)
+    {
+        WebhookProcessor.IsHumanHandoffRequest(input).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task HumanHandoff_PreservesOrderContext()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.DeliveryType = "delivery";
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        string? sentBody = null;
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentBody = msg.Body)
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "humano"), _testBusiness);
+
+        state.HumanHandoffRequested.Should().BeTrue();
+        state.Items.Should().HaveCount(1); // order preserved
+        state.Items.First().Quantity.Should().Be(2);
+        sentBody.Should().Contain("humano");
+    }
+
+    // ── No observation variants ──
+
+    [Theory]
+    [InlineData("no")]
+    [InlineData("NO")]
+    [InlineData("no tengo")]
+    [InlineData("ninguna")]
+    [InlineData("sin observaciones")]
+    [InlineData("nada")]
+    public void IsNoObservation_DetectsCorrectly(string input)
+    {
+        WebhookProcessor.IsNoObservation(input.Trim().ToLowerInvariant()).Should().BeTrue();
+    }
+
+    // ── Item modification is NOT confused with observation ──
+
+    [Fact]
+    public async Task ItemModification_NotConfusedWithObservation()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.CheckoutFormSent = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // This should be parsed as an item modification, not an observation
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "agrega 1 coca"), _testBusiness);
+
+        state.Items.Should().HaveCount(2);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
+
+    // ── Restart still works after observation addition ──
+
+    [Fact]
+    public async Task RestartIntent_ClearsObservationState()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.SpecialInstructions = "sin cebolla";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "hola"), _testBusiness);
+
+        state.SpecialInstructions.Should().BeNull();
+        state.ObservationPromptSent.Should().BeFalse();
+        state.ObservationAnswered.Should().BeFalse();
+        state.Items.Should().BeEmpty();
     }
 }

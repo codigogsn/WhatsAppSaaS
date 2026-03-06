@@ -25,6 +25,11 @@ public sealed class ConversationFields
     public bool PaymentEvidenceRequested { get; set; }
     public bool PaymentEvidenceReceived { get; set; }
 
+    public string? SpecialInstructions { get; set; }
+    public bool ObservationPromptSent { get; set; }
+    public bool ObservationAnswered { get; set; }
+    public bool HumanHandoffRequested { get; set; }
+
     public void ResetAfterConfirm()
     {
         MenuSent = false;
@@ -40,6 +45,10 @@ public sealed class ConversationFields
         LocationText = null;
         PaymentEvidenceRequested = false;
         PaymentEvidenceReceived = false;
+        SpecialInstructions = null;
+        ObservationPromptSent = false;
+        ObservationAnswered = false;
+        HumanHandoffRequested = false;
     }
 }
 

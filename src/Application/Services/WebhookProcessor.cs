@@ -133,6 +133,53 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     var rawText = message.Text.Body;
                     var t = Normalize(rawText);
 
+                    // 0) Human handoff request
+                    if (IsHumanHandoffRequest(t))
+                    {
+                        state.HumanHandoffRequested = true;
+
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = "\ud83d\ude4b Perfecto. Te pondremos en contacto con un humano para ayudarte con tu pedido.",
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
+                    // A0) Observation answer capture
+                    if (state.ObservationPromptSent && !state.ObservationAnswered)
+                    {
+                        state.ObservationAnswered = true;
+
+                        if (!IsNoObservation(t))
+                        {
+                            // Append to existing observations
+                            state.SpecialInstructions = string.IsNullOrWhiteSpace(state.SpecialInstructions)
+                                ? rawText.Trim()
+                                : state.SpecialInstructions + "; " + rawText.Trim();
+                        }
+
+                        // Now continue to checkout form
+                        state.CheckoutFormSent = true;
+
+                        var obsReply = "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udeaa *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nLuego escribe *CONFIRMAR*.";
+
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = obsReply,
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
                     // A) Confirmar
                     if (IsConfirmCommand(t))
                     {
@@ -288,13 +335,21 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     }
 
                     // E0) Quick parse (no AI)
-                    if (TryParseQuickOrder(rawText, out var quickItems, out var quickDelivery))
+                    if (TryParseQuickOrder(rawText, out var quickItems, out var quickDelivery, out var quickObs))
                     {
                         foreach (var (name, qty) in quickItems)
                             AddOrIncreaseItem(state, name, qty);
 
                         if (!string.IsNullOrWhiteSpace(quickDelivery))
                             state.DeliveryType = quickDelivery;
+
+                        // Store embedded observation if detected
+                        if (!string.IsNullOrWhiteSpace(quickObs))
+                        {
+                            state.SpecialInstructions = string.IsNullOrWhiteSpace(state.SpecialInstructions)
+                                ? quickObs
+                                : state.SpecialInstructions + "; " + quickObs;
+                        }
 
                         var quickReply = BuildOrderReplyFromState(state);
 
@@ -473,6 +528,19 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
             return "\ud83d\udecd\ufe0f \u00bfEs *pick up* o *delivery*?";
 
+        // Observation prompt — after items+delivery, before checkout form
+        if (!state.ObservationPromptSent)
+        {
+            state.ObservationPromptSent = true;
+
+            if (!string.IsNullOrWhiteSpace(state.SpecialInstructions))
+            {
+                return $"\u270d\ufe0f *Observaci\u00f3n detectada:* {state.SpecialInstructions}\n\nSi quieres agregar otra observaci\u00f3n, escr\u00edbela ahora.\nSi no, responde *NO*.";
+            }
+
+            return "\u270d\ufe0f Si tu pedido tiene una *observaci\u00f3n especial*, escr\u00edbela ahora.\nEjemplo: *sin cebolla*, *extra queso*, *sin hielo*, *aderezo aparte*.\n\nSi no tienes observaciones, responde *NO*.";
+        }
+
         if (!state.CheckoutFormSent)
         {
             state.CheckoutFormSent = true;
@@ -526,6 +594,7 @@ $"A\u00fan falta informaci\u00f3n para confirmar.\n\nEnv\u00edanos al menos:\n- 
             Address = state.Address,
             PaymentMethod = state.PaymentMethod,
             LocationText = state.LocationText,
+            SpecialInstructions = state.SpecialInstructions,
 
             CheckoutCompleted = true,
             CheckoutCompletedAtUtc = DateTime.UtcNow,
@@ -553,8 +622,12 @@ $"A\u00fan falta informaci\u00f3n para confirmar.\n\nEnv\u00edanos al menos:\n- 
             _ => "EFECTIVO"
         };
 
+        var obsLine = !string.IsNullOrWhiteSpace(state.SpecialInstructions)
+            ? $"\n\u270d\ufe0f Observaci\u00f3n: {state.SpecialInstructions}"
+            : "";
+
         var receipt =
-$"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc64 Nombre: {state.CustomerName}\n\ud83e\udeaa C\u00e9dula: {state.CustomerIdNumber}\n\ud83d\udcf1 Tel\u00e9fono: {customerPhoneE164}\n\n\ud83c\udf7d\ufe0f Pedido: {itemsText}\n\ud83c\udfe1 Direcci\u00f3n: {state.Address}\n\ud83d\udcb5 Pago: {payText}\n\nGracias \ud83d\ude4c";
+$"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc64 Nombre: {state.CustomerName}\n\ud83e\udeaa C\u00e9dula: {state.CustomerIdNumber}\n\ud83d\udcf1 Tel\u00e9fono: {customerPhoneE164}\n\n\ud83c\udf7d\ufe0f Pedido: {itemsText}{obsLine}\n\ud83c\udfe1 Direcci\u00f3n: {state.Address}\n\ud83d\udcb5 Pago: {payText}\n\nGracias \ud83d\ude4c";
 
         state.ResetAfterConfirm();
         return receipt;
@@ -651,6 +724,18 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
 
     private static bool IsConfirmCommand(string t)
         => t == "confirmar" || t == "confirmado" || t == "listo";
+
+    internal static bool IsHumanHandoffRequest(string t)
+        => t is "humano" or "agente" or "asesor" or "persona" or "soporte"
+           or "operador" or "asistente";
+
+    internal static bool IsNoObservation(string t)
+    {
+        var s = StripAccents(t);
+        return s is "no" or "no tengo" or "ninguna" or "sin observaciones"
+            or "nada" or "no gracias" or "ninguno" or "na" or "nop"
+            or "no, gracias" or "sin obs";
+    }
 
     private static bool LooksLikeOrderIntent(string t)
         => t.Contains("pedido")
@@ -1008,14 +1093,16 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         return "+" + digits;
     }
 
-    // Quick parse (no AI)
-    private static bool TryParseQuickOrder(
+    // Quick parse (no AI) — also extracts embedded observations like "sin cebolla"
+    internal static bool TryParseQuickOrder(
         string rawText,
         out List<(string Name, int Quantity)> items,
-        out string? deliveryType)
+        out string? deliveryType,
+        out string? embeddedObservation)
     {
         items = new List<(string, int)>();
         deliveryType = null;
+        embeddedObservation = null;
 
         var t = rawText.ToLowerInvariant();
 
@@ -1024,21 +1111,66 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         else if (t.Contains("pick up") || t.Contains("pickup") || t.Contains("recoger"))
             deliveryType = "pickup";
 
-        // Match "N item" patterns, then normalize item name via fuzzy matching
-        var matches = Regex.Matches(t, @"(\d+)\s+([a-záéíóúñü]+(?:\s+[a-záéíóúñü]+)?)", RegexOptions.IgnoreCase);
+        // Match "N word [word]" patterns, try normalizing single word first, then two words
+        var matches = Regex.Matches(t, @"(\d+)\s+([a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc]+)(?:\s+([a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc]+))?", RegexOptions.IgnoreCase);
 
         foreach (Match m in matches)
         {
             if (!int.TryParse(m.Groups[1].Value, out var qty)) continue;
             if (qty <= 0) continue;
 
-            var rawItemName = m.Groups[2].Value.Trim();
-            var name = NormalizeMenuItemName(rawItemName);
+            var word1 = m.Groups[2].Value.Trim();
+            var word2 = m.Groups[3].Success ? m.Groups[3].Value.Trim() : null;
+
+            // Try single word first (e.g. "hamburguesa"), then two words (e.g. "coca cola")
+            var name = NormalizeMenuItemName(word1);
+            if (name is null && word2 != null)
+                name = NormalizeMenuItemName(word1 + " " + word2);
             if (name is null) continue;
 
             items.Add((name, qty));
         }
 
+        // Extract embedded observations: "sin X", "con extra Y", "sin X y sin Y", etc.
+        embeddedObservation = ExtractEmbeddedObservation(rawText);
+
         return items.Count > 0;
+    }
+
+    // Overload for backward compatibility (existing callers that don't need observation)
+    private static bool TryParseQuickOrder(
+        string rawText,
+        out List<(string Name, int Quantity)> items,
+        out string? deliveryType)
+    {
+        return TryParseQuickOrder(rawText, out items, out deliveryType, out _);
+    }
+
+    // Extract modifier phrases like "sin cebolla", "con extra queso", "uno sin tomate y otro con queso"
+    internal static string? ExtractEmbeddedObservation(string rawText)
+    {
+        var observations = new List<string>();
+
+        // Match patterns: "sin X", "con extra X", "con X", "una/uno sin X", "otra/otro con X"
+        var obsMatches = Regex.Matches(rawText,
+            @"(?:un[ao]?\s+|otr[ao]?\s+)?(?:sin\s+[a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc\s]+|con\s+extra\s+[a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc\s]+|con\s+[a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc\s]+)",
+            RegexOptions.IgnoreCase);
+
+        foreach (Match m in obsMatches)
+        {
+            var obs = m.Value.Trim();
+            // Don't capture "con extra" alone or very short fragments
+            if (obs.Length >= 6)
+                observations.Add(obs);
+        }
+
+        if (observations.Count == 0) return null;
+
+        // Clean up: join, collapse spaces, trim trailing conjunctions
+        var result = string.Join(", ", observations);
+        result = Regex.Replace(result, @"\s+", " ").Trim();
+        result = Regex.Replace(result, @"[,\s]+$", "").Trim();
+
+        return string.IsNullOrWhiteSpace(result) ? null : result;
     }
 }
