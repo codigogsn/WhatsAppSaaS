@@ -163,15 +163,72 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // C) Manual add: "agrega 2 cocacolas"
-                    if (TryParseManualAddItem(rawText, out var addQty, out var addName))
+                    // C) Order modification: add/remove/replace items (typo-tolerant)
+                    if (TryParseOrderModification(rawText, out var orderMod))
                     {
-                        AddOrIncreaseItem(state, addName, addQty);
+                        string modReply;
+                        switch (orderMod.Type)
+                        {
+                            case ModificationType.Add:
+                                AddOrIncreaseItem(state, orderMod.ItemName, orderMod.Quantity);
+                                modReply = $"\u2705 Listo, agregu\u00e9 *{orderMod.Quantity} {orderMod.ItemName}* a tu pedido. Escribe *CONFIRMAR* para finalizar.";
+                                break;
+
+                            case ModificationType.Remove:
+                            {
+                                var existing = state.Items.FirstOrDefault(
+                                    x => x.Name.Equals(orderMod.ItemName, StringComparison.OrdinalIgnoreCase));
+                                if (existing != null)
+                                {
+                                    if (orderMod.Quantity >= existing.Quantity)
+                                    {
+                                        state.Items.Remove(existing);
+                                        modReply = $"\u2705 Listo, elimin\u00e9 *{orderMod.ItemName}* del pedido.";
+                                    }
+                                    else
+                                    {
+                                        existing.Quantity -= orderMod.Quantity;
+                                        modReply = $"\u2705 Listo, quit\u00e9 {orderMod.Quantity}. Ahora tienes *{existing.Quantity} {orderMod.ItemName}*. Escribe *CONFIRMAR* para finalizar.";
+                                    }
+                                }
+                                else
+                                {
+                                    modReply = $"No tienes *{orderMod.ItemName}* en el pedido.";
+                                }
+
+                                if (state.Items.Count == 0)
+                                    modReply += "\n\nTu pedido est\u00e1 vac\u00edo. \u00bfQu\u00e9 deseas ordenar?";
+                                else
+                                    modReply += " Escribe *CONFIRMAR* para finalizar.";
+                                break;
+                            }
+
+                            case ModificationType.Replace:
+                            {
+                                var existingR = state.Items.FirstOrDefault(
+                                    x => x.Name.Equals(orderMod.ItemName, StringComparison.OrdinalIgnoreCase));
+                                if (existingR != null)
+                                {
+                                    existingR.Quantity = orderMod.Quantity;
+                                    modReply = $"\u2705 Listo, ahora son *{orderMod.Quantity} {orderMod.ItemName}*. Escribe *CONFIRMAR* para finalizar.";
+                                }
+                                else
+                                {
+                                    AddOrIncreaseItem(state, orderMod.ItemName, orderMod.Quantity);
+                                    modReply = $"\u2705 Agregu\u00e9 *{orderMod.Quantity} {orderMod.ItemName}*. Escribe *CONFIRMAR* para finalizar.";
+                                }
+                                break;
+                            }
+
+                            default:
+                                modReply = "\u2705 Escribe *CONFIRMAR* para finalizar.";
+                                break;
+                        }
 
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = "\u2705 Listo, agregado. Escribe *CONFIRMAR* para finalizar.",
+                            Body = modReply,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -634,21 +691,181 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         }
     }
 
-    private static bool TryParseManualAddItem(string rawText, out int qty, out string name)
+    // ──────────────────────────────────────────
+    // Order modification parser (typo-tolerant)
+    // ──────────────────────────────────────────
+
+    internal enum ModificationType { Add, Remove, Replace }
+
+    internal sealed class OrderModification
     {
-        qty = 0;
-        name = "";
+        public ModificationType Type { get; set; }
+        public int Quantity { get; set; }
+        public string ItemName { get; set; } = "";
+    }
 
-        var m = Regex.Match(rawText.Trim(), @"^(agrega|agregar)\s+(\d+)\s+(.+)$", RegexOptions.IgnoreCase);
-        if (!m.Success) return false;
+    internal static bool TryParseOrderModification(string rawText, out OrderModification mod)
+    {
+        mod = new OrderModification();
+        var t = rawText.Trim();
 
-        if (!int.TryParse(m.Groups[2].Value, out qty)) return false;
-        name = m.Groups[3].Value.Trim();
+        // Pattern 1: verb + qty + item [+ trailing noise]
+        // agrega/agregame/agregar/suma/sumale/pon/ponme 3 hamburguesas mas porfavor
+        var m = Regex.Match(t,
+            @"^(agrega|agregame|agregar|suma|sumale|sumame|pon|ponme|a[nñ]ade|a[nñ]ademe)\s+(\d+)\s+(.+)$",
+            RegexOptions.IgnoreCase);
+        if (m.Success && int.TryParse(m.Groups[2].Value, out var addQty) && addQty > 0)
+        {
+            var rawItem = StripTrailingNoise(m.Groups[3].Value);
+            var resolved = NormalizeMenuItemName(rawItem);
+            if (resolved != null)
+            {
+                mod.Type = ModificationType.Add;
+                mod.Quantity = addQty;
+                mod.ItemName = resolved;
+                return true;
+            }
+        }
 
-        if (qty <= 0) return false;
-        if (string.IsNullOrWhiteSpace(name)) return false;
+        // Pattern 2: qty + item + "más" (e.g. "2 hamburguesas más")
+        m = Regex.Match(t, @"^(\d+)\s+(.+?)\s+m[aá]s\b", RegexOptions.IgnoreCase);
+        if (m.Success && int.TryParse(m.Groups[1].Value, out var moreQty) && moreQty > 0)
+        {
+            var resolved = NormalizeMenuItemName(m.Groups[2].Value.Trim());
+            if (resolved != null)
+            {
+                mod.Type = ModificationType.Add;
+                mod.Quantity = moreQty;
+                mod.ItemName = resolved;
+                return true;
+            }
+        }
 
-        return true;
+        // Pattern 3: remove — quita/quitame/elimina/borra/sin + qty? + item
+        //   Handles "una/un" as quantity 1
+        m = Regex.Match(t,
+            @"^(quita|quitame|quitale|elimina|borra|sin)\s+(?:(?:las?|los?|el|la)\s+)?(?:(\d+|un[ao]?)\s+)?(.+)$",
+            RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var rawItem = StripTrailingNoise(m.Groups[3].Value);
+            var resolved = NormalizeMenuItemName(rawItem);
+            if (resolved != null)
+            {
+                mod.Type = ModificationType.Remove;
+                var qtyStr = m.Groups[2].Value.ToLowerInvariant();
+                mod.Quantity = m.Groups[2].Success && m.Groups[2].Length > 0
+                    ? (int.TryParse(qtyStr, out var remQty) && remQty > 0 ? remQty
+                       : qtyStr is "un" or "una" or "uno" ? 1
+                       : int.MaxValue)
+                    : int.MaxValue; // "sin las papas" = remove all
+                mod.ItemName = resolved;
+                return true;
+            }
+        }
+
+        // Pattern 4: replace — "cambia a N item" / "mejor N item"
+        m = Regex.Match(t,
+            @"^(cambia\s+a|mejor|en\s+vez\s+de\s+.+\s+pon)\s+(\d+)\s+(.+)$",
+            RegexOptions.IgnoreCase);
+        if (m.Success && int.TryParse(m.Groups[2].Value, out var repQty) && repQty > 0)
+        {
+            var rawItem = StripTrailingNoise(m.Groups[3].Value);
+            var resolved = NormalizeMenuItemName(rawItem);
+            if (resolved != null)
+            {
+                mod.Type = ModificationType.Replace;
+                mod.Quantity = repQty;
+                mod.ItemName = resolved;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Strip trailing filler words like "mas", "porfavor", "por favor", "porfa", "plis", "please"
+    private static string StripTrailingNoise(string input)
+    {
+        var result = Regex.Replace(input.Trim(),
+            @"\s+(m[aá]s|porfavor|por\s*favor|porfa|plis|please|gracias|xfa|xfavor)\s*$",
+            "", RegexOptions.IgnoreCase).Trim();
+        // Also strip trailing "mas" at the very end (no space after)
+        result = Regex.Replace(result, @"\s+m[aá]s$", "", RegexOptions.IgnoreCase).Trim();
+        return result;
+    }
+
+    // ──────────────────────────────────────────
+    // Menu item normalization (typo-tolerant)
+    // ──────────────────────────────────────────
+
+    // Known canonical menu items and their fuzzy variants
+    private static readonly (string Canonical, string[] Patterns)[] MenuItems =
+    {
+        ("Hamburguesa", new[] { "hamburguesa", "hamburguesas", "hamburgesa", "hamburgesas",
+            "hamburguea", "hamburgueas", "hamburgues", "hamburguez", "hamburgue",
+            "hamburga", "hamburgs", "hambur" }),
+        ("Coca Cola", new[] { "coca cola", "cocacola", "cocacolas", "coca", "cocas",
+            "coca-cola", "coca colas" }),
+        ("Papas", new[] { "papas", "papa", "papaas", "papitas", "papita", "papaz" }),
+    };
+
+    internal static string? NormalizeMenuItemName(string rawItem)
+    {
+        if (string.IsNullOrWhiteSpace(rawItem)) return null;
+
+        var t = rawItem.Trim().ToLowerInvariant();
+        // Strip plural trailing 's' for matching
+        var tNoS = t.EndsWith("s") ? t[..^1] : t;
+
+        foreach (var (canonical, patterns) in MenuItems)
+        {
+            // Exact pattern match
+            foreach (var p in patterns)
+            {
+                if (t == p || tNoS == p)
+                    return canonical;
+            }
+
+            // Prefix match for short inputs (at least 5 chars to avoid false positives)
+            var canonLower = canonical.ToLowerInvariant();
+            if (t.Length >= 5 && (canonLower.StartsWith(t) || canonLower.StartsWith(tNoS)))
+                return canonical;
+
+            // Levenshtein distance for close typos (threshold: max 2 edits for words >= 5 chars)
+            if (t.Length >= 5)
+            {
+                foreach (var p in patterns)
+                {
+                    var dist = LevenshteinDistance(t, p);
+                    if (dist <= 2)
+                        return canonical;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    internal static int LevenshteinDistance(string a, string b)
+    {
+        if (a.Length == 0) return b.Length;
+        if (b.Length == 0) return a.Length;
+
+        var dp = new int[a.Length + 1, b.Length + 1];
+        for (var i = 0; i <= a.Length; i++) dp[i, 0] = i;
+        for (var j = 0; j <= b.Length; j++) dp[0, j] = j;
+
+        for (var i = 1; i <= a.Length; i++)
+        for (var j = 1; j <= b.Length; j++)
+        {
+            var cost = a[i - 1] == b[j - 1] ? 0 : 1;
+            dp[i, j] = Math.Min(
+                Math.Min(dp[i - 1, j] + 1, dp[i, j - 1] + 1),
+                dp[i - 1, j - 1] + cost);
+        }
+
+        return dp[a.Length, b.Length];
     }
 
     internal sealed class CheckoutForm
@@ -807,24 +1024,17 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         else if (t.Contains("pick up") || t.Contains("pickup") || t.Contains("recoger"))
             deliveryType = "pickup";
 
-        var matches = Regex.Matches(
-            t,
-            @"(\d+)\s*(hamburguesas?|coca\s*cola|cocacola|coca|papas|papitas)",
-            RegexOptions.IgnoreCase);
+        // Match "N item" patterns, then normalize item name via fuzzy matching
+        var matches = Regex.Matches(t, @"(\d+)\s+([a-záéíóúñü]+(?:\s+[a-záéíóúñü]+)?)", RegexOptions.IgnoreCase);
 
         foreach (Match m in matches)
         {
             if (!int.TryParse(m.Groups[1].Value, out var qty)) continue;
-            var key = m.Groups[2].Value.Trim().ToLowerInvariant();
-
-            var name =
-                key.StartsWith("hamburg") ? "Hamburguesa" :
-                key.Contains("coca") ? "Coca Cola" :
-                (key.StartsWith("papa") || key.StartsWith("papit")) ? "Papas" :
-                null;
-
-            if (name is null) continue;
             if (qty <= 0) continue;
+
+            var rawItemName = m.Groups[2].Value.Trim();
+            var name = NormalizeMenuItemName(rawItemName);
+            if (name is null) continue;
 
             items.Add((name, qty));
         }

@@ -740,6 +740,8 @@ public class WebhookProcessorTests
         sentMessages[0].Body.Should().Contain("bienvenido");
     }
 
+    private static int _msgCounter;
+
     private static WebhookPayload CreateTextMessagePayload(string from, string body) => new()
     {
         Object = "whatsapp_business_account",
@@ -774,7 +776,7 @@ public class WebhookProcessorTests
                                 new WebhookMessage
                                 {
                                     From = from,
-                                    Id = "wamid.test123",
+                                    Id = $"wamid.test{Interlocked.Increment(ref _msgCounter)}",
                                     Timestamp = "1234567890",
                                     Type = "text",
                                     Text = new WebhookText { Body = body }
@@ -786,4 +788,235 @@ public class WebhookProcessorTests
             }
         ]
     };
+
+    // ══════════════════════════════════════════════
+    // ORDER MODIFICATION TESTS
+    // ══════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("agrega 3 hamburgueAs mas porfavor", "Hamburguesa", 3)]
+    [InlineData("agrega 2 cocas", "Coca Cola", 2)]
+    [InlineData("agregame 1 papa", "Papas", 1)]
+    [InlineData("suma 2 hamburguesas", "Hamburguesa", 2)]
+    [InlineData("pon 4 papas", "Papas", 4)]
+    [InlineData("2 hamburguesas más", "Hamburguesa", 2)]
+    [InlineData("agrega 1 hamburgesa mas porfa", "Hamburguesa", 1)]
+    public void TryParseOrderModification_Add_ParsesCorrectly(string input, string expectedItem, int expectedQty)
+    {
+        var result = WebhookProcessor.TryParseOrderModification(input, out var mod);
+
+        result.Should().BeTrue();
+        mod.Type.Should().Be(WebhookProcessor.ModificationType.Add);
+        mod.ItemName.Should().Be(expectedItem);
+        mod.Quantity.Should().Be(expectedQty);
+    }
+
+    [Theory]
+    [InlineData("quita 1 papa", "Papas", 1)]
+    [InlineData("elimina 2 cocas", "Coca Cola", 2)]
+    [InlineData("sin las papas", "Papas", int.MaxValue)]
+    [InlineData("borra una hamburguesa", "Hamburguesa", 1)]
+    public void TryParseOrderModification_Remove_ParsesCorrectly(string input, string expectedItem, int expectedQty)
+    {
+        var result = WebhookProcessor.TryParseOrderModification(input, out var mod);
+
+        result.Should().BeTrue();
+        mod.Type.Should().Be(WebhookProcessor.ModificationType.Remove);
+        mod.ItemName.Should().Be(expectedItem);
+        mod.Quantity.Should().Be(expectedQty);
+    }
+
+    [Theory]
+    [InlineData("cambia a 3 hamburguesas", "Hamburguesa", 3)]
+    [InlineData("mejor 2 cocas", "Coca Cola", 2)]
+    public void TryParseOrderModification_Replace_ParsesCorrectly(string input, string expectedItem, int expectedQty)
+    {
+        var result = WebhookProcessor.TryParseOrderModification(input, out var mod);
+
+        result.Should().BeTrue();
+        mod.Type.Should().Be(WebhookProcessor.ModificationType.Replace);
+        mod.ItemName.Should().Be(expectedItem);
+        mod.Quantity.Should().Be(expectedQty);
+    }
+
+    // ── Typo tolerance ──
+
+    [Theory]
+    [InlineData("hamburgueas", "Hamburguesa")]
+    [InlineData("hamburgesa", "Hamburguesa")]
+    [InlineData("hamburgesas", "Hamburguesa")]
+    [InlineData("hamburguesas", "Hamburguesa")]
+    [InlineData("cocacolas", "Coca Cola")]
+    [InlineData("cocas", "Coca Cola")]
+    [InlineData("coca cola", "Coca Cola")]
+    [InlineData("papaas", "Papas")]
+    [InlineData("papas", "Papas")]
+    [InlineData("papa", "Papas")]
+    [InlineData("papitas", "Papas")]
+    public void NormalizeMenuItemName_ResolvesTypos(string input, string expected)
+    {
+        var result = WebhookProcessor.NormalizeMenuItemName(input);
+        result.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("hola")]
+    [InlineData("confirmar")]
+    [InlineData("xyz")]
+    [InlineData("direccion")]
+    public void NormalizeMenuItemName_RejectsNonMenuItems(string input)
+    {
+        var result = WebhookProcessor.NormalizeMenuItemName(input);
+        result.Should().BeNull();
+    }
+
+    // ── Integration: modification updates structured state, not raw text ──
+
+    [Fact]
+    public async Task OrderModification_AddWithTypo_UpdatesStructuredItems()
+    {
+        // Arrange: existing order with 2 hamburguesas
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 3 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 6 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var payload = CreateTextMessagePayload("5511999999999","agrega 3 hamburgueAs mas porfavor");
+
+        // Act
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        // Assert: Hamburguesa quantity should be 5 (2 + 3)
+        state.Items.Should().HaveCount(3);
+        state.Items.First(i => i.Name == "Hamburguesa").Quantity.Should().Be(5);
+        state.Items.First(i => i.Name == "Coca Cola").Quantity.Should().Be(3);
+        state.Items.First(i => i.Name == "Papas").Quantity.Should().Be(6);
+
+        // Assert: no raw text item was added
+        state.Items.Should().NotContain(i => i.Name.Contains("hamburgueAs"));
+        state.Items.Should().NotContain(i => i.Name.Contains("porfavor"));
+    }
+
+    [Fact]
+    public async Task OrderModification_Add_ResponseMentionsCleanItemName()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        string? sentBody = null;
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentBody = msg.Body)
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999","agrega 3 hamburgueas mas porfavor"), _testBusiness);
+
+        sentBody.Should().NotBeNull();
+        sentBody.Should().Contain("3 Hamburguesa");
+        sentBody.Should().Contain("CONFIRMAR");
+        sentBody.Should().NotContain("hamburgueAs");
+        sentBody.Should().NotContain("porfavor");
+    }
+
+    [Fact]
+    public async Task OrderModification_Remove_DecreasesQuantity()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 6 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999","quita 2 papas"), _testBusiness);
+
+        state.Items.Should().HaveCount(1);
+        state.Items.First().Quantity.Should().Be(4);
+    }
+
+    [Fact]
+    public async Task OrderModification_RemoveAll_RemovesItem()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 6 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999","sin las papas"), _testBusiness);
+
+        state.Items.Should().HaveCount(1);
+        state.Items.First().Name.Should().Be("Hamburguesa");
+    }
+
+    [Fact]
+    public async Task OrderModification_Replace_SetsExactQuantity()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999","cambia a 5 hamburguesas"), _testBusiness);
+
+        state.Items.Should().HaveCount(1);
+        state.Items.First().Quantity.Should().Be(5);
+    }
+
+    [Fact]
+    public async Task ReceiptAfterModification_ShowsCleanItems()
+    {
+        // Setup: order with items, checkout form completed, then modification, then confirm
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 3 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 6 });
+        state.DeliveryType = "delivery";
+        state.CheckoutFormSent = true;
+        state.CustomerName = "Juan";
+        state.CustomerIdNumber = "12345678";
+        state.CustomerPhone = "04141234567";
+        state.Address = "Calle 1";
+        state.PaymentMethod = "efectivo";
+        state.GpsPinReceived = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var sentBodies = new List<string>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentBodies.Add(msg.Body))
+            .ReturnsAsync(true);
+
+        // Step 1: Modify the order
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999","agrega 3 hamburgueas mas porfavor"), _testBusiness);
+        state.Items.First(i => i.Name == "Hamburguesa").Quantity.Should().Be(5);
+
+        // Step 2: Confirm
+        sentBodies.Clear();
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999","confirmar"), _testBusiness);
+
+        // The receipt should contain clean item names only
+        var receipt = sentBodies.LastOrDefault() ?? "";
+        receipt.Should().Contain("5 Hamburguesa");
+        receipt.Should().Contain("3 Coca Cola");
+        receipt.Should().Contain("6 Papas");
+        receipt.Should().NotContain("hamburgueAs");
+        receipt.Should().NotContain("porfavor");
+        receipt.Should().Contain("PEDIDO CONFIRMADO");
+    }
 }
