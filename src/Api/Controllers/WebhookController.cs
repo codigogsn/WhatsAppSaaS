@@ -143,7 +143,17 @@ public class WebhookController : ControllerBase
         if (string.IsNullOrWhiteSpace(phoneNumberId))
             return Ok();
 
-        var businessContext = await _businessResolver.ResolveByPhoneNumberIdAsync(phoneNumberId, ct);
+        BusinessContext? businessContext;
+        try
+        {
+            businessContext = await _businessResolver.ResolveByPhoneNumberIdAsync(phoneNumberId, ct);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "WEBHOOK ERROR: business lookup failed for phone_number_id={PhoneNumberId}", phoneNumberId);
+            return Ok(); // return 200 so Meta does not retry endlessly
+        }
+
         if (businessContext is null)
         {
             Log.Warning("WEBHOOK: no business for phone_number_id={PhoneNumberId}", phoneNumberId);

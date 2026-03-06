@@ -27,7 +27,7 @@ public class BusinessResolver : IBusinessResolver
 
         var biz = await _db.Businesses
             .AsNoTracking()
-            .Where(b => b.IsActive && b.PhoneNumberId == id)
+            .Where(b => b.IsActive == true && b.PhoneNumberId == id)
             .Select(b => new { b.Id, b.PhoneNumberId, b.AccessToken })
             .FirstOrDefaultAsync(ct);
 
