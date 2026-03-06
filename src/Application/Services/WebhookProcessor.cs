@@ -150,9 +150,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // B) Greeting -> welcome + menu + prompt
-                    if (!state.MenuSent && IsGreeting(t))
+                    // B) Restart intent: greeting / menu request / new-order intent
+                    //    HIGHEST PRIORITY — clears stale checkout state
+                    if (IsRestartIntent(t))
                     {
+                        state.ResetAfterConfirm();
                         state.MenuSent = true;
 
                         await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
@@ -246,29 +248,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                        continue;
-                    }
-
-                    // E1) Deterministic ordering-intent detection (no AI needed)
-                    if (IsOrderingIntent(t))
-                    {
-                        if (!state.MenuSent)
-                        {
-                            state.MenuSent = true;
-                            await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
-                        }
-                        else
-                        {
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?",
-                                PhoneNumberId = phoneNumberId,
-                                AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-                        }
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -563,6 +542,11 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         return sb.ToString().Normalize(NormalizationForm.FormC);
     }
 
+    // Unified restart intent: greeting OR menu request OR new-order intent
+    // This must have HIGHEST PRIORITY over stale checkout state
+    internal static bool IsRestartIntent(string t)
+        => IsGreeting(t) || IsMenuRequest(t) || IsOrderingIntent(t);
+
     internal static bool IsGreeting(string t)
     {
         var s = StripAccents(t);
@@ -582,13 +566,34 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         return false;
     }
 
-    private static bool IsOrderingIntent(string t)
+    internal static bool IsMenuRequest(string t)
+    {
+        var s = StripAccents(t);
+
+        // Exact match
+        if (s is "menu" or "el menu" or "ver menu")
+            return true;
+
+        // Contains patterns for menu requests
+        if (s.Contains("mandas el menu") || s.Contains("mandame el menu")
+            || s.Contains("manda el menu") || s.Contains("enviar menu")
+            || s.Contains("enviar el menu") || s.Contains("enviame el menu")
+            || s.Contains("quiero ver el menu") || s.Contains("ver el menu")
+            || s.Contains("pasame el menu") || s.Contains("muestrame el menu"))
+            return true;
+
+        return false;
+    }
+
+    internal static bool IsOrderingIntent(string t)
     {
         var s = StripAccents(t);
         return s.Contains("quisiera") || s.Contains("hacer un pedido")
             || s.Contains("quiero pedir") || s.Contains("para llevar")
             || s.Contains("quiero ordenar") || s.Contains("me gustaria ordenar")
-            || s.Contains("me gustaria pedir");
+            || s.Contains("me gustaria pedir") || s.Contains("deseo pedir")
+            || s.Contains("nuevo pedido") || s.Contains("empezar de nuevo")
+            || s.Contains("reiniciar pedido");
     }
 
     private static bool IsConfirmCommand(string t)

@@ -488,6 +488,162 @@ public class WebhookProcessorTests
         form.CustomerName.Should().Be("Juan");
     }
 
+    // ── STALE STATE RESET TESTS ──
+
+    private ConversationFields CreateStaleCheckoutState()
+    {
+        var state = new ConversationFields
+        {
+            MenuSent = true,
+            CheckoutFormSent = true,
+            CustomerName = "Old Customer",
+            CustomerIdNumber = "V-OLD",
+            CustomerPhone = "0412-0000000",
+            Address = "Old Address",
+            PaymentMethod = "efectivo",
+            GpsPinReceived = true,
+            DeliveryType = "delivery"
+        };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        return state;
+    }
+
+    [Fact]
+    public async Task StaleCheckout_HolaQueTal_ResetsAndSends3FreshMessages()
+    {
+        var staleState = CreateStaleCheckoutState();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(staleState);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var payload = CreateTextMessagePayload("5511999999999", "hola que tal");
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        sentMessages.Should().HaveCount(3, "should send welcome + menu + prompt");
+        sentMessages[0].Body.Should().Contain("bienvenido");
+        sentMessages[1].Body.Should().Contain("MEN\u00da");
+        sentMessages[2].Body.Should().Contain("Qu\u00e9 deseas ordenar");
+
+        // State must be reset
+        staleState.Items.Should().BeEmpty("stale items should be cleared");
+        staleState.CheckoutFormSent.Should().BeFalse("checkout form flag should be reset");
+        staleState.CustomerName.Should().BeNull("customer data should be cleared");
+    }
+
+    [Fact]
+    public async Task StaleCheckout_QuieroHacerUnPedido_ResetsAndStartsFresh()
+    {
+        var staleState = CreateStaleCheckoutState();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(staleState);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var payload = CreateTextMessagePayload("5511999999999", "quiero hacer un pedido");
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        sentMessages.Should().HaveCount(3, "should send welcome + menu + prompt");
+        sentMessages[0].Body.Should().Contain("bienvenido");
+        sentMessages[1].Body.Should().Contain("MEN\u00da");
+
+        // Must NOT say "Sigue llenando la planilla"
+        sentMessages.Should().NotContain(m => m.Body.Contains("planilla"));
+    }
+
+    [Fact]
+    public async Task StaleCheckout_MeMandasElMenu_ResetsAndSendsMenu()
+    {
+        var staleState = CreateStaleCheckoutState();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(staleState);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var payload = CreateTextMessagePayload("5511999999999", "me mandas el menu?");
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        sentMessages.Should().HaveCount(3, "should send welcome + menu + prompt");
+        sentMessages[1].Body.Should().Contain("MEN\u00da");
+        sentMessages[1].Body.Should().Contain("Hamburguesa");
+    }
+
+    [Theory]
+    [InlineData("hola")]
+    [InlineData("hola que tal")]
+    [InlineData("buenas tardes")]
+    [InlineData("menu")]
+    [InlineData("men\u00fa")]
+    [InlineData("quiero ver el menu")]
+    [InlineData("mandame el menu")]
+    [InlineData("quiero hacer un pedido")]
+    [InlineData("quisiera hacer un pedido")]
+    [InlineData("nuevo pedido")]
+    [InlineData("empezar de nuevo")]
+    public async Task RestartIntent_AlwaysWinsOverStaleCheckout(string input)
+    {
+        var staleState = CreateStaleCheckoutState();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(staleState);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var payload = CreateTextMessagePayload("5511999999999", input);
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        sentMessages.Should().HaveCount(3, $"'{input}' should reset and send 3 fresh messages");
+        sentMessages[0].Body.Should().Contain("bienvenido", $"'{input}' should trigger welcome");
+        sentMessages[1].Body.Should().Contain("MEN\u00da", $"'{input}' should trigger menu");
+        sentMessages[2].Body.Should().Contain("Qu\u00e9 deseas ordenar", $"'{input}' should trigger prompt");
+
+        // Must NOT contain stale checkout messages
+        sentMessages.Should().NotContain(m => m.Body.Contains("planilla"), $"'{input}' should not trigger stale checkout");
+        sentMessages.Should().NotContain(m => m.Body.Contains("falta informaci\u00f3n"), $"'{input}' should not trigger missing-info");
+    }
+
+    // ── IsRestartIntent unit tests ──
+
+    [Theory]
+    [InlineData("menu", true)]
+    [InlineData("men\u00fa", true)]
+    [InlineData("me mandas el menu", true)]
+    [InlineData("quiero ver el menu", true)]
+    [InlineData("mandame el menu", true)]
+    [InlineData("hola", true)]
+    [InlineData("quiero hacer un pedido", true)]
+    [InlineData("nuevo pedido", true)]
+    [InlineData("empezar de nuevo", true)]
+    [InlineData("reiniciar pedido", true)]
+    [InlineData("deseo pedir", true)]
+    [InlineData("confirmar", false)]
+    [InlineData("agrega 2 hamburguesas", false)]
+    [InlineData("Nombre: Juan", false)]
+    public void IsRestartIntent_DetectsCorrectly(string input, bool expected)
+    {
+        var t = input.Trim().ToLowerInvariant();
+        WebhookProcessor.IsRestartIntent(t).Should().Be(expected);
+    }
+
     private static WebhookPayload CreateTextMessagePayload(string from, string body) => new()
     {
         Object = "whatsapp_business_account",
