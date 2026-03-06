@@ -644,6 +644,102 @@ public class WebhookProcessorTests
         WebhookProcessor.IsRestartIntent(t).Should().Be(expected);
     }
 
+    // ── Parser cleanup tests ──
+
+    [Theory]
+    [InlineData("pago movil pago movil", "pago_movil")]
+    [InlineData("PAGO MOVIL", "pago_movil")]
+    [InlineData("pago m\u00f3vil", "pago_movil")]
+    [InlineData("efectivo", "efectivo")]
+    [InlineData("EFECTIVO", "efectivo")]
+    [InlineData("divisas", "divisas")]
+    public void CheckoutParser_PaymentNormalization_NoDuplicates(string payValue, string expected)
+    {
+        var formText = $"Nombre: Juan\nC\u00e9dula: V-12345\nTel\u00e9fono: 0412-1234567\nPago: {payValue}";
+        var result = WebhookProcessor.TryParseCheckoutForm(formText, out var form);
+        result.Should().BeTrue();
+        form.PaymentMethod.Should().Be(expected);
+    }
+
+    [Fact]
+    public void DeduplicateTokens_RemovesDuplicatedHalves()
+    {
+        WebhookProcessor.DeduplicateTokens("pago movil pago movil").Should().Be("pago movil");
+        WebhookProcessor.DeduplicateTokens("efectivo").Should().Be("efectivo");
+        WebhookProcessor.DeduplicateTokens("hello world").Should().Be("hello world");
+    }
+
+    [Fact]
+    public void CleanFieldValue_TrimsAndCollapsesSpaces()
+    {
+        WebhookProcessor.CleanFieldValue("  Juan  P\u00e9rez  ").Should().Be("Juan P\u00e9rez");
+        WebhookProcessor.CleanFieldValue("*bold text*").Should().Be("bold text");
+        WebhookProcessor.CleanFieldValue(null).Should().BeNull();
+        WebhookProcessor.CleanFieldValue("  ").Should().BeNull();
+    }
+
+    [Fact]
+    public void CheckoutParser_CleansFieldValues()
+    {
+        var formText = "Nombre:  Juan   P\u00e9rez  \nC\u00e9dula: V-12345\nTel\u00e9fono: 0412-1234567\nDirecci\u00f3n:  Alto  Hatillo \nPago: efectivo";
+        var result = WebhookProcessor.TryParseCheckoutForm(formText, out var form);
+        result.Should().BeTrue();
+        form.CustomerName.Should().Be("Juan P\u00e9rez");
+        form.Address.Should().Be("Alto Hatillo");
+    }
+
+    // ── Emoji correctness tests ──
+
+    [Fact]
+    public void CheckoutForm_UsesCedulaIdCardEmoji()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Must contain 🪪 (U+1FAAA = ID card), NOT 🪭 (U+1FAAD = fan)
+        reply.Should().Contain("\ud83e\udeaa", "should use ID card emoji for C\u00e9dula");
+        reply.Should().NotContain("\ud83e\udead", "should NOT use fan emoji");
+    }
+
+    [Fact]
+    public void DeliveryTypePrompt_HasShoppingBagEmoji()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        // No delivery type set — should prompt
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+        reply.Should().Contain("pick up");
+        reply.Should().Contain("delivery");
+    }
+
+    // ── "quiero hacer un nuevo pedido" must also reset (user should NOT need "NUEVO") ──
+
+    [Fact]
+    public async Task StaleCheckout_QuieroHacerUnNuevoPedido_AlsoResets()
+    {
+        var staleState = CreateStaleCheckoutState();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(staleState);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // Both with and without "nuevo" should reset
+        var payload = CreateTextMessagePayload("5511999999999", "quiero hacer un nuevo pedido");
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        sentMessages.Should().HaveCount(3);
+        sentMessages[0].Body.Should().Contain("bienvenido");
+    }
+
     private static WebhookPayload CreateTextMessagePayload(string from, string body) => new()
     {
         Object = "whatsapp_business_account",

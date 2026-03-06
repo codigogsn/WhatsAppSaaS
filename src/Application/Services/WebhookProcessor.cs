@@ -418,13 +418,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?";
 
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
-            return "\u00bfEs *pick up* o *delivery*?";
+            return "\ud83d\udecd\ufe0f \u00bfEs *pick up* o *delivery*?";
 
         if (!state.CheckoutFormSent)
         {
             state.CheckoutFormSent = true;
 
-            return "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udead *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nLuego escribe *CONFIRMAR*.";
+            return "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udeaa *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nLuego escribe *CONFIRMAR*.";
         }
 
         return "\u2705 Escribe *CONFIRMAR* para finalizar.";
@@ -445,7 +445,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         var missing = new List<string>();
         if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("\ud83d\udc64 Nombre");
-        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("\ud83e\udead C\u00e9dula");
+        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("\ud83e\udeaa C\u00e9dula");
         if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("\ud83d\udcf1 Tel\u00e9fono");
         if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("\ud83c\udfe1 Direcci\u00f3n");
         if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("\ud83d\udcb5 Pago");
@@ -501,7 +501,7 @@ $"A\u00fan falta informaci\u00f3n para confirmar.\n\nEnv\u00edanos al menos:\n- 
         };
 
         var receipt =
-$"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc64 Nombre: {state.CustomerName}\n\ud83e\udead C\u00e9dula: {state.CustomerIdNumber}\n\ud83d\udcf1 Tel\u00e9fono: {customerPhoneE164}\n\n\ud83c\udf7d\ufe0f Pedido: {itemsText}\n\ud83c\udfe1 Direcci\u00f3n: {state.Address}\n\ud83d\udcb5 Pago: {payText}\n\nGracias \ud83d\ude4c";
+$"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc64 Nombre: {state.CustomerName}\n\ud83e\udeaa C\u00e9dula: {state.CustomerIdNumber}\n\ud83d\udcf1 Tel\u00e9fono: {customerPhoneE164}\n\n\ud83c\udf7d\ufe0f Pedido: {itemsText}\n\ud83c\udfe1 Direcci\u00f3n: {state.Address}\n\ud83d\udcb5 Pago: {payText}\n\nGracias \ud83d\ude4c";
 
         state.ResetAfterConfirm();
         return receipt;
@@ -700,10 +700,10 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
             return null;
         }
 
-        form.CustomerName = GetValue("nombre");
-        form.CustomerIdNumber = GetValue("cedula") ?? GetValue("c\u00e9dula");
-        form.CustomerPhone = GetValue("telefono") ?? GetValue("tel\u00e9fono");
-        form.Address = GetValue("direccion") ?? GetValue("direcci\u00f3n");
+        form.CustomerName = CleanFieldValue(GetValue("nombre"));
+        form.CustomerIdNumber = CleanFieldValue(GetValue("cedula") ?? GetValue("c\u00e9dula"));
+        form.CustomerPhone = CleanFieldValue(GetValue("telefono") ?? GetValue("tel\u00e9fono"));
+        form.Address = CleanFieldValue(GetValue("direccion") ?? GetValue("direcci\u00f3n"));
         var pay = GetValue("pago");
         var loc = GetValue("ubicacion") ?? GetValue("ubicaci\u00f3n");
 
@@ -711,7 +711,16 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
 
         if (!string.IsNullOrWhiteSpace(pay))
         {
-            var p = StripAccents(pay.Trim().ToLowerInvariant());
+            // Strip template echo like "EFECTIVO / DIVISAS / PAGO MÓVIL" — take only the user's actual choice
+            var cleanPay = pay.Trim();
+            if (cleanPay.Contains('/'))
+            {
+                // User likely pasted the template options; take the whole thing and detect below
+            }
+            var p = StripAccents(cleanPay.ToLowerInvariant());
+
+            // Deduplicate repeated tokens (e.g. "pago movil pago movil" → "pago movil")
+            p = DeduplicateTokens(p);
 
             if (p.Contains("pago") && p.Contains("mov"))
                 form.PaymentMethod = "pago_movil";
@@ -732,6 +741,36 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
             + (string.IsNullOrWhiteSpace(form.LocationText) ? 0 : 1);
 
         return filled >= 3;
+    }
+
+    // Deduplicate repeated token sequences like "pago movil pago movil" → "pago movil"
+    internal static string DeduplicateTokens(string input)
+    {
+        var words = input.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length < 2) return input;
+
+        // Try halves: if first half equals second half, keep only first half
+        if (words.Length % 2 == 0)
+        {
+            var half = words.Length / 2;
+            var firstHalf = string.Join(" ", words.Take(half));
+            var secondHalf = string.Join(" ", words.Skip(half));
+            if (firstHalf == secondHalf)
+                return firstHalf;
+        }
+
+        return input;
+    }
+
+    // Clean parsed field values: trim whitespace, collapse spaces, strip template markers
+    internal static string? CleanFieldValue(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        // Collapse multiple spaces
+        var cleaned = Regex.Replace(raw.Trim(), @"\s+", " ");
+        // Strip bold markers
+        cleaned = cleaned.Replace("*", "");
+        return string.IsNullOrWhiteSpace(cleaned) ? null : cleaned;
     }
 
     private static string? NormalizeToE164(string? phone)
