@@ -146,7 +146,7 @@ public class WebhookController : ControllerBase
         BusinessContext? businessContext;
         try
         {
-            businessContext = await _businessResolver.ResolveByPhoneNumberIdAsync(phoneNumberId, ct);
+            businessContext = await _businessResolver.ResolveOrCreateAsync(phoneNumberId, ct);
         }
         catch (Exception ex)
         {
@@ -156,7 +156,7 @@ public class WebhookController : ControllerBase
 
         if (businessContext is null)
         {
-            Log.Warning("WEBHOOK: no business for phone_number_id={PhoneNumberId}", phoneNumberId);
+            Log.Warning("WEBHOOK: could not resolve or create business for phone_number_id={PhoneNumberId}", phoneNumberId);
             return Ok();
         }
 
