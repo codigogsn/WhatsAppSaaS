@@ -95,7 +95,7 @@ public class BusinessResolver : IBusinessResolver
         cmd.CommandText = """
             SELECT "Id", "PhoneNumberId", "AccessToken"
             FROM "Businesses"
-            WHERE "PhoneNumberId" = @pid AND CAST("IsActive" AS integer) = 1
+            WHERE "PhoneNumberId" = @pid AND "IsActive" = true
             LIMIT 1
             """;
 
@@ -108,7 +108,13 @@ public class BusinessResolver : IBusinessResolver
         if (!await reader.ReadAsync(ct))
             return null;
 
-        var bizId = reader.GetGuid(0);
+        // Read Id as string to support both TEXT and UUID column types in legacy/new schemas
+        var rawId = reader.GetValue(0)?.ToString() ?? "";
+        if (!Guid.TryParse(rawId, out var bizId))
+        {
+            Log.Warning("BUSINESS RESOLVE: invalid Id format for phoneNumberId={PhoneNumberId}, rawId={RawId}", id, rawId);
+            return null;
+        }
         var bizPhone = reader.GetString(1);
         var bizToken = reader.GetString(2);
 
