@@ -46,7 +46,7 @@ public class WebhookProcessorTests
             .Setup(x => x.SaveAsync(It.IsAny<string>(), It.IsAny<ConversationFields>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        _testBusiness = new BusinessContext(Guid.NewGuid(), "123456789", "test-token");
+        _testBusiness = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Mi Restaurante");
 
         _sut = new WebhookProcessor(
             _aiParserMock.Object,
@@ -211,7 +211,7 @@ public class WebhookProcessorTests
     [InlineData("hola", true)]
     [InlineData("buenas", true)]
     [InlineData("que tal como estas", true)]
-    [InlineData("qué tal cómo estás", true)]
+    [InlineData("qu\u00e9 tal c\u00f3mo est\u00e1s", true)]
     [InlineData("hey", true)]
     [InlineData("epa", true)]
     [InlineData("saludos", true)]
@@ -220,60 +220,190 @@ public class WebhookProcessorTests
     [InlineData("hola buenas tardes", true)]
     [InlineData("confirmar", false)]
     [InlineData("quiero 2 hamburguesas", false)]
-    public async Task IsGreeting_DetectsCorrectly(string input, bool expected)
+    public void IsGreeting_DetectsCorrectly(string input, bool expected)
     {
-        var stateStore = new Mock<IConversationStateStore>();
-        stateStore
-            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ConversationFields());
-        stateStore
-            .Setup(x => x.IsMessageProcessedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-        stateStore
-            .Setup(x => x.MarkMessageProcessedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
-        stateStore
-            .Setup(x => x.SaveAsync(It.IsAny<string>(), It.IsAny<ConversationFields>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        var t = input.Trim().ToLowerInvariant();
+        WebhookProcessor.IsGreeting(t).Should().Be(expected);
+    }
 
-        var whatsAppClient = new Mock<IWhatsAppClient>();
-        whatsAppClient
+    // ── NEW: Greeting sends 3 messages in correct order ──
+
+    [Fact]
+    public async Task Greeting_Sends3Messages_WelcomeMenuPrompt()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
             .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
             .ReturnsAsync(true);
 
-        var aiParser = new Mock<IAiParser>();
-        aiParser
-            .Setup(x => x.ParseAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AiParseResult
-            {
-                Intent = RestaurantIntent.General,
-                Confidence = 0.5,
-                MissingFields = [],
-                Args = new ParsedArgs { General = new GeneralArgs { Topic = "test" } }
-            });
+        var payload = CreateTextMessagePayload("5511999999999", "hola");
 
-        var sut = new WebhookProcessor(
-            aiParser.Object, whatsAppClient.Object, new Mock<IOrderRepository>().Object,
-            stateStore.Object, new Mock<ILogger<WebhookProcessor>>().Object);
+        await _sut.ProcessAsync(payload, _testBusiness);
 
-        var payload = CreateTextMessagePayload("5511999999999", input);
-        await sut.ProcessAsync(payload, new BusinessContext(Guid.NewGuid(), "123456789", "test-token"));
+        sentMessages.Should().HaveCount(3);
 
-        if (expected)
+        // Message 1: Welcome with business name
+        sentMessages[0].Body.Should().Contain("bienvenido");
+        sentMessages[0].Body.Should().Contain("Mi Restaurante");
+
+        // Message 2: Menu
+        sentMessages[1].Body.Should().Contain("MEN\u00da");
+        sentMessages[1].Body.Should().Contain("Hamburguesa");
+        sentMessages[1].Body.Should().Contain("Coca Cola");
+        sentMessages[1].Body.Should().Contain("Papas");
+
+        // Message 3: Prompt
+        sentMessages[2].Body.Should().Contain("Qu\u00e9 deseas ordenar");
+    }
+
+    [Fact]
+    public async Task Greeting_WelcomeMessage_IncludesBusinessName()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var biz = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Burger Palace");
+        var payload = CreateTextMessagePayload("5511999999999", "buenas tardes");
+
+        await _sut.ProcessAsync(payload, biz);
+
+        sentMessages.Should().HaveCountGreaterOrEqualTo(1);
+        sentMessages[0].Body.Should().Contain("Burger Palace");
+    }
+
+    // ── NEW: Checkout form premium style ──
+
+    [Fact]
+    public void CheckoutForm_HasPremiumStyle()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Premium emoji labels
+        reply.Should().Contain("Nombre:");
+        reply.Should().Contain("C\u00e9dula:");
+        reply.Should().Contain("Tel\u00e9fono:");
+        reply.Should().Contain("Direcci\u00f3n:");
+        reply.Should().Contain("Pago:");
+        reply.Should().Contain("EFECTIVO / DIVISAS / PAGO M\u00d3VIL");
+        reply.Should().Contain("Ubicaci\u00f3n GPS:");
+        reply.Should().Contain("OBLIGATORIO");
+        reply.Should().Contain("CONFIRMAR");
+    }
+
+    // ── NEW: Pago Móvil sends payment details + proof request ──
+
+    [Fact]
+    public async Task PagoMovil_SendsPaymentDetails_ThenProofRequest()
+    {
+        // Set up env vars for payment config
+        Environment.SetEnvironmentVariable("PAYMENT_MOBILE_BANK", "Banesco");
+        Environment.SetEnvironmentVariable("PAYMENT_MOBILE_ID", "V-12345678");
+        Environment.SetEnvironmentVariable("PAYMENT_MOBILE_PHONE", "0412-1234567");
+
+        try
         {
-            whatsAppClient.Verify(
-                x => x.SendTextMessageAsync(
-                    It.Is<OutgoingMessage>(m => m.Body.Contains("MENU")),
-                    It.IsAny<CancellationToken>()),
-                Times.Once);
+            var sentMessages = new List<OutgoingMessage>();
+            _whatsAppClientMock
+                .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+                .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+                .ReturnsAsync(true);
+
+            // Prepare state: items + delivery + checkout form sent
+            var state = new ConversationFields();
+            state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+            state.DeliveryType = "delivery";
+            state.CheckoutFormSent = true;
+
+            _stateStoreMock
+                .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(state);
+
+            var formText = "Nombre: Juan\nC\u00e9dula: V-12345\nTel\u00e9fono: 0412-1234567\nDirecci\u00f3n: Calle 1\nPago: pago m\u00f3vil";
+            var payload = CreateTextMessagePayload("5511999999999", formText);
+
+            await _sut.ProcessAsync(payload, _testBusiness);
+
+            // Should have: payment details + proof request + "Perfecto" confirmation
+            var pagoDetailMsg = sentMessages.FirstOrDefault(m => m.Body.Contains("DATOS PARA PAGO"));
+            pagoDetailMsg.Should().NotBeNull("should send payment details");
+            pagoDetailMsg!.Body.Should().Contain("Banesco");
+            pagoDetailMsg.Body.Should().Contain("V-12345678");
+            pagoDetailMsg.Body.Should().Contain("0412-1234567");
+
+            var proofMsg = sentMessages.FirstOrDefault(m => m.Body.Contains("comprobante"));
+            proofMsg.Should().NotBeNull("should request proof photo");
+
+            // Payment details should come before proof request
+            var detailIdx = sentMessages.IndexOf(pagoDetailMsg);
+            var proofIdx = sentMessages.IndexOf(proofMsg!);
+            detailIdx.Should().BeLessThan(proofIdx, "payment details should come before proof request");
         }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PAYMENT_MOBILE_BANK", null);
+            Environment.SetEnvironmentVariable("PAYMENT_MOBILE_ID", null);
+            Environment.SetEnvironmentVariable("PAYMENT_MOBILE_PHONE", null);
+        }
+    }
+
+    // ── NEW: Confirmed receipt uses premium format ──
+
+    [Fact]
+    public async Task ConfirmedReceipt_UsesPremiumFormat()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields
+        {
+            CheckoutFormSent = true,
+            CustomerName = "Juan P\u00e9rez",
+            CustomerIdNumber = "V-12345678",
+            CustomerPhone = "0412-1234567",
+            Address = "Calle Principal #10",
+            PaymentMethod = "efectivo",
+            GpsPinReceived = true,
+            DeliveryType = "delivery"
+        };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 1 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var payload = CreateTextMessagePayload("5511999999999", "confirmar");
+
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        var receipt = sentMessages.FirstOrDefault(m => m.Body.Contains("PEDIDO CONFIRMADO"));
+        receipt.Should().NotBeNull("should send confirmed receipt");
+
+        var body = receipt!.Body;
+        body.Should().Contain("PEDIDO CONFIRMADO");
+        body.Should().Contain("Pedido: #");
+        body.Should().Contain("Nombre: Juan P\u00e9rez");
+        body.Should().Contain("C\u00e9dula: V-12345678");
+        body.Should().Contain("Pedido: 2 Hamburguesa, 1 Coca Cola");
+        body.Should().Contain("Direcci\u00f3n: Calle Principal #10");
+        body.Should().Contain("Pago: EFECTIVO");
+        body.Should().Contain("Gracias");
     }
 
     [Fact]
     public async Task ProcessAsync_OrderingIntent_ShowsMenuWithoutAi()
     {
-        // "quisiera hacer un pedido" should trigger the ordering-intent path
-        // and show the menu + "Que deseas ordenar?" WITHOUT calling AI
         _whatsAppClientMock
             .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(true);
@@ -287,16 +417,10 @@ public class WebhookProcessorTests
             x => x.ParseAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
 
-        // Should send menu + help
+        // Should send greeting sequence (3 messages including menu)
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(
-                It.Is<OutgoingMessage>(m => m.Body.Contains("MENU")),
-                It.IsAny<CancellationToken>()),
-            Times.Once);
-
-        _whatsAppClientMock.Verify(
-            x => x.SendTextMessageAsync(
-                It.Is<OutgoingMessage>(m => m.Body.Contains("Que deseas ordenar")),
+                It.Is<OutgoingMessage>(m => m.Body.Contains("MEN\u00da")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -304,7 +428,6 @@ public class WebhookProcessorTests
     [Fact]
     public async Task ProcessAsync_AfterConfirm_GreetingShowsMenuAgain()
     {
-        // Simulate a state where MenuSent was true but ResetAfterConfirm was called
         var resetState = new ConversationFields();
         resetState.MenuSent = true;
         resetState.ResetAfterConfirm();
@@ -325,7 +448,7 @@ public class WebhookProcessorTests
         // Should send menu since MenuSent was reset
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(
-                It.Is<OutgoingMessage>(m => m.Body.Contains("MENU")),
+                It.Is<OutgoingMessage>(m => m.Body.Contains("MEN\u00da")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -333,7 +456,6 @@ public class WebhookProcessorTests
     [Fact]
     public async Task ProcessAsync_SendFailure_LogsError()
     {
-        // When WhatsAppClient returns false, the logger should receive an error
         _whatsAppClientMock
             .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(false);
@@ -346,7 +468,6 @@ public class WebhookProcessorTests
         var payload = CreateTextMessagePayload("5511999999999", "hola");
         await sut.ProcessAsync(payload, _testBusiness);
 
-        // Verify that logger was called with Error level (SEND FAILED)
         loggerMock.Verify(
             x => x.Log(
                 LogLevel.Error,
@@ -355,6 +476,16 @@ public class WebhookProcessorTests
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public void TryParseCheckoutForm_PagoMovil_ParsesCorrectly()
+    {
+        var formText = "Nombre: Juan\nC\u00e9dula: V-12345\nTel\u00e9fono: 0412-1234567\nDirecci\u00f3n: Calle 1\nPago: pago m\u00f3vil";
+        var result = WebhookProcessor.TryParseCheckoutForm(formText, out var form);
+        result.Should().BeTrue("form has 5 filled fields");
+        form.PaymentMethod.Should().Be("pago_movil");
+        form.CustomerName.Should().Be("Juan");
     }
 
     private static WebhookPayload CreateTextMessagePayload(string from, string body) => new()

@@ -19,3 +19,12 @@ public sealed class WhatsAppOptions
 
     public bool RequireSignatureValidation { get; set; } = false;
 }
+
+public sealed class PaymentMobileOptions
+{
+    public const string SectionName = "PaymentMobile";
+
+    public string Bank { get; set; } = "";
+    public string Id { get; set; } = "";
+    public string Phone { get; set; } = "";
+}

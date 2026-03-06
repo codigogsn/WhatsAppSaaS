@@ -21,19 +21,22 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly IOrderRepository _orderRepository;
     private readonly IConversationStateStore _stateStore;
     private readonly ILogger<WebhookProcessor> _logger;
+    private readonly PaymentMobileOptions _paymentMobile;
 
     public WebhookProcessor(
         IAiParser aiParser,
         IWhatsAppClient whatsAppClient,
         IOrderRepository orderRepository,
         IConversationStateStore stateStore,
-        ILogger<WebhookProcessor> logger)
+        ILogger<WebhookProcessor> logger,
+        PaymentMobileOptions? paymentMobile = null)
     {
         _aiParser = aiParser;
         _whatsAppClient = whatsAppClient;
         _orderRepository = orderRepository;
         _stateStore = stateStore;
         _logger = logger;
+        _paymentMobile = paymentMobile ?? new PaymentMobileOptions();
     }
 
     private const int MaxMessageLength = 4096;
@@ -95,7 +98,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = "Recibido. Escribe *CONFIRMAR* para finalizar.",
+                                Body = "\u2705 Ubicaci\u00f3n recibida. Escribe *CONFIRMAR* para finalizar.",
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -115,7 +118,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = "Recibido. Un operador verificara el pago y te confirmamos.",
+                                Body = "\u2705 Comprobante recibido. Un operador verificar\u00e1 el pago y te confirmamos.",
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -147,32 +150,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // B) Greeting -> menu
+                    // B) Greeting -> welcome + menu + prompt
                     if (!state.MenuSent && IsGreeting(t))
                     {
                         state.MenuSent = true;
 
-                        await SendAsync(new OutgoingMessage
-                        {
-                            To = message.From,
-                            Body =
-@"MENU (DEMO)
-1) Hamburguesa
-2) Coca Cola
-3) Papas
-
-(En produccion aqui va foto/PDF del menu del restaurante)",
-                            PhoneNumberId = phoneNumberId,
-                            AccessToken = businessContext.AccessToken
-                        }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                        await SendAsync(new OutgoingMessage
-                        {
-                            To = message.From,
-                            Body = "Que deseas ordenar?",
-                            PhoneNumberId = phoneNumberId,
-                            AccessToken = businessContext.AccessToken
-                        }, businessContext.BusinessId, conversationId, cancellationToken);
+                        await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -186,7 +169,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = "Listo, agregado. Escribe *CONFIRMAR* para finalizar.",
+                            Body = "\u2705 Listo, agregado. Escribe *CONFIRMAR* para finalizar.",
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -216,24 +199,27 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             {
                                 state.PaymentEvidenceRequested = true;
 
-                                var msg = state.PaymentMethod == "pago_movil"
-                                    ? "Para *PAGO MOVIL*, envia el *comprobante* (foto)"
-                                    : "Para *DIVISAS*, envia una *foto de los billetes*";
-
-                                await SendAsync(new OutgoingMessage
+                                if (state.PaymentMethod == "pago_movil")
                                 {
-                                    To = message.From,
-                                    Body = msg,
-                                    PhoneNumberId = phoneNumberId,
-                                    AccessToken = businessContext.AccessToken
-                                }, businessContext.BusinessId, conversationId, cancellationToken);
+                                    await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+                                }
+                                else
+                                {
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = "Para *DIVISAS*, env\u00eda una *foto de los billetes* \u2705",
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
                             }
                         }
 
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = "Perfecto. Escribe *CONFIRMAR* para finalizar.",
+                            Body = "\u2705 Perfecto. Escribe *CONFIRMAR* para finalizar.",
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -271,28 +257,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         if (!state.MenuSent)
                         {
                             state.MenuSent = true;
+                            await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+                        }
+                        else
+                        {
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body =
-@"MENU (DEMO)
-1) Hamburguesa
-2) Coca Cola
-3) Papas
-
-(En produccion aqui va foto/PDF del menu del restaurante)",
+                                Body = "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?",
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
                         }
-
-                        await SendAsync(new OutgoingMessage
-                        {
-                            To = message.From,
-                            Body = "Que deseas ordenar?",
-                            PhoneNumberId = phoneNumberId,
-                            AccessToken = businessContext.AccessToken
-                        }, businessContext.BusinessId, conversationId, cancellationToken);
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -335,6 +311,93 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
     }
 
+    // ──────────────────────────────────────────
+    // Greeting: 3 messages (welcome, menu, prompt)
+    // ──────────────────────────────────────────
+
+    private async Task SendGreetingSequenceAsync(
+        string to, string phoneNumberId, BusinessContext biz, string conversationId, CancellationToken ct)
+    {
+        var businessName = !string.IsNullOrWhiteSpace(biz.BusinessName)
+            ? biz.BusinessName
+            : "nuestro restaurante";
+
+        // Message 1: Welcome
+        await SendAsync(new OutgoingMessage
+        {
+            To = to,
+            Body = $"\ud83d\udc4b Hola, bienvenido a {businessName}",
+            PhoneNumberId = phoneNumberId,
+            AccessToken = biz.AccessToken
+        }, biz.BusinessId, conversationId, ct);
+
+        // Message 2: Menu
+        await SendAsync(new OutgoingMessage
+        {
+            To = to,
+            Body = "\ud83d\udccb *MEN\u00da (DEMO)*\n1) Hamburguesa\n2) Coca Cola\n3) Papas\n\n_(En producci\u00f3n aqu\u00ed va foto/PDF del men\u00fa del restaurante)_",
+            PhoneNumberId = phoneNumberId,
+            AccessToken = biz.AccessToken
+        }, biz.BusinessId, conversationId, ct);
+
+        // Message 3: Prompt
+        await SendAsync(new OutgoingMessage
+        {
+            To = to,
+            Body = "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?",
+            PhoneNumberId = phoneNumberId,
+            AccessToken = biz.AccessToken
+        }, biz.BusinessId, conversationId, ct);
+    }
+
+    // ──────────────────────────────────────────
+    // Pago Móvil: 2 messages (details + proof request)
+    // ──────────────────────────────────────────
+
+    private async Task SendPagoMovilDetailsAsync(
+        string to, string phoneNumberId, BusinessContext biz, string conversationId, CancellationToken ct)
+    {
+        var bank = ResolvePaymentConfig(_paymentMobile.Bank, "PAYMENT_MOBILE_BANK", "PaymentMobile__Bank")
+            ?? "(no configurado)";
+        var payId = ResolvePaymentConfig(_paymentMobile.Id, "PAYMENT_MOBILE_ID", "PaymentMobile__Id")
+            ?? "(no configurado)";
+        var phone = ResolvePaymentConfig(_paymentMobile.Phone, "PAYMENT_MOBILE_PHONE", "PaymentMobile__Phone")
+            ?? "(no configurado)";
+
+        // Message 1: Payment details
+        await SendAsync(new OutgoingMessage
+        {
+            To = to,
+            Body = $"\ud83d\udcb3 *DATOS PARA PAGO M\u00d3VIL*\n\n\u2022 *Banco:* {bank}\n\u2022 *C.I./RIF:* {payId}\n\u2022 *Tel\u00e9fono:* {phone}",
+            PhoneNumberId = phoneNumberId,
+            AccessToken = biz.AccessToken
+        }, biz.BusinessId, conversationId, ct);
+
+        // Message 2: Proof request
+        await SendAsync(new OutgoingMessage
+        {
+            To = to,
+            Body = "Para *PAGO M\u00d3VIL*, env\u00eda el *comprobante* (foto) \u2705",
+            PhoneNumberId = phoneNumberId,
+            AccessToken = biz.AccessToken
+        }, biz.BusinessId, conversationId, ct);
+    }
+
+    private static string? ResolvePaymentConfig(string optionsValue, params string[] envKeys)
+    {
+        if (!string.IsNullOrWhiteSpace(optionsValue))
+            return optionsValue;
+
+        foreach (var key in envKeys)
+        {
+            var val = Environment.GetEnvironmentVariable(key);
+            if (!string.IsNullOrWhiteSpace(val))
+                return val;
+        }
+
+        return null;
+    }
+
     private string BuildReply(
         RestaurantIntent intent,
         AiParseResult parsed,
@@ -349,7 +412,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         {
             RestaurantIntent.OrderCreate => BuildOrderReply(parsed, state),
             RestaurantIntent.HumanHandoff => "Te paso con un humano",
-            _ => "Que deseas ordenar?"
+            _ => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?"
         };
     }
 
@@ -370,32 +433,22 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return BuildOrderReplyFromState(state);
     }
 
-    private static string BuildOrderReplyFromState(ConversationFields state)
+    internal static string BuildOrderReplyFromState(ConversationFields state)
     {
         if (state.Items.Count == 0)
-            return "Que deseas ordenar?";
+            return "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?";
 
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
-            return "Es *pick up* o *delivery*?";
+            return "\u00bfEs *pick up* o *delivery*?";
 
         if (!state.CheckoutFormSent)
         {
             state.CheckoutFormSent = true;
 
-            return
-@"Para finalizar envianos:
-
-*Nombre:*
-*Cedula:*
-*Telefono:*
-*Direccion:*
-*Pago:* EFECTIVO / DIVISAS / PAGO MOVIL
-*Ubicacion GPS:* (manda el pin) *OBLIGATORIO*
-
-Luego escribe *CONFIRMAR*.";
+            return "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udead *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nLuego escribe *CONFIRMAR*.";
         }
 
-        return "Escribe *CONFIRMAR* para finalizar.";
+        return "\u2705 Escribe *CONFIRMAR* para finalizar.";
     }
 
     private async Task<string> FinalizeOrderIfPossibleAsync(
@@ -412,22 +465,17 @@ Luego escribe *CONFIRMAR*.";
             return "Indica si es *pick up* o *delivery*.";
 
         var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("Nombre");
-        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("Cedula");
-        if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("Telefono");
-        if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("Direccion");
-        if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("Pago");
-        if (!state.GpsPinReceived) missing.Add("Ubicacion GPS (pin)");
+        if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("\ud83d\udc64 Nombre");
+        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("\ud83e\udead C\u00e9dula");
+        if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("\ud83d\udcf1 Tel\u00e9fono");
+        if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("\ud83c\udfe1 Direcci\u00f3n");
+        if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("\ud83d\udcb5 Pago");
+        if (!state.GpsPinReceived) missing.Add("\ud83d\udccd Ubicaci\u00f3n GPS (pin)");
 
         if (missing.Count > 0)
         {
             return
-$@"Aun falta informacion para confirmar.
-
-Envianos al menos:
-- {string.Join("\n- ", missing)}
-
-Luego escribe *CONFIRMAR*.";
+$"A\u00fan falta informaci\u00f3n para confirmar.\n\nEnv\u00edanos al menos:\n- {string.Join("\n- ", missing)}\n\nLuego escribe *CONFIRMAR*.";
         }
 
         var customerPhoneE164 = NormalizeToE164(state.CustomerPhone) ?? NormalizeToE164(from) ?? state.CustomerPhone;
@@ -468,24 +516,13 @@ Luego escribe *CONFIRMAR*.";
 
         var payText = state.PaymentMethod switch
         {
-            "pago_movil" => "PAGO MOVIL (pendiente verificacion)",
-            "divisas" => "DIVISAS (pendiente verificacion)",
+            "pago_movil" => "PAGO M\u00d3VIL (pendiente verificaci\u00f3n)",
+            "divisas" => "DIVISAS (pendiente verificaci\u00f3n)",
             _ => "EFECTIVO"
         };
 
         var receipt =
-$@"*PEDIDO CONFIRMADO*
-Pedido: #{orderNumber}
-
-Nombre: {state.CustomerName}
-Cedula: {state.CustomerIdNumber}
-Telefono: {customerPhoneE164}
-
-Pedido: {itemsText}
-Direccion: {state.Address}
-Pago: {payText}
-
-Gracias!";
+$"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc64 Nombre: {state.CustomerName}\n\ud83e\udead C\u00e9dula: {state.CustomerIdNumber}\n\ud83d\udcf1 Tel\u00e9fono: {customerPhoneE164}\n\n\ud83c\udf7d\ufe0f Pedido: {itemsText}\n\ud83c\udfe1 Direcci\u00f3n: {state.Address}\n\ud83d\udcb5 Pago: {payText}\n\nGracias \ud83d\ude4c";
 
         state.ResetAfterConfirm();
         return receipt;
@@ -526,7 +563,7 @@ Gracias!";
         return sb.ToString().Normalize(NormalizationForm.FormC);
     }
 
-    private static bool IsGreeting(string t)
+    internal static bool IsGreeting(string t)
     {
         var s = StripAccents(t);
 
@@ -613,7 +650,7 @@ Gracias!";
         return true;
     }
 
-    private sealed class CheckoutForm
+    internal sealed class CheckoutForm
     {
         public string? CustomerName { get; set; }
         public string? CustomerIdNumber { get; set; }
@@ -623,7 +660,7 @@ Gracias!";
         public string? LocationText { get; set; }
     }
 
-    private static bool TryParseCheckoutForm(string rawText, out CheckoutForm form)
+    internal static bool TryParseCheckoutForm(string rawText, out CheckoutForm form)
     {
         form = new CheckoutForm();
 
@@ -639,16 +676,20 @@ Gracias!";
             foreach (var line in lines)
             {
                 var l = line.Trim();
-                var ln = l.ToLowerInvariant();
+                // Strip leading emoji + whitespace for label matching
+                var stripped = Regex.Replace(l, @"^[\p{So}\p{Cs}\ufe0f\u200d]+\s*", "");
+                // Also strip leading WhatsApp bold markers
+                stripped = stripped.TrimStart('*');
+                var ln = stripped.ToLowerInvariant();
 
                 if (ln.StartsWith(key))
                 {
-                    var idx = l.IndexOf(':');
-                    if (idx < 0) idx = l.IndexOf('-');
-                    if (idx < 0) idx = l.IndexOf('=');
+                    var idx = stripped.IndexOf(':');
+                    if (idx < 0) idx = stripped.IndexOf('-');
+                    if (idx < 0) idx = stripped.IndexOf('=');
 
-                    if (idx >= 0 && idx + 1 < l.Length)
-                        return l[(idx + 1)..].Trim();
+                    if (idx >= 0 && idx + 1 < stripped.Length)
+                        return stripped[(idx + 1)..].Trim().TrimEnd('*');
                 }
             }
             return null;
@@ -665,7 +706,7 @@ Gracias!";
 
         if (!string.IsNullOrWhiteSpace(pay))
         {
-            var p = pay.Trim().ToLowerInvariant();
+            var p = StripAccents(pay.Trim().ToLowerInvariant());
 
             if (p.Contains("pago") && p.Contains("mov"))
                 form.PaymentMethod = "pago_movil";

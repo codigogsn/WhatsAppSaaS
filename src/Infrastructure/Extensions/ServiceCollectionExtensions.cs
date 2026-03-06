@@ -25,6 +25,11 @@ public static class ServiceCollectionExtensions
         services.AddOptions<AiParserOptions>()
             .Bind(configuration.GetSection(AiParserOptions.SectionName));
 
+        // ── Payment Mobile options ────────────────────────
+        var pmOpts = new PaymentMobileOptions();
+        configuration.GetSection(PaymentMobileOptions.SectionName).Bind(pmOpts);
+        services.AddSingleton(pmOpts);
+
         // ── WhatsApp typed HttpClient ───────────────────
         services.AddHttpClient<IWhatsAppClient, WhatsAppClient>(client =>
         {

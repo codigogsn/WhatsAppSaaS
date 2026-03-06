@@ -80,7 +80,7 @@ public class BusinessResolver : IBusinessResolver
             return null;
         }
 
-        return new BusinessContext(biz.Id, biz.PhoneNumberId, biz.AccessToken);
+        return new BusinessContext(biz.Id, biz.PhoneNumberId, biz.AccessToken, biz.Name);
     }
 
     private async Task<BusinessContext?> FindByPhoneNumberIdAsync(string id, CancellationToken ct)
@@ -93,7 +93,7 @@ public class BusinessResolver : IBusinessResolver
 
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
-            SELECT "Id", "PhoneNumberId", "AccessToken"
+            SELECT "Id", "PhoneNumberId", "AccessToken", "Name"
             FROM "Businesses"
             WHERE "PhoneNumberId" = @pid AND "IsActive" = true
             LIMIT 1
@@ -117,8 +117,9 @@ public class BusinessResolver : IBusinessResolver
         }
         var bizPhone = reader.GetString(1);
         var bizToken = reader.GetString(2);
+        var bizName = reader.IsDBNull(3) ? "" : reader.GetString(3);
 
-        return new BusinessContext(bizId, bizPhone, bizToken);
+        return new BusinessContext(bizId, bizPhone, bizToken, bizName);
     }
 
     public static string? EnvResolve(params string[] keys)
