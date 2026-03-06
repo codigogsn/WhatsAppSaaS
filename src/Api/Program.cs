@@ -7,7 +7,6 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
@@ -29,7 +28,6 @@ try
 
     var builder = WebApplication.CreateBuilder(args);
 
-    // ✅ Forzar puerto local estable
     if (builder.Environment.IsDevelopment())
     {
         builder.WebHost.UseUrls("http://127.0.0.1:5070");
@@ -84,7 +82,6 @@ try
             throw new InvalidOperationException("DATABASE_URL is missing in Production.");
         }
 
-        // ✅ SQLite ABSOLUTO: SIEMPRE apunta a src/Api/app.db
         var sqlitePath = Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "app.db"));
         options.UseSqlite($"Data Source={sqlitePath}");
     });
@@ -98,18 +95,16 @@ try
     var app = builder.Build();
 
     // ────────────────────────────────────────
-    // ✅ DEBUG: ver exactamente qué DB está usando el proceso
+    // DEBUG: DB info endpoint
     // ────────────────────────────────────────
     app.MapGet("/debug/db", (IHostEnvironment env, AppDbContext db) =>
     {
         var conn = db.Database.GetDbConnection();
         var expected = Path.GetFullPath(Path.Combine(env.ContentRootPath, "app.db"));
 
-        // Intento extra para SQLite: DataSource (si aplica)
         string? sqliteDataSource = null;
         try
         {
-            // Requiere paquete Microsoft.Data.Sqlite (ya lo tienes porque usas UseSqlite)
             if (conn is Microsoft.Data.Sqlite.SqliteConnection sqliteConn)
                 sqliteDataSource = sqliteConn.DataSource;
         }
@@ -129,8 +124,7 @@ try
     });
 
     // ────────────────────────────────────────
-    // ✅ AUTO-MIGRATE (both SQLite and Postgres)
-    // Uses Postgres advisory lock to prevent concurrent migration crashes.
+    // AUTO-MIGRATE (both SQLite and Postgres)
     // ────────────────────────────────────────
     using (var scope = app.Services.CreateScope())
     {
@@ -209,7 +203,6 @@ static void SeedDefaultBusiness(IServiceProvider services)
         var existing = db.Businesses.FirstOrDefault(b => b.PhoneNumberId == phoneNumberId);
         if (existing is not null)
         {
-            // Update token/key if changed in env vars
             var changed = false;
             if (!string.IsNullOrWhiteSpace(accessToken) && existing.AccessToken != accessToken)
             {
@@ -258,7 +251,7 @@ static void SeedDefaultBusiness(IServiceProvider services)
 }
 
 // ──────────────────────────────────────────
-// Postgres-safe migration with advisory lock
+// Postgres-safe migration with advisory lock + legacy schema repair
 // ──────────────────────────────────────────
 static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
 {
@@ -279,41 +272,21 @@ static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
 
         try
         {
-            // ── Step 1: Schema repair BEFORE EF migrations ──
-            RepairBooleanColumns(conn);
+            // Step 1: Full legacy schema repair
+            RepairLegacySchema(conn);
 
-            // ── Step 2: Apply migrations one-by-one ──
-            // Do NOT use a single Migrate() call — if one migration fails with 42P07
-            // (table already exists from old migrations), we record it and continue
-            // so remaining migrations (like FixBooleanColumnsForPostgres) still run.
-            var migrator = db.GetInfrastructure().GetRequiredService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
+            // Step 2: Normal EF migrations (safe now that schema is repaired)
             var pending = db.Database.GetPendingMigrations().ToList();
-
             if (pending.Count == 0)
             {
                 Log.Information("MIGRATE: no pending migrations (Postgres)");
             }
             else
             {
-                Log.Information("MIGRATE: {Count} pending migrations: {Migrations}", pending.Count, string.Join(", ", pending));
-                foreach (var migration in pending)
-                {
-                    try
-                    {
-                        Log.Information("MIGRATE START: {Migration}", migration);
-                        migrator.Migrate(migration);
-                        Log.Information("MIGRATE OK: {Migration}", migration);
-                    }
-                    catch (Npgsql.PostgresException pgEx) when (pgEx.SqlState == "42P07")
-                    {
-                        Log.Warning("MIGRATE 42P07: {Migration} — objects already exist, recording as applied. Detail: {Detail}",
-                            migration, pgEx.MessageText);
-                        RecordMigrationAsApplied(conn, migration);
-                    }
-                }
+                Log.Information("MIGRATE: {Count} pending: {List}", pending.Count, string.Join(", ", pending));
+                db.Database.Migrate();
+                Log.Information("MIGRATE OK (Postgres)");
             }
-
-            Log.Information("MIGRATE OK (Postgres) — all migrations processed");
         }
         finally
         {
@@ -342,91 +315,154 @@ static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
 }
 
 // ──────────────────────────────────────────
-// Pre-migration schema repair for boolean columns
+// Legacy schema repair: bring a partially-migrated production DB
+// in line with the current EF model BEFORE running migrations.
+// All statements are idempotent (IF NOT EXISTS / IF EXISTS).
 // ──────────────────────────────────────────
-static void RepairBooleanColumns(System.Data.Common.DbConnection conn)
+static void RepairLegacySchema(System.Data.Common.DbConnection conn)
 {
-    Log.Information("SCHEMA REPAIR START");
+    Log.Information("LEGACY SCHEMA REPAIR START");
 
-    var repaired = false;
-    string[] repairs =
+    // Ensure __EFMigrationsHistory exists
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" ("MigrationId" varchar(150) NOT NULL PRIMARY KEY, "ProductVersion" varchar(32) NOT NULL)""");
+
+    // Remove falsely-recorded InitV2 if the schema is incomplete
+    ExecSql(conn, """
+        DO $$ BEGIN
+            IF EXISTS (SELECT 1 FROM "__EFMigrationsHistory" WHERE "MigrationId" = '20260305063008_InitV2')
+               AND EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'Orders')
+               AND NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name = 'Orders' AND column_name = 'BusinessId')
+            THEN
+                DELETE FROM "__EFMigrationsHistory"
+                WHERE "MigrationId" IN (
+                    '20260305063008_InitV2',
+                    '20260305161922_AddAnalyticsFields',
+                    '20260305170406_AddCompositeIndexBusinessCheckout',
+                    '20260305200000_FixBooleanColumnsForPostgres'
+                );
+                RAISE NOTICE 'Removed falsely-recorded migrations from history';
+            END IF;
+        END $$;
+    """);
+
+    // ── Tables (CREATE IF NOT EXISTS) ──
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "Businesses" ("Id" uuid NOT NULL PRIMARY KEY, "Name" text NOT NULL, "PhoneNumberId" text NOT NULL, "AccessToken" text NOT NULL, "AdminKey" text NOT NULL, "IsActive" boolean NOT NULL DEFAULT true, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "Customers" ("Id" uuid NOT NULL PRIMARY KEY, "BusinessId" uuid, "PhoneE164" text NOT NULL, "Name" text, "TotalSpent" numeric(12,2) NOT NULL DEFAULT 0, "OrdersCount" integer NOT NULL DEFAULT 0, "FirstSeenAtUtc" timestamp NOT NULL DEFAULT now(), "LastSeenAtUtc" timestamp, "LastPurchaseAtUtc" timestamp)""");
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "Products" ("Id" uuid NOT NULL PRIMARY KEY, "Name" text NOT NULL, "Price" numeric NOT NULL DEFAULT 0)""");
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "ConversationStates" ("ConversationId" varchar(256) NOT NULL PRIMARY KEY, "BusinessId" uuid, "UpdatedAtUtc" timestamp NOT NULL DEFAULT now(), "StateJson" text NOT NULL DEFAULT '{}')""");
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "ProcessedMessages" ("Id" uuid NOT NULL PRIMARY KEY, "ConversationId" varchar(256) NOT NULL, "MessageId" varchar(256) NOT NULL, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "Orders" ("Id" uuid NOT NULL PRIMARY KEY, "From" text NOT NULL, "PhoneNumberId" text NOT NULL, "DeliveryType" text NOT NULL DEFAULT 'pickup', "Status" text NOT NULL DEFAULT 'Pending', "CreatedAtUtc" timestamp NOT NULL DEFAULT now(), "CheckoutFormSent" boolean NOT NULL DEFAULT false, "CheckoutCompleted" boolean NOT NULL DEFAULT false)""");
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "OrderItems" ("Id" uuid NOT NULL PRIMARY KEY, "OrderId" uuid NOT NULL, "Name" text NOT NULL, "Quantity" integer NOT NULL DEFAULT 1, "UnitPrice" numeric(12,2), "LineTotal" numeric(12,2))""");
+
+    // ── Missing columns on Orders (ADD COLUMN IF NOT EXISTS) ──
+    string[] orderColumns =
     [
-        """
-        DO $$ BEGIN
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'Businesses' AND column_name = 'IsActive' AND data_type <> 'boolean'
-            ) THEN
-                ALTER TABLE "Businesses" ALTER COLUMN "IsActive" TYPE boolean USING CASE WHEN "IsActive" = 0 THEN false ELSE true END;
-                RAISE NOTICE 'Repaired Businesses.IsActive';
-            END IF;
-        END $$;
-        """,
-        """
-        DO $$ BEGIN
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'Orders' AND column_name = 'CheckoutCompleted' AND data_type <> 'boolean'
-            ) THEN
-                ALTER TABLE "Orders" ALTER COLUMN "CheckoutCompleted" TYPE boolean USING CASE WHEN "CheckoutCompleted" = 0 THEN false ELSE true END;
-                RAISE NOTICE 'Repaired Orders.CheckoutCompleted';
-            END IF;
-        END $$;
-        """,
-        """
-        DO $$ BEGIN
-            IF EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_name = 'Orders' AND column_name = 'CheckoutFormSent' AND data_type <> 'boolean'
-            ) THEN
-                ALTER TABLE "Orders" ALTER COLUMN "CheckoutFormSent" TYPE boolean USING CASE WHEN "CheckoutFormSent" = 0 THEN false ELSE true END;
-                RAISE NOTICE 'Repaired Orders.CheckoutFormSent';
-            END IF;
-        END $$;
-        """
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "BusinessId" uuid""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "CustomerId" uuid""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "CustomerName" text""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "CustomerIdNumber" text""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "CustomerPhone" text""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "Address" text""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PaymentMethod" text""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "ReceiverName" text""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "AdditionalNotes" text""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "LocationLat" numeric(9,6)""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "LocationLng" numeric(9,6)""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "LocationText" text""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "CheckoutCompletedAtUtc" timestamp""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "LastNotifiedStatus" text""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "LastNotifiedAtUtc" timestamp""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "SubtotalAmount" numeric(12,2)""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "TotalAmount" numeric(12,2)""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "AcceptedAtUtc" timestamp""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "DeliveredAtUtc" timestamp""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "DeliveryFee" numeric(12,2)""",
+        """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PreparingAtUtc" timestamp""",
     ];
-
-    foreach (var sql in repairs)
+    foreach (var sql in orderColumns)
     {
-        try
-        {
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = sql;
-            cmd.ExecuteNonQuery();
-            repaired = true;
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "SCHEMA REPAIR: non-fatal error during column repair");
-        }
+        if (ExecSql(conn, sql))
+            Log.Information("LEGACY COLUMN ADDED: {Col}", sql.Replace("""ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS """, "Orders."));
     }
 
-    Log.Information(repaired ? "SCHEMA REPAIR APPLIED" : "SCHEMA REPAIR SKIPPED (no changes needed or tables don't exist yet)");
+    // ── Boolean column repair ──
+    string[] boolRepairs =
+    [
+        """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Businesses' AND column_name='IsActive' AND data_type<>'boolean') THEN ALTER TABLE "Businesses" ALTER COLUMN "IsActive" TYPE boolean USING CASE WHEN "IsActive"=0 THEN false ELSE true END; END IF; END $$""",
+        """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CheckoutCompleted' AND data_type<>'boolean') THEN ALTER TABLE "Orders" ALTER COLUMN "CheckoutCompleted" TYPE boolean USING CASE WHEN "CheckoutCompleted"=0 THEN false ELSE true END; END IF; END $$""",
+        """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CheckoutFormSent' AND data_type<>'boolean') THEN ALTER TABLE "Orders" ALTER COLUMN "CheckoutFormSent" TYPE boolean USING CASE WHEN "CheckoutFormSent"=0 THEN false ELSE true END; END IF; END $$""",
+    ];
+    var boolFixed = false;
+    foreach (var sql in boolRepairs)
+    {
+        if (ExecSql(conn, sql)) boolFixed = true;
+    }
+    Log.Information(boolFixed ? "LEGACY BOOL REPAIR APPLIED" : "LEGACY BOOL REPAIR SKIPPED");
+
+    // ── Indexes (IF NOT EXISTS) ──
+    ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Businesses_PhoneNumberId" ON "Businesses" ("PhoneNumberId")""");
+    ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Customers_BusinessId_PhoneE164" ON "Customers" ("BusinessId", "PhoneE164")""");
+    ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_OrderItems_OrderId" ON "OrderItems" ("OrderId")""");
+    ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_Orders_CustomerId" ON "Orders" ("CustomerId")""");
+    ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_Orders_BusinessId" ON "Orders" ("BusinessId")""");
+    ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_Orders_CreatedAtUtc" ON "Orders" ("CreatedAtUtc")""");
+    ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_Orders_BusinessId_CheckoutCompleted" ON "Orders" ("BusinessId", "CheckoutCompleted")""");
+    ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_ProcessedMessages_ConversationId_MessageId" ON "ProcessedMessages" ("ConversationId", "MessageId")""");
+
+    // ── Foreign keys (check before adding) ──
+    AddFkIfMissing(conn, "FK_ProcessedMessages_ConversationStates_ConversationId",
+        """ALTER TABLE "ProcessedMessages" ADD CONSTRAINT "FK_ProcessedMessages_ConversationStates_ConversationId" FOREIGN KEY ("ConversationId") REFERENCES "ConversationStates" ("ConversationId") ON DELETE CASCADE""");
+    AddFkIfMissing(conn, "FK_Orders_Customers_CustomerId",
+        """ALTER TABLE "Orders" ADD CONSTRAINT "FK_Orders_Customers_CustomerId" FOREIGN KEY ("CustomerId") REFERENCES "Customers" ("Id") ON DELETE SET NULL""");
+    AddFkIfMissing(conn, "FK_OrderItems_Orders_OrderId",
+        """ALTER TABLE "OrderItems" ADD CONSTRAINT "FK_OrderItems_Orders_OrderId" FOREIGN KEY ("OrderId") REFERENCES "Orders" ("Id") ON DELETE CASCADE""");
+
+    // ── Mark all known migrations as applied ──
+    // After repair, the schema is fully aligned with what all these migrations produce.
+    string[] allMigrations =
+    [
+        "20260305063008_InitV2",
+        "20260305161922_AddAnalyticsFields",
+        "20260305170406_AddCompositeIndexBusinessCheckout",
+        "20260305200000_FixBooleanColumnsForPostgres",
+    ];
+    foreach (var mid in allMigrations)
+    {
+        ExecSql(conn, $"""INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion") VALUES ('{mid}', '8.0.11') ON CONFLICT ("MigrationId") DO NOTHING""");
+    }
+
+    Log.Information("LEGACY SCHEMA REPAIR DONE");
 }
 
-// ──────────────────────────────────────────
-// Record a migration as applied in __EFMigrationsHistory
-// ──────────────────────────────────────────
-static void RecordMigrationAsApplied(System.Data.Common.DbConnection conn, string migrationId)
+static bool ExecSql(System.Data.Common.DbConnection conn, string sql)
 {
     try
     {
         using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
-            VALUES (@mid, '8.0.11')
-            ON CONFLICT ("MigrationId") DO NOTHING
-            """;
-        var param = cmd.CreateParameter();
-        param.ParameterName = "@mid";
-        param.Value = migrationId;
-        cmd.Parameters.Add(param);
+        cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
-        Log.Information("MIGRATE: recorded {Migration} in history", migrationId);
+        return true;
     }
     catch (Exception ex)
     {
-        Log.Warning(ex, "MIGRATE: failed to record {Migration} in history", migrationId);
+        Log.Warning("LEGACY REPAIR SQL warning: {Message} — SQL: {Sql}", ex.Message, sql[..Math.Min(sql.Length, 120)]);
+        return false;
+    }
+}
+
+static void AddFkIfMissing(System.Data.Common.DbConnection conn, string constraintName, string alterSql)
+{
+    try
+    {
+        using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = $"SELECT 1 FROM pg_constraint WHERE conname = '{constraintName}'";
+        var exists = checkCmd.ExecuteScalar() is not null;
+        if (!exists)
+            ExecSql(conn, alterSql);
+    }
+    catch (Exception ex)
+    {
+        Log.Warning("LEGACY FK check warning: {Message}", ex.Message);
     }
 }
 
