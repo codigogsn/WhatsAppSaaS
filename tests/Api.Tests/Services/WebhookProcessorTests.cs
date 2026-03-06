@@ -1351,4 +1351,360 @@ public class WebhookProcessorTests
         state.ObservationAnswered.Should().BeFalse();
         state.Items.Should().BeEmpty();
     }
+
+    // ══════════════════════════════════════════════════
+    // Checkout Form Parsing Tests
+    // ══════════════════════════════════════════════════
+
+    [Fact]
+    public void TryParseCheckoutForm_LabeledFormat_ParsesCorrectly()
+    {
+        var text = "Nombre: Adal\nC\u00e9dula: 27302670\nTel\u00e9fono: 04242309349\nDirecci\u00f3n: Alto Hatillo\nPago: pago m\u00f3vil";
+
+        WebhookProcessor.TryParseCheckoutForm(text, out var form).Should().BeTrue();
+
+        form.CustomerName.Should().Be("Adal");
+        form.CustomerIdNumber.Should().Be("27302670");
+        form.CustomerPhone.Should().Be("04242309349");
+        form.Address.Should().Be("Alto Hatillo");
+        form.PaymentMethod.Should().Be("pago_movil");
+    }
+
+    [Fact]
+    public void TryParseCheckoutForm_PlainMultiline_ParsesCorrectly()
+    {
+        var text = "adal\n27302670\n04242309349\nalto hatillo\npago movil";
+
+        WebhookProcessor.TryParseCheckoutForm(text, out var form).Should().BeTrue();
+
+        form.CustomerName.Should().Be("adal");
+        form.CustomerIdNumber.Should().Be("27302670");
+        form.CustomerPhone.Should().Be("04242309349");
+        form.Address.Should().Be("alto hatillo");
+        form.PaymentMethod.Should().Be("pago_movil");
+    }
+
+    [Fact]
+    public void TryParseCheckoutForm_HybridFormat_ParsesCorrectly()
+    {
+        var text = "Adal\n27302670\n04242309349\nDirecci\u00f3n: Alto Hatillo\nPago m\u00f3vil";
+
+        WebhookProcessor.TryParseCheckoutForm(text, out var form).Should().BeTrue();
+
+        form.CustomerName.Should().Be("Adal");
+        form.CustomerIdNumber.Should().Be("27302670");
+        form.CustomerPhone.Should().Be("04242309349");
+        form.Address.Should().Be("Alto Hatillo");
+        form.PaymentMethod.Should().Be("pago_movil");
+    }
+
+    [Fact]
+    public void TryParseCheckoutForm_PhoneOnlyLine_Recognized()
+    {
+        var text = "Maria\n04141234567";
+
+        WebhookProcessor.TryParseCheckoutForm(text, out var form).Should().BeTrue();
+
+        form.CustomerName.Should().Be("Maria");
+        form.CustomerPhone.Should().Be("04141234567");
+    }
+
+    [Fact]
+    public void TryParseCheckoutForm_CedulaOnlyLine_Recognized()
+    {
+        var text = "Jose\n18456789";
+
+        WebhookProcessor.TryParseCheckoutForm(text, out var form).Should().BeTrue();
+
+        form.CustomerName.Should().Be("Jose");
+        form.CustomerIdNumber.Should().Be("18456789");
+    }
+
+    [Fact]
+    public void TryParseCheckoutForm_PaymentOnlyLine_Recognized()
+    {
+        var text = "Maria\nefectivo";
+
+        WebhookProcessor.TryParseCheckoutForm(text, out var form).Should().BeTrue();
+
+        form.CustomerName.Should().Be("Maria");
+        form.PaymentMethod.Should().Be("efectivo");
+    }
+
+    [Theory]
+    [InlineData("pago movil", "pago_movil")]
+    [InlineData("pago m\u00f3vil", "pago_movil")]
+    [InlineData("pm", "pago_movil")]
+    [InlineData("efectivo", "efectivo")]
+    [InlineData("cash", "efectivo")]
+    [InlineData("divisas", "divisas")]
+    public void NormalizePaymentMethod_VariousInputs(string input, string expected)
+    {
+        WebhookProcessor.NormalizePaymentMethod(input).Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task CheckoutForm_PlainMultiline_MergesIntoState()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.CheckoutFormSent = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "adal\n27302670\n04242309349\nalto hatillo\npago movil"),
+            _testBusiness);
+
+        state.CustomerName.Should().Be("adal");
+        state.CustomerIdNumber.Should().Be("27302670");
+        state.CustomerPhone.Should().Be("04242309349");
+        state.Address.Should().Be("alto hatillo");
+        state.PaymentMethod.Should().Be("pago_movil");
+
+        sentMessages.Should().Contain(m => m.Body.Contains("CONFIRMAR"));
+    }
+
+    [Fact]
+    public async Task CheckoutForm_PartialSubmission_MergesAndKeepsPrevious()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.CheckoutFormSent = true;
+        state.CustomerName = "Carlos";  // Already have name
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Send only phone and cedula
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "18456789\n04141234567"),
+            _testBusiness);
+
+        state.CustomerName.Should().Be("Carlos"); // Kept from before
+        state.CustomerIdNumber.Should().Be("18456789");
+        state.CustomerPhone.Should().Be("04141234567");
+    }
+
+    [Fact]
+    public async Task ConfirmBeforeFullData_ShowsCanonicalMissingFields()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.CheckoutFormSent = true;
+        // Only name filled, everything else missing
+
+        state.CustomerName = "Juan";
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        var reply = sentMessages.Last().Body;
+        reply.Should().Contain("A\u00fan falta informaci\u00f3n para confirmar.");
+        reply.Should().Contain("\u2022 \ud83e\udeaa C\u00e9dula:");
+        reply.Should().Contain("\u2022 \ud83d\udcf1 Tel\u00e9fono:");
+        reply.Should().Contain("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
+        reply.Should().Contain("\u2022 \ud83d\udcb5 Pago:");
+        reply.Should().NotContain("\u2022 \ud83d\udc64 Nombre:"); // Name already filled
+        reply.Should().Contain("Luego escribe *CONFIRMAR*.");
+        reply.Should().Contain("l\u00edneas separadas");
+    }
+
+    [Fact]
+    public async Task ConfirmBeforeFullData_DoesNotCorruptExistingState()
+    {
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.CheckoutFormSent = true;
+        state.CustomerName = "Juan";
+        state.CustomerPhone = "04141234567";
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        // State should not be corrupted
+        state.CustomerName.Should().Be("Juan");
+        state.CustomerPhone.Should().Be("04141234567");
+        state.Items.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public void IsVenezuelanPhone_VariousFormats()
+    {
+        WebhookProcessor.IsVenezuelanPhone("04242309349").Should().BeTrue();
+        WebhookProcessor.IsVenezuelanPhone("04141234567").Should().BeTrue();
+        WebhookProcessor.IsVenezuelanPhone("04121234567").Should().BeTrue();
+        WebhookProcessor.IsVenezuelanPhone("+584242309349").Should().BeTrue();
+        WebhookProcessor.IsVenezuelanPhone("584242309349").Should().BeTrue();
+        WebhookProcessor.IsVenezuelanPhone("12345").Should().BeFalse();
+        WebhookProcessor.IsVenezuelanPhone("27302670").Should().BeFalse();
+    }
+
+    [Fact]
+    public void BuildCanonicalMissingFieldsMessage_FormatIsStable()
+    {
+        var missing = new List<string>
+        {
+            "\u2022 \ud83c\udfe1 Direcci\u00f3n:",
+        };
+
+        var result = WebhookProcessor.BuildCanonicalMissingFieldsMessage(missing);
+        result.Should().Contain("A\u00fan falta informaci\u00f3n para confirmar.");
+        result.Should().Contain("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
+        result.Should().Contain("l\u00edneas separadas");
+        result.Should().Contain("Luego escribe *CONFIRMAR*.");
+    }
+
+    [Fact]
+    public async Task CheckoutPrompt_IncludesMultiFormatInstruction()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        // CheckoutFormSent = false => should trigger checkout prompt
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Trigger via quick order that reaches BuildOrderReplyFromState
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "1 hamburguesa delivery"), _testBusiness);
+
+        var checkoutPrompt = sentMessages.FirstOrDefault(m => m.Body.Contains("Nombre:"));
+        checkoutPrompt.Should().NotBeNull();
+        checkoutPrompt!.Body.Should().Contain("l\u00edneas separadas");
+        checkoutPrompt.Body.Should().Contain("planilla");
+    }
+
+    [Fact]
+    public async Task FullFlow_PlainCheckout_GpsAndConfirm()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // State: ready for checkout form
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.CheckoutFormSent = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Step 1: Send plain multiline checkout
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "Juan\n27302670\n04242309349\nalto hatillo\nefectivo"),
+            _testBusiness);
+
+        state.CustomerName.Should().Be("Juan");
+        state.PaymentMethod.Should().Be("efectivo");
+
+        // Step 2: GPS pin
+        state.GpsPinReceived = true;
+
+        // Step 3: Confirm
+        sentMessages.Clear();
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        var receipt = sentMessages.FirstOrDefault(m => m.Body.Contains("PEDIDO CONFIRMADO"));
+        receipt.Should().NotBeNull();
+        receipt!.Body.Should().Contain("Nombre: Juan");
+        receipt.Body.Should().Contain("2 Hamburguesa");
+    }
+
+    [Fact]
+    public async Task SpecialInstructions_StillWorksWithPlainCheckout()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.SpecialInstructions = "sin cebolla";
+        state.CheckoutFormSent = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Plain multiline checkout
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "Maria\n18456789\n04141234567\nla castellana\nefectivo"),
+            _testBusiness);
+
+        state.CustomerName.Should().Be("Maria");
+        state.SpecialInstructions.Should().Be("sin cebolla"); // Preserved
+
+        // GPS + confirm
+        state.GpsPinReceived = true;
+        sentMessages.Clear();
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        var receipt = sentMessages.FirstOrDefault(m => m.Body.Contains("PEDIDO CONFIRMADO"));
+        receipt.Should().NotBeNull();
+        receipt!.Body.Should().Contain("sin cebolla");
+    }
 }

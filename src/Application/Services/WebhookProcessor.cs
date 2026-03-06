@@ -166,7 +166,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         // Now continue to checkout form
                         state.CheckoutFormSent = true;
 
-                        var obsReply = "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udeaa *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nLuego escribe *CONFIRMAR*.";
+                        var obsReply = "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udeaa *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nPuedes responder copiando y pegando esta planilla\no enviando los datos en l\u00edneas separadas.\n\nLuego escribe *CONFIRMAR*.";
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -545,7 +545,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         {
             state.CheckoutFormSent = true;
 
-            return "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udeaa *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nLuego escribe *CONFIRMAR*.";
+            return "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udeaa *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nPuedes responder copiando y pegando esta planilla\no enviando los datos en l\u00edneas separadas.\n\nLuego escribe *CONFIRMAR*.";
         }
 
         return "\u2705 Escribe *CONFIRMAR* para finalizar.";
@@ -565,17 +565,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return "Indica si es *pick up* o *delivery*.";
 
         var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("\ud83d\udc64 Nombre");
-        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("\ud83e\udeaa C\u00e9dula");
-        if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("\ud83d\udcf1 Tel\u00e9fono");
-        if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("\ud83c\udfe1 Direcci\u00f3n");
-        if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("\ud83d\udcb5 Pago");
-        if (!state.GpsPinReceived) missing.Add("\ud83d\udccd Ubicaci\u00f3n GPS (pin)");
+        if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("\u2022 \ud83d\udc64 Nombre:");
+        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("\u2022 \ud83e\udeaa C\u00e9dula:");
+        if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("\u2022 \ud83d\udcf1 Tel\u00e9fono:");
+        if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
+        if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("\u2022 \ud83d\udcb5 Pago:");
+        if (!state.GpsPinReceived) missing.Add("\u2022 \ud83d\udccd Ubicaci\u00f3n GPS (pin)");
 
         if (missing.Count > 0)
         {
-            return
-$"A\u00fan falta informaci\u00f3n para confirmar.\n\nEnv\u00edanos al menos:\n- {string.Join("\n- ", missing)}\n\nLuego escribe *CONFIRMAR*.";
+            return BuildCanonicalMissingFieldsMessage(missing);
         }
 
         var customerPhoneE164 = NormalizeToE164(state.CustomerPhone) ?? NormalizeToE164(from) ?? state.CustomerPhone;
@@ -974,16 +973,15 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
 
         if (lines.Length == 0) return false;
 
-        string? GetValue(string key)
+        // Phase 1: Try labeled extraction for each field
+        string? GetLabeledValue(string key)
         {
             foreach (var line in lines)
             {
                 var l = line.Trim();
-                // Strip leading emoji + whitespace for label matching
                 var stripped = Regex.Replace(l, @"^[\p{So}\p{Cs}\ufe0f\u200d]+\s*", "");
-                // Also strip leading WhatsApp bold markers
                 stripped = stripped.TrimStart('*');
-                var ln = stripped.ToLowerInvariant();
+                var ln = StripAccents(stripped.ToLowerInvariant());
 
                 if (ln.StartsWith(key))
                 {
@@ -998,36 +996,100 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
             return null;
         }
 
-        form.CustomerName = CleanFieldValue(GetValue("nombre"));
-        form.CustomerIdNumber = CleanFieldValue(GetValue("cedula") ?? GetValue("c\u00e9dula"));
-        form.CustomerPhone = CleanFieldValue(GetValue("telefono") ?? GetValue("tel\u00e9fono"));
-        form.Address = CleanFieldValue(GetValue("direccion") ?? GetValue("direcci\u00f3n"));
-        var pay = GetValue("pago");
-        var loc = GetValue("ubicacion") ?? GetValue("ubicaci\u00f3n");
+        form.CustomerName = CleanFieldValue(GetLabeledValue("nombre"));
+        form.CustomerIdNumber = CleanFieldValue(GetLabeledValue("cedula"));
+        form.CustomerPhone = CleanFieldValue(GetLabeledValue("telefono"));
+        form.Address = CleanFieldValue(GetLabeledValue("direccion"));
+        var payLabeled = GetLabeledValue("pago");
+        var locLabeled = GetLabeledValue("ubicacion");
 
-        form.LocationText = string.IsNullOrWhiteSpace(loc) ? null : loc;
-
-        if (!string.IsNullOrWhiteSpace(pay))
+        if (!string.IsNullOrWhiteSpace(locLabeled))
         {
-            // Strip template echo like "EFECTIVO / DIVISAS / PAGO MÓVIL" — take only the user's actual choice
-            var cleanPay = pay.Trim();
-            if (cleanPay.Contains('/'))
+            form.LocationText = locLabeled;
+        }
+
+        if (!string.IsNullOrWhiteSpace(payLabeled))
+            form.PaymentMethod = NormalizePaymentMethod(payLabeled);
+
+        // Phase 2: Smart inference for unlabeled lines
+        // Collect lines not yet consumed by labeled extraction
+        var unlabeled = new List<string>();
+        foreach (var line in lines)
+        {
+            var stripped = Regex.Replace(line.Trim(), @"^[\p{So}\p{Cs}\ufe0f\u200d]+\s*", "").TrimStart('*');
+            var ln = StripAccents(stripped.ToLowerInvariant());
+
+            // Skip lines that were consumed by labeled extraction
+            bool isLabeled = ln.StartsWith("nombre") || ln.StartsWith("cedula")
+                || ln.StartsWith("telefono") || ln.StartsWith("direccion")
+                || ln.StartsWith("pago") || ln.StartsWith("ubicacion");
+            if (isLabeled && (stripped.Contains(':') || stripped.Contains('-') || stripped.Contains('=')))
+                continue;
+
+            // Skip "OBLIGATORIO", "CONFIRMAR", "GPS" template lines
+            if (ln is "obligatorio" or "confirmar" or "gps" or "✅ obligatorio"
+                || ln.Contains("manda el pin") || ln.Contains("luego escribe"))
+                continue;
+
+            unlabeled.Add(line.Trim());
+        }
+
+        // Infer fields from unlabeled lines
+        foreach (var line in unlabeled)
+        {
+            var clean = Regex.Replace(line, @"^[\p{So}\p{Cs}\ufe0f\u200d]+\s*", "").TrimStart('*').Trim();
+            if (string.IsNullOrWhiteSpace(clean)) continue;
+
+            var cleanLower = StripAccents(clean.ToLowerInvariant());
+            var digitsOnly = new string(clean.Where(char.IsDigit).ToArray());
+
+            // Phone detection: Venezuelan mobile patterns (04XX, +58, 58XX)
+            if (form.CustomerPhone is null && IsVenezuelanPhone(clean))
             {
-                // User likely pasted the template options; take the whole thing and detect below
+                form.CustomerPhone = CleanFieldValue(clean);
+                continue;
             }
-            var p = StripAccents(cleanPay.ToLowerInvariant());
 
-            // Deduplicate repeated tokens (e.g. "pago movil pago movil" → "pago movil")
-            p = DeduplicateTokens(p);
+            // ID detection: 6-10 digit number (not a phone)
+            if (form.CustomerIdNumber is null
+                && digitsOnly.Length >= 6 && digitsOnly.Length <= 10
+                && Regex.IsMatch(clean, @"^[VvEeJjGg]?[\-\.]?\d[\d\.\-]*$"))
+            {
+                form.CustomerIdNumber = CleanFieldValue(clean);
+                continue;
+            }
 
-            if (p.Contains("pago") && p.Contains("mov"))
-                form.PaymentMethod = "pago_movil";
-            else if (p.Contains("divis") || p.Contains("usd") || p.Contains("dolar"))
-                form.PaymentMethod = "divisas";
-            else if (p.Contains("efect"))
-                form.PaymentMethod = "efectivo";
-            else
-                form.PaymentMethod = p.Replace(" ", "_");
+            // Payment detection
+            if (form.PaymentMethod is null)
+            {
+                var payNorm = NormalizePaymentMethod(clean);
+                if (payNorm is not null)
+                {
+                    form.PaymentMethod = payNorm;
+                    continue;
+                }
+            }
+
+            // Address detection: longer text with address-like patterns
+            if (form.Address is null && LooksLikeAddress(cleanLower))
+            {
+                form.Address = CleanFieldValue(clean);
+                continue;
+            }
+
+            // Name detection: first remaining human-looking text (alpha, short-ish)
+            if (form.CustomerName is null && Regex.IsMatch(clean, @"^[A-Za-zÀ-ÿ\s\.\-']+$") && clean.Length <= 80)
+            {
+                form.CustomerName = CleanFieldValue(clean);
+                continue;
+            }
+
+            // Fallback: if address not set and it's longer text, treat as address
+            if (form.Address is null && clean.Length >= 4)
+            {
+                form.Address = CleanFieldValue(clean);
+                continue;
+            }
         }
 
         var filled =
@@ -1038,7 +1100,71 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
             + (string.IsNullOrWhiteSpace(form.PaymentMethod) ? 0 : 1)
             + (string.IsNullOrWhiteSpace(form.LocationText) ? 0 : 1);
 
-        return filled >= 3;
+        return filled >= 2;
+    }
+
+    internal static bool IsVenezuelanPhone(string value)
+    {
+        var digits = new string(value.Where(char.IsDigit).ToArray());
+        if (digits.Length < 10 || digits.Length > 13) return false;
+
+        // +584XX, 584XX, 04XX patterns
+        if (digits.StartsWith("58") && digits.Length >= 12) return true;
+        if (digits.StartsWith("0") && digits.Length >= 10 && digits.Length <= 11)
+        {
+            var after0 = digits[1..];
+            if (after0.StartsWith("4") || after0.StartsWith("2"))
+                return true;
+        }
+        // Also match if value starts with + and has 12-13 digits
+        if (value.TrimStart().StartsWith("+") && digits.Length >= 10) return true;
+
+        return false;
+    }
+
+    internal static bool LooksLikeAddress(string lowerText)
+    {
+        // Common Venezuelan address tokens
+        return lowerText.Contains("calle") || lowerText.Contains("av ")
+            || lowerText.Contains("avenida") || lowerText.Contains("urbaniz")
+            || lowerText.Contains("res.") || lowerText.Contains("residencia")
+            || lowerText.Contains("quinta") || lowerText.Contains("piso")
+            || lowerText.Contains("apto") || lowerText.Contains("local")
+            || lowerText.Contains("sector") || lowerText.Contains("zona")
+            || lowerText.Contains("centro") || lowerText.Contains("plaza")
+            || lowerText.Contains("torre") || lowerText.Contains("edificio")
+            || lowerText.Contains("edif") || lowerText.Contains("hatillo")
+            || lowerText.Contains("castellana") || lowerText.Contains("altamira")
+            || lowerText.Contains("chacao") || lowerText.Contains("baruta")
+            || lowerText.Contains("el paraiso") || lowerText.Contains("los palos grandes")
+            || lowerText.Contains("carrera") || lowerText.Contains("transversal")
+            || lowerText.Contains("vereda") || lowerText.Contains("esquina")
+            || lowerText.Contains("casa") || lowerText.Contains("apt ")
+            || lowerText.Contains("manzana") || lowerText.Contains("parcela")
+            || lowerText.Contains("conjunto");
+    }
+
+    internal static string? NormalizePaymentMethod(string input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return null;
+
+        var p = StripAccents(input.Trim().ToLowerInvariant());
+        p = DeduplicateTokens(p);
+
+        // If contains template options separator, don't match
+        if (p.Contains('/') && p.Contains("efectivo") && p.Contains("divis"))
+            return null;
+
+        if (p.Contains("pago") && p.Contains("mov"))
+            return "pago_movil";
+        if (p is "pm")
+            return "pago_movil";
+        if (p.Contains("divis") || p.Contains("usd") || p.Contains("dolar"))
+            return "divisas";
+        if (p.Contains("efect") || p is "cash")
+            return "efectivo";
+
+        return null;
     }
 
     // Deduplicate repeated token sequences like "pago movil pago movil" → "pago movil"
@@ -1058,6 +1184,23 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         }
 
         return input;
+    }
+
+    internal static string BuildCanonicalMissingFieldsMessage(List<string> missing)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("A\u00fan falta informaci\u00f3n para confirmar.");
+        sb.AppendLine();
+        sb.AppendLine("Env\u00edanos al menos:");
+        sb.AppendLine();
+        foreach (var field in missing)
+            sb.AppendLine(field);
+        sb.AppendLine();
+        sb.AppendLine("Puedes responder copiando y pegando esta planilla");
+        sb.AppendLine("o enviando los datos en l\u00edneas separadas.");
+        sb.AppendLine();
+        sb.Append("Luego escribe *CONFIRMAR*.");
+        return sb.ToString();
     }
 
     // Clean parsed field values: trim whitespace, collapse spaces, strip template markers
