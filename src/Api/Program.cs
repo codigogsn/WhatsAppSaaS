@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json.Serialization;
+using System.Threading;
 using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -128,20 +129,30 @@ try
 
     // ────────────────────────────────────────
     // ✅ AUTO-MIGRATE (both SQLite and Postgres)
+    // Uses Postgres advisory lock to prevent concurrent migration crashes.
     // ────────────────────────────────────────
     using (var scope = app.Services.CreateScope())
     {
-        try
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var isNpgsql = db.Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
+
+        if (isNpgsql)
         {
-            Log.Information("Applying EF migrations...");
-            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            db.Database.Migrate();
-            Log.Information("EF migrations applied successfully.");
+            ApplyMigrationsWithAdvisoryLock(db);
         }
-        catch (Exception ex)
+        else
         {
-            Log.Fatal(ex, "Failed applying EF migrations on startup.");
-            throw;
+            try
+            {
+                Log.Information("MIGRATE START (SQLite)");
+                db.Database.Migrate();
+                Log.Information("MIGRATE OK (SQLite)");
+            }
+            catch (Exception ex)
+            {
+                Log.Fatal(ex, "Failed applying EF migrations on startup.");
+                throw;
+            }
         }
     }
 
@@ -166,6 +177,82 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+// ──────────────────────────────────────────
+// Postgres-safe migration with advisory lock
+// ──────────────────────────────────────────
+static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
+{
+    const long lockId = 920_717; // arbitrary unique ID for this app's migration lock
+    const int maxRetries = 3;
+
+    var conn = db.Database.GetDbConnection();
+    conn.Open();
+    try
+    {
+        // Acquire advisory lock (blocks until available or timeout)
+        Log.Information("MIGRATION LOCK WAITING...");
+        using (var lockCmd = conn.CreateCommand())
+        {
+            lockCmd.CommandText = $"SET lock_timeout = '60s'; SELECT pg_advisory_lock({lockId})";
+            lockCmd.CommandTimeout = 70;
+            lockCmd.ExecuteNonQuery();
+        }
+        Log.Information("MIGRATION LOCK ACQUIRED");
+
+        try
+        {
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            {
+                try
+                {
+                    Log.Information("MIGRATE START (Postgres) attempt {Attempt}/{Max}", attempt, maxRetries);
+                    db.Database.Migrate();
+                    Log.Information("MIGRATE OK (Postgres)");
+                    return;
+                }
+                catch (Npgsql.PostgresException pgEx) when (pgEx.SqlState == "42P07")
+                {
+                    // "relation already exists" — another process created it; safe to ignore
+                    Log.Warning("MIGRATE WARNING: relation already exists (42P07), treating as success. Detail: {Detail}", pgEx.MessageText);
+                    return;
+                }
+                catch (Exception ex) when (attempt < maxRetries)
+                {
+                    Log.Warning(ex, "MIGRATE RETRY: transient error on attempt {Attempt}/{Max}", attempt, maxRetries);
+                    Thread.Sleep(2000 * attempt);
+                }
+            }
+            // Final attempt — let it throw
+            Log.Information("MIGRATE START (Postgres) final attempt");
+            db.Database.Migrate();
+            Log.Information("MIGRATE OK (Postgres)");
+        }
+        finally
+        {
+            try
+            {
+                using var unlockCmd = conn.CreateCommand();
+                unlockCmd.CommandText = $"SELECT pg_advisory_unlock({lockId})";
+                unlockCmd.ExecuteNonQuery();
+                Log.Information("MIGRATION LOCK RELEASED");
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "MIGRATION LOCK RELEASE failed (non-fatal)");
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Fatal(ex, "Failed applying EF migrations on startup.");
+        throw;
+    }
+    finally
+    {
+        conn.Close();
+    }
 }
 
 // ──────────────────────────────────────────
