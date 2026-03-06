@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
@@ -261,14 +262,12 @@ static void SeedDefaultBusiness(IServiceProvider services)
 // ──────────────────────────────────────────
 static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
 {
-    const long lockId = 920_717; // arbitrary unique ID for this app's migration lock
-    const int maxRetries = 3;
+    const long lockId = 920_717;
 
     var conn = db.Database.GetDbConnection();
     conn.Open();
     try
     {
-        // Acquire advisory lock (blocks until available or timeout)
         Log.Information("MIGRATION LOCK WAITING...");
         using (var lockCmd = conn.CreateCommand())
         {
@@ -280,31 +279,41 @@ static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
 
         try
         {
-            for (int attempt = 1; attempt <= maxRetries; attempt++)
+            // ── Step 1: Schema repair BEFORE EF migrations ──
+            RepairBooleanColumns(conn);
+
+            // ── Step 2: Apply migrations one-by-one ──
+            // Do NOT use a single Migrate() call — if one migration fails with 42P07
+            // (table already exists from old migrations), we record it and continue
+            // so remaining migrations (like FixBooleanColumnsForPostgres) still run.
+            var migrator = db.GetInfrastructure().GetRequiredService<Microsoft.EntityFrameworkCore.Migrations.IMigrator>();
+            var pending = db.Database.GetPendingMigrations().ToList();
+
+            if (pending.Count == 0)
             {
-                try
+                Log.Information("MIGRATE: no pending migrations (Postgres)");
+            }
+            else
+            {
+                Log.Information("MIGRATE: {Count} pending migrations: {Migrations}", pending.Count, string.Join(", ", pending));
+                foreach (var migration in pending)
                 {
-                    Log.Information("MIGRATE START (Postgres) attempt {Attempt}/{Max}", attempt, maxRetries);
-                    db.Database.Migrate();
-                    Log.Information("MIGRATE OK (Postgres)");
-                    return;
-                }
-                catch (Npgsql.PostgresException pgEx) when (pgEx.SqlState == "42P07")
-                {
-                    // "relation already exists" — another process created it; safe to ignore
-                    Log.Warning("MIGRATE WARNING: relation already exists (42P07), treating as success. Detail: {Detail}", pgEx.MessageText);
-                    return;
-                }
-                catch (Exception ex) when (attempt < maxRetries)
-                {
-                    Log.Warning(ex, "MIGRATE RETRY: transient error on attempt {Attempt}/{Max}", attempt, maxRetries);
-                    Thread.Sleep(2000 * attempt);
+                    try
+                    {
+                        Log.Information("MIGRATE START: {Migration}", migration);
+                        migrator.Migrate(migration);
+                        Log.Information("MIGRATE OK: {Migration}", migration);
+                    }
+                    catch (Npgsql.PostgresException pgEx) when (pgEx.SqlState == "42P07")
+                    {
+                        Log.Warning("MIGRATE 42P07: {Migration} — objects already exist, recording as applied. Detail: {Detail}",
+                            migration, pgEx.MessageText);
+                        RecordMigrationAsApplied(conn, migration);
+                    }
                 }
             }
-            // Final attempt — let it throw
-            Log.Information("MIGRATE START (Postgres) final attempt");
-            db.Database.Migrate();
-            Log.Information("MIGRATE OK (Postgres)");
+
+            Log.Information("MIGRATE OK (Postgres) — all migrations processed");
         }
         finally
         {
@@ -329,6 +338,95 @@ static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
     finally
     {
         conn.Close();
+    }
+}
+
+// ──────────────────────────────────────────
+// Pre-migration schema repair for boolean columns
+// ──────────────────────────────────────────
+static void RepairBooleanColumns(System.Data.Common.DbConnection conn)
+{
+    Log.Information("SCHEMA REPAIR START");
+
+    var repaired = false;
+    string[] repairs =
+    [
+        """
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'Businesses' AND column_name = 'IsActive' AND data_type <> 'boolean'
+            ) THEN
+                ALTER TABLE "Businesses" ALTER COLUMN "IsActive" TYPE boolean USING CASE WHEN "IsActive" = 0 THEN false ELSE true END;
+                RAISE NOTICE 'Repaired Businesses.IsActive';
+            END IF;
+        END $$;
+        """,
+        """
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'Orders' AND column_name = 'CheckoutCompleted' AND data_type <> 'boolean'
+            ) THEN
+                ALTER TABLE "Orders" ALTER COLUMN "CheckoutCompleted" TYPE boolean USING CASE WHEN "CheckoutCompleted" = 0 THEN false ELSE true END;
+                RAISE NOTICE 'Repaired Orders.CheckoutCompleted';
+            END IF;
+        END $$;
+        """,
+        """
+        DO $$ BEGIN
+            IF EXISTS (
+                SELECT 1 FROM information_schema.columns
+                WHERE table_name = 'Orders' AND column_name = 'CheckoutFormSent' AND data_type <> 'boolean'
+            ) THEN
+                ALTER TABLE "Orders" ALTER COLUMN "CheckoutFormSent" TYPE boolean USING CASE WHEN "CheckoutFormSent" = 0 THEN false ELSE true END;
+                RAISE NOTICE 'Repaired Orders.CheckoutFormSent';
+            END IF;
+        END $$;
+        """
+    ];
+
+    foreach (var sql in repairs)
+    {
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
+            cmd.ExecuteNonQuery();
+            repaired = true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "SCHEMA REPAIR: non-fatal error during column repair");
+        }
+    }
+
+    Log.Information(repaired ? "SCHEMA REPAIR APPLIED" : "SCHEMA REPAIR SKIPPED (no changes needed or tables don't exist yet)");
+}
+
+// ──────────────────────────────────────────
+// Record a migration as applied in __EFMigrationsHistory
+// ──────────────────────────────────────────
+static void RecordMigrationAsApplied(System.Data.Common.DbConnection conn, string migrationId)
+{
+    try
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO "__EFMigrationsHistory" ("MigrationId", "ProductVersion")
+            VALUES (@mid, '8.0.11')
+            ON CONFLICT ("MigrationId") DO NOTHING
+            """;
+        var param = cmd.CreateParameter();
+        param.ParameterName = "@mid";
+        param.Value = migrationId;
+        cmd.Parameters.Add(param);
+        cmd.ExecuteNonQuery();
+        Log.Information("MIGRATE: recorded {Migration} in history", migrationId);
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "MIGRATE: failed to record {Migration} in history", migrationId);
     }
 }
 
