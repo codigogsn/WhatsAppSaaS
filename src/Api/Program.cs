@@ -156,6 +156,11 @@ try
         }
     }
 
+    // ────────────────────────────────────────
+    // Seed default business from env vars (idempotent)
+    // ────────────────────────────────────────
+    SeedDefaultBusiness(app.Services);
+
     app.UseGlobalExceptionHandling();
     app.UseRequestLogging();
 
@@ -177,6 +182,78 @@ catch (Exception ex)
 finally
 {
     Log.CloseAndFlush();
+}
+
+// ──────────────────────────────────────────
+// Seed default business from environment variables
+// ──────────────────────────────────────────
+static void SeedDefaultBusiness(IServiceProvider services)
+{
+    var phoneNumberId = Environment.GetEnvironmentVariable("WHATSAPP_PHONE_NUMBER_ID");
+    if (string.IsNullOrWhiteSpace(phoneNumberId))
+    {
+        Log.Information("SEED: WHATSAPP_PHONE_NUMBER_ID not set, skipping business seed");
+        return;
+    }
+
+    var accessToken = Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN") ?? "";
+    var adminKey = Environment.GetEnvironmentVariable("WHATSAPP_ADMIN_KEY") ?? "";
+    var businessName = Environment.GetEnvironmentVariable("WHATSAPP_BUSINESS_NAME") ?? "Default Business";
+
+    using var scope = services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+    try
+    {
+        var existing = db.Businesses.FirstOrDefault(b => b.PhoneNumberId == phoneNumberId);
+        if (existing is not null)
+        {
+            // Update token/key if changed in env vars
+            var changed = false;
+            if (!string.IsNullOrWhiteSpace(accessToken) && existing.AccessToken != accessToken)
+            {
+                existing.AccessToken = accessToken;
+                changed = true;
+            }
+            if (!string.IsNullOrWhiteSpace(adminKey) && existing.AdminKey != adminKey)
+            {
+                existing.AdminKey = adminKey;
+                changed = true;
+            }
+            if (!existing.IsActive)
+            {
+                existing.IsActive = true;
+                changed = true;
+            }
+
+            if (changed)
+            {
+                db.SaveChanges();
+                Log.Information("SEED: updated existing business PhoneNumberId={PhoneNumberId}", phoneNumberId);
+            }
+            else
+            {
+                Log.Information("SEED: business already exists PhoneNumberId={PhoneNumberId} IsActive={IsActive}",
+                    phoneNumberId, existing.IsActive);
+            }
+            return;
+        }
+
+        db.Businesses.Add(new WhatsAppSaaS.Domain.Entities.Business
+        {
+            Name = businessName,
+            PhoneNumberId = phoneNumberId,
+            AccessToken = accessToken,
+            AdminKey = adminKey,
+            IsActive = true
+        });
+        db.SaveChanges();
+        Log.Information("SEED: created business PhoneNumberId={PhoneNumberId} Name={Name}", phoneNumberId, businessName);
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "SEED: failed to seed business for PhoneNumberId={PhoneNumberId}", phoneNumberId);
+    }
 }
 
 // ──────────────────────────────────────────
