@@ -131,6 +131,11 @@ public class AppDbContext : DbContext
             b.Property(x => x.AdminKey)
                 .IsRequired();
 
+            // Per-business Pago Móvil config
+            b.Property(x => x.PaymentMobileBank);
+            b.Property(x => x.PaymentMobileId);
+            b.Property(x => x.PaymentMobilePhone);
+
             b.Property(x => x.IsActive)
                 .IsRequired();
 

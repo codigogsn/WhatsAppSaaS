@@ -174,10 +174,10 @@ async function loadSummary(){
   }
 
   const s = await res.json();
-  document.getElementById('kpiOrdersTotal').textContent = s.orders ?? 0;
+  document.getElementById('kpiOrdersTotal').textContent = s.totalOrders ?? 0;
   document.getElementById('kpiUniqueCustomers').textContent = s.uniqueCustomers ?? 0;
-  document.getElementById('kpiTotalRevenue').textContent = (s.totalRevenue ?? 0).toString();
-  document.getElementById('kpiAvgTicket').textContent = (s.avgTicket ?? 0).toString();
+  document.getElementById('kpiTotalRevenue').textContent = (s.totalRevenue ?? 0).toLocaleString('es-VE', {minimumFractionDigits:2});
+  document.getElementById('kpiAvgTicket').textContent = (s.averageTicket ?? 0).toLocaleString('es-VE', {minimumFractionDigits:2});
 }
 
 // KPIs operativos (sobre la lista cargada)

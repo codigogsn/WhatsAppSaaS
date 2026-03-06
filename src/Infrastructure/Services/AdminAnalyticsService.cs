@@ -24,21 +24,19 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
     public async Task<AnalyticsSummaryDto> GetSummaryAsync(CancellationToken ct)
     {
-        var totalOrdersTask = _db.Orders.AsNoTracking().CountAsync(ct);
-        var completedOrdersTask = _db.Orders.AsNoTracking().CountAsync(o => o.CheckoutCompleted, ct);
-        var totalCustomersTask = _db.Customers.AsNoTracking().CountAsync(ct);
-
-        await Task.WhenAll(totalOrdersTask, completedOrdersTask, totalCustomersTask);
-
-        var totalOrders = totalOrdersTask.Result;
-        var completedOrders = completedOrdersTask.Result;
-
-        var revenueRows = await _db.Orders
+        // Pull minimal projections client-side to avoid Npgsql bare-boolean translation issues
+        var orderRows = await _db.Orders
             .AsNoTracking()
-            .Where(o => o.CheckoutCompleted)
-            .Select(o => o.TotalAmount)
+            .Select(o => new { o.CheckoutCompleted, o.TotalAmount })
             .ToListAsync(ct);
-        var totalRevenue = revenueRows.Sum(t => t ?? 0m);
+
+        var totalCustomers = await _db.Customers.AsNoTracking().CountAsync(ct);
+
+        var totalOrders = orderRows.Count;
+        var completedOrders = orderRows.Count(o => o.CheckoutCompleted);
+        var revenueRows = orderRows.Where(o => o.CheckoutCompleted).ToList();
+        var totalRevenue = revenueRows.Sum(o => o.TotalAmount ?? 0m);
+        var avgTicket = completedOrders == 0 ? 0m : Math.Round(totalRevenue / completedOrders, 2);
 
         return new AnalyticsSummaryDto
         {
@@ -46,7 +44,9 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             CompletedOrders = completedOrders,
             PendingOrders = Math.Max(0, totalOrders - completedOrders),
             TotalRevenue = totalRevenue,
-            TotalCustomers = totalCustomersTask.Result
+            TotalCustomers = totalCustomers,
+            UniqueCustomers = totalCustomers,
+            AverageTicket = avgTicket
         };
     }
 

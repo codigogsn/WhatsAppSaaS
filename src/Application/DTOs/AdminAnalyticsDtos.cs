@@ -12,6 +12,8 @@ public sealed class AnalyticsSummaryDto
     public int PendingOrders { get; set; }
     public decimal TotalRevenue { get; set; }
     public int TotalCustomers { get; set; }
+    public int UniqueCustomers { get; set; }
+    public decimal AverageTicket { get; set; }
 }
 
 public sealed class TopProductDto

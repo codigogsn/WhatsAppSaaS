@@ -336,12 +336,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private async Task SendPagoMovilDetailsAsync(
         string to, string phoneNumberId, BusinessContext biz, string conversationId, CancellationToken ct)
     {
-        var bank = ResolvePaymentConfig(_paymentMobile.Bank, "PAYMENT_MOBILE_BANK", "PaymentMobile__Bank")
-            ?? "(no configurado)";
-        var payId = ResolvePaymentConfig(_paymentMobile.Id, "PAYMENT_MOBILE_ID", "PaymentMobile__Id")
-            ?? "(no configurado)";
-        var phone = ResolvePaymentConfig(_paymentMobile.Phone, "PAYMENT_MOBILE_PHONE", "PaymentMobile__Phone")
-            ?? "(no configurado)";
+        // Per-business config → global options → env vars → placeholder
+        var bank = FirstNonEmpty(biz.PaymentMobileBank, _paymentMobile.Bank,
+            Environment.GetEnvironmentVariable("PAYMENT_MOBILE_BANK")) ?? "(no configurado)";
+        var payId = FirstNonEmpty(biz.PaymentMobileId, _paymentMobile.Id,
+            Environment.GetEnvironmentVariable("PAYMENT_MOBILE_ID")) ?? "(no configurado)";
+        var phone = FirstNonEmpty(biz.PaymentMobilePhone, _paymentMobile.Phone,
+            Environment.GetEnvironmentVariable("PAYMENT_MOBILE_PHONE")) ?? "(no configurado)";
 
         // Message 1: Payment details
         await SendAsync(new OutgoingMessage
@@ -362,18 +363,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }, biz.BusinessId, conversationId, ct);
     }
 
-    private static string? ResolvePaymentConfig(string optionsValue, params string[] envKeys)
+    private static string? FirstNonEmpty(params string?[] values)
     {
-        if (!string.IsNullOrWhiteSpace(optionsValue))
-            return optionsValue;
-
-        foreach (var key in envKeys)
+        foreach (var v in values)
         {
-            var val = Environment.GetEnvironmentVariable(key);
-            if (!string.IsNullOrWhiteSpace(val))
-                return val;
+            if (!string.IsNullOrWhiteSpace(v))
+                return v;
         }
-
         return null;
     }
 
