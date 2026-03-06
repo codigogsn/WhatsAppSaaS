@@ -60,6 +60,7 @@ public sealed class OrdersController : ControllerBase
                 o.CheckoutCompletedAtUtc,
                 o.LastNotifiedStatus,
                 o.LastNotifiedAtUtc,
+                o.SpecialInstructions,
                 Items = o.Items.Select(i => new { i.Id, i.Name, i.Quantity })
             })
             .ToListAsync();
@@ -93,6 +94,7 @@ public sealed class OrdersController : ControllerBase
                 x.CheckoutCompletedAtUtc,
                 x.LastNotifiedStatus,
                 x.LastNotifiedAtUtc,
+                x.SpecialInstructions,
                 Items = x.Items.Select(i => new { i.Id, i.Name, i.Quantity })
             })
             .SingleOrDefaultAsync();
