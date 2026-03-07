@@ -108,7 +108,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = "\u2705 Ubicaci\u00f3n recibida. Escribe *CONFIRMAR* para finalizar.",
+                                Body = Msg.GpsReceived,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -128,7 +128,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = "\u2705 Comprobante recibido. Un operador verificar\u00e1 el pago y te confirmamos.",
+                                Body = Msg.PaymentProofReceived,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -153,7 +153,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = "\ud83d\ude4b Perfecto. Tu conversaci\u00f3n fue derivada a un agente humano. En breve te atenderemos.",
+                            Body = Msg.HandoffInitiated,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -172,7 +172,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = "\u23f3 Tu conversaci\u00f3n est\u00e1 en espera de atenci\u00f3n humana. Un agente te atender\u00e1 pronto.",
+                                Body = Msg.HandoffWaiting,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -198,7 +198,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         // Now continue to checkout form
                         state.CheckoutFormSent = true;
 
-                        var obsReply = "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udeaa *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nPuedes responder copiando y pegando esta planilla\no enviando los datos en l\u00edneas separadas.\n\nLuego escribe *CONFIRMAR*.";
+                        var obsReply = Msg.CheckoutForm;
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -250,7 +250,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         {
                             case ModificationType.Add:
                                 AddOrIncreaseItem(state, orderMod.ItemName, orderMod.Quantity);
-                                modReply = $"\u2705 Listo, agregu\u00e9 *{orderMod.Quantity} {orderMod.ItemName}* a tu pedido. Escribe *CONFIRMAR* para finalizar.";
+                                modReply = Msg.ItemAdded(orderMod.Quantity, orderMod.ItemName);
                                 break;
 
                             case ModificationType.Remove:
@@ -262,23 +262,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     if (orderMod.Quantity >= existing.Quantity)
                                     {
                                         state.Items.Remove(existing);
-                                        modReply = $"\u2705 Listo, elimin\u00e9 *{orderMod.ItemName}* del pedido.";
+                                        modReply = Msg.ItemRemoved(orderMod.ItemName);
                                     }
                                     else
                                     {
                                         existing.Quantity -= orderMod.Quantity;
-                                        modReply = $"\u2705 Listo, quit\u00e9 {orderMod.Quantity}. Ahora tienes *{existing.Quantity} {orderMod.ItemName}*. Escribe *CONFIRMAR* para finalizar.";
+                                        modReply = Msg.ItemReduced(existing.Quantity, orderMod.ItemName);
                                     }
                                 }
                                 else
                                 {
-                                    modReply = $"No tienes *{orderMod.ItemName}* en el pedido.";
+                                    modReply = Msg.ItemNotFound(orderMod.ItemName);
                                 }
 
                                 if (state.Items.Count == 0)
-                                    modReply += "\n\nTu pedido est\u00e1 vac\u00edo. \u00bfQu\u00e9 deseas ordenar?";
+                                    modReply += Msg.EmptyCart;
                                 else
-                                    modReply += " Escribe *CONFIRMAR* para finalizar.";
+                                    modReply += " " + Msg.ConfirmPrompt;
                                 break;
                             }
 
@@ -289,18 +289,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 if (existingR != null)
                                 {
                                     existingR.Quantity = orderMod.Quantity;
-                                    modReply = $"\u2705 Listo, ahora son *{orderMod.Quantity} {orderMod.ItemName}*. Escribe *CONFIRMAR* para finalizar.";
+                                    modReply = Msg.ItemReplaced(orderMod.Quantity, orderMod.ItemName);
                                 }
                                 else
                                 {
                                     AddOrIncreaseItem(state, orderMod.ItemName, orderMod.Quantity);
-                                    modReply = $"\u2705 Agregu\u00e9 *{orderMod.Quantity} {orderMod.ItemName}*. Escribe *CONFIRMAR* para finalizar.";
+                                    modReply = Msg.ItemAdded(orderMod.Quantity, orderMod.ItemName);
                                 }
                                 break;
                             }
 
                             default:
-                                modReply = "\u2705 Escribe *CONFIRMAR* para finalizar.";
+                                modReply = Msg.ConfirmPrompt;
                                 break;
                         }
 
@@ -346,7 +346,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     await SendAsync(new OutgoingMessage
                                     {
                                         To = message.From,
-                                        Body = "Para *DIVISAS*, env\u00eda una *foto de los billetes* \u2705",
+                                        Body = Msg.DivisasProofRequest,
                                         PhoneNumberId = phoneNumberId,
                                         AccessToken = businessContext.AccessToken
                                     }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -357,7 +357,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = "\u2705 Perfecto. Escribe *CONFIRMAR* para finalizar.",
+                            Body = Msg.CheckoutDataReceived,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -457,7 +457,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Message 1: Welcome (custom greeting or default)
         var greeting = !string.IsNullOrWhiteSpace(biz.Greeting)
             ? biz.Greeting
-            : $"\ud83d\udc4b Hola, bienvenido a {businessName}";
+            : Msg.DefaultGreeting(businessName);
 
         await SendAsync(new OutgoingMessage
         {
@@ -482,7 +482,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         await SendAsync(new OutgoingMessage
         {
             To = to,
-            Body = "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?",
+            Body = Msg.MenuPrompt,
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
@@ -492,23 +492,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
     {
         var catalog = _activeMenu ?? MenuCatalog;
 
-        // If using the built-in demo catalog, show demo message
         if (catalog == MenuCatalog)
-            return "\ud83d\udccb *MEN\u00da (DEMO)*\n1) Hamburguesa\n2) Coca Cola\n3) Papas\n\n_(En producci\u00f3n aqu\u00ed va foto/PDF del men\u00fa del restaurante)_";
+            return Msg.DemoMenu;
 
-        // Build dynamic menu from DB items
-        var sb = new StringBuilder();
-        sb.AppendLine("\ud83d\udccb *MEN\u00da*");
-
-        var idx = 1;
-        foreach (var item in catalog)
-        {
-            var priceStr = item.Price > 0 ? $" — ${item.Price:0.00}" : "";
-            sb.AppendLine($"{idx}) {item.Canonical}{priceStr}");
-            idx++;
-        }
-
-        return sb.ToString().TrimEnd();
+        return Msg.BuildMenu(catalog);
     }
 
     // ──────────────────────────────────────────
@@ -530,7 +517,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         await SendAsync(new OutgoingMessage
         {
             To = to,
-            Body = $"\ud83d\udcb3 *DATOS PARA PAGO M\u00d3VIL*\n\n\u2022 *Banco:* {bank}\n\u2022 *C.I./RIF:* {payId}\n\u2022 *Tel\u00e9fono:* {phone}",
+            Body = Msg.PagoMovilDetails(bank, payId, phone),
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
@@ -539,7 +526,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         await SendAsync(new OutgoingMessage
         {
             To = to,
-            Body = "Para *PAGO M\u00d3VIL*, env\u00eda el *comprobante* (foto) \u2705",
+            Body = Msg.PagoMovilProofRequest,
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
@@ -562,14 +549,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
     {
         if (state.Items.Count > 0 && state.CheckoutFormSent && intent == RestaurantIntent.General)
         {
-            return "Sigue llenando la planilla y luego escribe *CONFIRMAR*.";
+            return Msg.StillFillingForm;
         }
 
         return intent switch
         {
             RestaurantIntent.OrderCreate => BuildOrderReply(parsed, state),
-            RestaurantIntent.HumanHandoff => "Te paso con un humano",
-            _ => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?"
+            RestaurantIntent.HumanHandoff => Msg.HandoffInitiated,
+            _ => Msg.WhatToOrder
         };
     }
 
@@ -593,10 +580,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
     internal static string BuildOrderReplyFromState(ConversationFields state)
     {
         if (state.Items.Count == 0)
-            return "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?";
+            return Msg.WhatToOrder;
 
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
-            return "\ud83d\udecd\ufe0f \u00bfEs *pick up* o *delivery*?";
+            return Msg.PickupOrDelivery;
 
         // Observation prompt — after items+delivery, before checkout form
         if (!state.ObservationPromptSent)
@@ -604,21 +591,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
             state.ObservationPromptSent = true;
 
             if (!string.IsNullOrWhiteSpace(state.SpecialInstructions))
-            {
-                return $"\u270d\ufe0f *Observaci\u00f3n detectada:* {state.SpecialInstructions}\n\nSi quieres agregar otra observaci\u00f3n, escr\u00edbela ahora.\nSi no, responde *NO*.";
-            }
+                return Msg.ObservationDetected(state.SpecialInstructions);
 
-            return "\u270d\ufe0f Si tu pedido tiene una *observaci\u00f3n especial*, escr\u00edbela ahora.\nEjemplo: *sin cebolla*, *extra queso*, *sin hielo*, *aderezo aparte*.\n\nSi no tienes observaciones, responde *NO*.";
+            return Msg.ObservationPrompt;
         }
 
         if (!state.CheckoutFormSent)
         {
             state.CheckoutFormSent = true;
-
-            return "Para finalizar env\u00edanos:\n\n\ud83d\udc64 *Nombre:*\n\ud83e\udeaa *C\u00e9dula:*\n\ud83d\udcf1 *Tel\u00e9fono:*\n\ud83c\udfe1 *Direcci\u00f3n:*\n\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n\u2705 *OBLIGATORIO*\n\nPuedes responder copiando y pegando esta planilla\no enviando los datos en l\u00edneas separadas.\n\nLuego escribe *CONFIRMAR*.";
+            return Msg.CheckoutForm;
         }
 
-        return "\u2705 Escribe *CONFIRMAR* para finalizar.";
+        return Msg.CheckoutDataReceived;
     }
 
     private async Task<string> FinalizeOrderIfPossibleAsync(
@@ -629,10 +613,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
         CancellationToken ct)
     {
         if (state.Items.Count == 0)
-            return "No hay productos en el pedido.";
+            return Msg.EmptyOrder;
 
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
-            return "Indica si es *pick up* o *delivery*.";
+            return Msg.MissingDeliveryType;
 
         var missing = new List<string>();
         if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("\u2022 \ud83d\udc64 Nombre:");
@@ -644,7 +628,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         if (missing.Count > 0)
         {
-            return BuildCanonicalMissingFieldsMessage(missing);
+            return Msg.MissingFields(missing);
         }
 
         var customerPhoneE164 = NormalizeToE164(state.CustomerPhone) ?? NormalizeToE164(from) ?? state.CustomerPhone;
@@ -682,21 +666,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
         await _orderRepository.AddOrderAsync(order, ct);
 
         var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
-        var itemsText = string.Join(", ", state.Items.Select(i => FormatItemText(i)));
 
-        var payText = state.PaymentMethod switch
-        {
-            "pago_movil" => "PAGO M\u00d3VIL (pendiente verificaci\u00f3n)",
-            "divisas" => "DIVISAS (pendiente verificaci\u00f3n)",
-            _ => "EFECTIVO"
-        };
-
-        var obsLine = !string.IsNullOrWhiteSpace(state.SpecialInstructions)
-            ? $"\n\u270d\ufe0f Observaci\u00f3n: {state.SpecialInstructions}"
-            : "";
-
-        var receipt =
-$"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc64 Nombre: {state.CustomerName}\n\ud83e\udeaa C\u00e9dula: {state.CustomerIdNumber}\n\ud83d\udcf1 Tel\u00e9fono: {customerPhoneE164}\n\n\ud83c\udf7d\ufe0f Pedido: {itemsText}{obsLine}\n\ud83c\udfe1 Direcci\u00f3n: {state.Address}\n\ud83d\udcb5 Pago: {payText}\n\nGracias \ud83d\ude4c";
+        var receipt = Msg.BuildReceipt(
+            orderNumber,
+            state.CustomerName!,
+            state.CustomerIdNumber!,
+            customerPhoneE164!,
+            state.Items,
+            state.SpecialInstructions,
+            state.Address!,
+            Msg.PaymentMethodText(state.PaymentMethod),
+            state.DeliveryType!);
 
         state.ResetAfterConfirm();
         return receipt;
@@ -1368,21 +1348,7 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
     }
 
     internal static string BuildCanonicalMissingFieldsMessage(List<string> missing)
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine("A\u00fan falta informaci\u00f3n para confirmar.");
-        sb.AppendLine();
-        sb.AppendLine("Env\u00edanos al menos:");
-        sb.AppendLine();
-        foreach (var field in missing)
-            sb.AppendLine(field);
-        sb.AppendLine();
-        sb.AppendLine("Puedes responder copiando y pegando esta planilla");
-        sb.AppendLine("o enviando los datos en l\u00edneas separadas.");
-        sb.AppendLine();
-        sb.Append("Luego escribe *CONFIRMAR*.");
-        return sb.ToString();
-    }
+        => Msg.MissingFields(missing);
 
     // Clean parsed field values: trim whitespace, collapse spaces, strip template markers
     internal static string? CleanFieldValue(string? raw)
