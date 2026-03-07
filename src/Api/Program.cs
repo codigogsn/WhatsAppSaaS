@@ -549,7 +549,7 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         "20260307184701_AddBusinessNotificationPhone",
         "20260307191229_AddPaymentProofFields",
         "20260307193423_AddBusinessUsers",
-        "20260307220000_AddRestaurantType",
+        "20260307212018_AddRestaurantType",
     ];
     foreach (var mid in allMigrations)
     {
