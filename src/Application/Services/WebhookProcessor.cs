@@ -20,6 +20,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly IWhatsAppClient _whatsAppClient;
     private readonly IOrderRepository _orderRepository;
     private readonly IConversationStateStore _stateStore;
+    private readonly IMenuRepository? _menuRepository;
     private readonly ILogger<WebhookProcessor> _logger;
     private readonly PaymentMobileOptions _paymentMobile;
 
@@ -29,21 +30,30 @@ public sealed class WebhookProcessor : IWebhookProcessor
         IOrderRepository orderRepository,
         IConversationStateStore stateStore,
         ILogger<WebhookProcessor> logger,
-        PaymentMobileOptions? paymentMobile = null)
+        PaymentMobileOptions? paymentMobile = null,
+        IMenuRepository? menuRepository = null)
     {
         _aiParser = aiParser;
         _whatsAppClient = whatsAppClient;
         _orderRepository = orderRepository;
         _stateStore = stateStore;
+        _menuRepository = menuRepository;
         _logger = logger;
         _paymentMobile = paymentMobile ?? new PaymentMobileOptions();
     }
 
     private const int MaxMessageLength = 4096;
 
+    // Per-request active menu (loaded from DB or fallback to demo)
+    private MenuEntry[]? _activeMenu;
+
     public async Task ProcessAsync(WebhookPayload payload, BusinessContext businessContext, CancellationToken cancellationToken = default)
     {
         if (payload?.Entry is null) return;
+
+        // Load business menu from DB; fallback to demo catalog
+        _activeMenu = await LoadBusinessMenuAsync(businessContext.BusinessId, cancellationToken);
+        ActiveCatalog = _activeMenu;
 
         foreach (var entry in payload.Entry)
         {
@@ -920,7 +930,12 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         public string[] Aliases { get; init; } = [];
         public string? Category { get; init; }
         public bool IsCombo { get; init; }
+        public decimal Price { get; init; }
     }
+
+    // Active catalog for current request (set by ProcessAsync, used by static helpers)
+    [ThreadStatic]
+    internal static MenuEntry[]? ActiveCatalog;
 
     // Catalog: future menu system will load from DB. For now, demo items.
     internal static readonly MenuEntry[] MenuCatalog =
@@ -959,7 +974,34 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
             Category = "bebida" },
     };
 
+    private async Task<MenuEntry[]> LoadBusinessMenuAsync(Guid businessId, CancellationToken ct)
+    {
+        if (_menuRepository is null) return MenuCatalog;
+
+        try
+        {
+            var dbItems = await _menuRepository.GetAvailableItemsAsync(businessId, ct);
+            if (dbItems.Count == 0) return MenuCatalog;
+
+            return dbItems.Select(i => new MenuEntry
+            {
+                Canonical = i.Name,
+                Aliases = i.Aliases.Select(a => a.Alias.ToLowerInvariant()).ToArray(),
+                Category = i.Category?.Name?.ToLowerInvariant(),
+                Price = i.Price
+            }).ToArray();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load business menu from DB for {BusinessId}, using demo catalog", businessId);
+            return MenuCatalog;
+        }
+    }
+
     internal static string? NormalizeMenuItemName(string rawItem)
+        => NormalizeMenuItemName(rawItem, ActiveCatalog ?? MenuCatalog);
+
+    internal static string? NormalizeMenuItemName(string rawItem, MenuEntry[] catalog)
     {
         if (string.IsNullOrWhiteSpace(rawItem)) return null;
 
@@ -967,8 +1009,19 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         t = StripAccents(t);
         var tNoS = t.EndsWith("s") ? t[..^1] : t;
 
-        foreach (var entry in MenuCatalog)
+        foreach (var entry in catalog)
         {
+            // Check canonical name itself
+            var canonLower = StripAccents(entry.Canonical.ToLowerInvariant());
+            if (t == canonLower || tNoS == canonLower)
+                return entry.Canonical;
+
+            // Check canonical without trailing 's'
+            var canonNoS = canonLower.EndsWith("s") ? canonLower[..^1] : canonLower;
+            if (t == canonNoS || tNoS == canonNoS)
+                return entry.Canonical;
+
+            // Check aliases
             foreach (var alias in entry.Aliases)
             {
                 var a = StripAccents(alias);
@@ -976,12 +1029,16 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
                     return entry.Canonical;
             }
 
-            var canonLower = StripAccents(entry.Canonical.ToLowerInvariant());
+            // Prefix match (at least 5 chars)
             if (t.Length >= 5 && (canonLower.StartsWith(t) || canonLower.StartsWith(tNoS)))
                 return entry.Canonical;
 
+            // Levenshtein distance for close typos
             if (t.Length >= 5)
             {
+                if (canonLower.Length >= 4 && LevenshteinDistance(t, canonLower) <= 2)
+                    return entry.Canonical;
+
                 foreach (var alias in entry.Aliases)
                 {
                     var a = StripAccents(alias);

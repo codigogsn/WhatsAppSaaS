@@ -14,6 +14,9 @@ public class AppDbContext : DbContext
     public DbSet<Business> Businesses => Set<Business>();
     public DbSet<ConversationState> ConversationStates => Set<ConversationState>();
     public DbSet<ProcessedMessage> ProcessedMessages => Set<ProcessedMessage>();
+    public DbSet<MenuCategory> MenuCategories => Set<MenuCategory>();
+    public DbSet<MenuItem> MenuItems => Set<MenuItem>();
+    public DbSet<MenuItemAlias> MenuItemAliases => Set<MenuItemAlias>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -146,6 +149,53 @@ public class AppDbContext : DbContext
             // cada phone_number_id debe ser único
             b.HasIndex(x => x.PhoneNumberId)
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<MenuCategory>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Name).IsRequired().HasMaxLength(100);
+            b.Property(x => x.SortOrder);
+            b.Property(x => x.IsActive).IsRequired();
+            b.Property(x => x.CreatedAtUtc).IsRequired();
+
+            b.HasOne(x => x.Business)
+                .WithMany(bz => bz.MenuCategories)
+                .HasForeignKey(x => x.BusinessId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasMany(x => x.Items)
+                .WithOne(i => i.Category)
+                .HasForeignKey(i => i.CategoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasIndex(x => x.BusinessId);
+        });
+
+        modelBuilder.Entity<MenuItem>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Name).IsRequired().HasMaxLength(200);
+            b.Property(x => x.Price).HasPrecision(12, 2);
+            b.Property(x => x.Description).HasMaxLength(500);
+            b.Property(x => x.IsAvailable).IsRequired();
+            b.Property(x => x.SortOrder);
+            b.Property(x => x.CreatedAtUtc).IsRequired();
+
+            b.HasMany(x => x.Aliases)
+                .WithOne(a => a.MenuItem)
+                .HasForeignKey(a => a.MenuItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasIndex(x => x.CategoryId);
+        });
+
+        modelBuilder.Entity<MenuItemAlias>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Alias).IsRequired().HasMaxLength(200);
+
+            b.HasIndex(x => x.MenuItemId);
         });
 
         modelBuilder.Entity<ConversationState>(b =>

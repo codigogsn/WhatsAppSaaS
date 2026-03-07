@@ -51,6 +51,7 @@ public static class ServiceCollectionExtensions
 
         // ── Repos / infra services ──────────────────────
         services.AddScoped<IOrderRepository, OrderRepository>();
+        services.AddScoped<IMenuRepository, MenuRepository>();
         services.AddScoped<IConversationStateStore, ConversationStateStore>();
         services.AddScoped<ISignatureValidator, SignatureValidator>();
 

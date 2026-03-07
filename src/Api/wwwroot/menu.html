@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>WhatsAppSaaS - Menu Manager</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 16px; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
+    th { background: #f6f6f6; }
+    button { padding: 6px 10px; cursor: pointer; }
+    select, input, textarea { padding: 6px; }
+    .muted { color:#666; }
+    .small { font-size: 12px; }
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom: 8px; }
+    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eee; margin: 2px; font-size: 12px; }
+    .pill button { padding: 0 4px; border: none; background: none; color: #b00020; cursor: pointer; font-weight: bold; }
+    .card { border:1px solid #eee; border-radius:10px; padding:12px; background:#fff; margin-bottom: 12px; }
+    .ok { color:#0a7a0a; }
+    .danger { color:#b00020; }
+    .key { width: 360px; max-width: 100%; }
+    .tab { display:inline-block; padding: 8px 16px; cursor:pointer; border:1px solid #ddd; border-bottom:none; margin-right:4px; background:#f6f6f6; border-radius: 6px 6px 0 0; }
+    .tab.active { background:#fff; font-weight:bold; border-bottom: 2px solid #fff; }
+    h2 { margin: 0 0 8px 0; }
+    a { color: #1a73e8; }
+  </style>
+</head>
+<body>
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap;">
+    <div>
+      <h2>Menu Manager</h2>
+      <div class="muted small"><a href="/">← Volver al Dashboard</a></div>
+    </div>
+    <div class="row">
+      <label class="muted small">X-Admin-Key:</label>
+      <input id="adminKey" class="key" placeholder="Pega tu ADMIN_KEY" />
+      <button onclick="saveKey()">Guardar</button>
+      <span id="keyMsg" class="muted small"></span>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:12px;">
+    <label>Business ID:</label>
+    <input id="businessId" style="width:340px;" placeholder="GUID del negocio" />
+    <button onclick="loadAll()">Cargar Menu</button>
+    <span id="msg" class="muted small"></span>
+  </div>
+
+  <!-- Categories -->
+  <div class="card" style="margin-top:16px;">
+    <h3>Categorias</h3>
+    <div class="row">
+      <input id="newCatName" placeholder="Nombre categoria" />
+      <input id="newCatOrder" type="number" value="0" style="width:60px;" placeholder="Orden" />
+      <button onclick="createCategory()">+ Agregar</button>
+    </div>
+    <table>
+      <thead><tr><th>Nombre</th><th>Orden</th><th>Activa</th><th>Items</th><th>Accion</th></tr></thead>
+      <tbody id="catBody"></tbody>
+    </table>
+  </div>
+
+  <!-- Items -->
+  <div class="card">
+    <h3>Items del Menu</h3>
+    <div class="row">
+      <select id="newItemCat"></select>
+      <input id="newItemName" placeholder="Nombre" />
+      <input id="newItemPrice" type="number" step="0.01" value="0" style="width:80px;" placeholder="Precio" />
+      <input id="newItemDesc" placeholder="Descripcion (opcional)" />
+      <input id="newItemAliases" placeholder="Aliases (separados por coma)" style="width:200px;" />
+      <button onclick="createItem()">+ Agregar Item</button>
+    </div>
+    <table>
+      <thead><tr><th>Categoria</th><th>Nombre</th><th>Precio</th><th>Descripcion</th><th>Disponible</th><th>Aliases</th><th>Accion</th></tr></thead>
+      <tbody id="itemBody"></tbody>
+    </table>
+  </div>
+
+<script>
+function getKey(){ return localStorage.getItem('ADMIN_KEY') || ''; }
+function saveKey(){
+  const v = document.getElementById('adminKey').value.trim();
+  if(!v){ localStorage.removeItem('ADMIN_KEY'); document.getElementById('keyMsg').innerHTML='<span class="danger">Borrada</span>'; return; }
+  localStorage.setItem('ADMIN_KEY',v);
+  document.getElementById('keyMsg').innerHTML='<span class="ok">Guardada</span>';
+}
+function hdrs(){ const k=getKey(); return k?{'X-Admin-Key':k,'Content-Type':'application/json'}:{'Content-Type':'application/json'}; }
+function bid(){ return document.getElementById('businessId').value.trim(); }
+
+document.getElementById('adminKey').value = getKey();
+
+// Try to load businessId from localStorage
+const savedBid = localStorage.getItem('MENU_BUSINESS_ID');
+if(savedBid) document.getElementById('businessId').value = savedBid;
+
+async function loadAll(){
+  const b = bid();
+  if(!b){ alert('Business ID requerido'); return; }
+  localStorage.setItem('MENU_BUSINESS_ID', b);
+  document.getElementById('msg').textContent = 'Cargando...';
+  await loadCategories();
+  await loadItems();
+  document.getElementById('msg').textContent = 'Listo';
+}
+
+async function loadCategories(){
+  const res = await fetch(`/api/admin/menu/categories?businessId=${bid()}`, {headers: hdrs()});
+  if(!res.ok){ document.getElementById('msg').textContent='Error cargando categorias'; return; }
+  const cats = await res.json();
+  const tbody = document.getElementById('catBody');
+  tbody.innerHTML = '';
+
+  // Also populate item category dropdown
+  const sel = document.getElementById('newItemCat');
+  sel.innerHTML = '';
+
+  for(const c of cats){
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${esc(c.name)}</td>
+      <td>${c.sortOrder}</td>
+      <td>${c.isActive ? '<span class="ok">Si</span>' : '<span class="danger">No</span>'}</td>
+      <td>${c.itemCount}</td>
+      <td>
+        <button onclick="toggleCategory('${c.id}',${!c.isActive})">
+          ${c.isActive ? 'Desactivar' : 'Activar'}
+        </button>
+        <button onclick="deleteCategory('${c.id}')" style="color:#b00020;">Eliminar</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+
+    const opt = document.createElement('option');
+    opt.value = c.id;
+    opt.textContent = c.name;
+    sel.appendChild(opt);
+  }
+}
+
+async function loadItems(){
+  const res = await fetch(`/api/admin/menu/items?businessId=${bid()}`, {headers: hdrs()});
+  if(!res.ok) return;
+  const items = await res.json();
+  const tbody = document.getElementById('itemBody');
+  tbody.innerHTML = '';
+
+  for(const i of items){
+    const aliasHtml = (i.aliases||[]).map(a =>
+      `<span class="pill">${esc(a.alias)} <button onclick="deleteAlias('${a.id}')">&times;</button></span>`
+    ).join(' ');
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="muted small">${esc(i.categoryName)}</td>
+      <td><b>${esc(i.name)}</b></td>
+      <td>${i.price.toFixed(2)}</td>
+      <td class="muted small">${esc(i.description||'')}</td>
+      <td>
+        <button onclick="toggleItem('${i.id}',${!i.isAvailable})">
+          ${i.isAvailable ? '<span class="ok">Si</span>' : '<span class="danger">No</span>'}
+        </button>
+      </td>
+      <td>
+        ${aliasHtml}
+        <input id="alias_${i.id}" placeholder="nuevo alias" style="width:100px;font-size:11px;" />
+        <button onclick="addAlias('${i.id}')" style="font-size:11px;">+</button>
+      </td>
+      <td>
+        <button onclick="deleteItem('${i.id}')" style="color:#b00020;">Eliminar</button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  }
+}
+
+async function createCategory(){
+  const name = document.getElementById('newCatName').value.trim();
+  const order = parseInt(document.getElementById('newCatOrder').value)||0;
+  if(!name) return alert('Nombre requerido');
+  await fetch('/api/admin/menu/categories', {
+    method:'POST', headers:hdrs(),
+    body: JSON.stringify({businessId:bid(), name, sortOrder:order, isActive:true})
+  });
+  document.getElementById('newCatName').value = '';
+  await loadAll();
+}
+
+async function toggleCategory(id, isActive){
+  await fetch(`/api/admin/menu/categories/${id}`, {
+    method:'PUT', headers:hdrs(),
+    body: JSON.stringify({name:'', sortOrder:0, isActive})
+  });
+  await loadAll();
+}
+
+async function deleteCategory(id){
+  if(!confirm('Eliminar categoria y todos sus items?')) return;
+  await fetch(`/api/admin/menu/categories/${id}`, {method:'DELETE', headers:hdrs()});
+  await loadAll();
+}
+
+async function createItem(){
+  const catId = document.getElementById('newItemCat').value;
+  const name = document.getElementById('newItemName').value.trim();
+  const price = parseFloat(document.getElementById('newItemPrice').value)||0;
+  const desc = document.getElementById('newItemDesc').value.trim()||null;
+  const aliasStr = document.getElementById('newItemAliases').value.trim();
+  const aliases = aliasStr ? aliasStr.split(',').map(a=>a.trim()).filter(Boolean) : [];
+  if(!name) return alert('Nombre requerido');
+  if(!catId) return alert('Selecciona una categoria');
+  await fetch('/api/admin/menu/items', {
+    method:'POST', headers:hdrs(),
+    body: JSON.stringify({categoryId:catId, name, price, description:desc, isAvailable:true, sortOrder:0, aliases})
+  });
+  document.getElementById('newItemName').value = '';
+  document.getElementById('newItemPrice').value = '0';
+  document.getElementById('newItemDesc').value = '';
+  document.getElementById('newItemAliases').value = '';
+  await loadAll();
+}
+
+async function toggleItem(id, isAvailable){
+  await fetch(`/api/admin/menu/items/${id}/availability`, {
+    method:'PATCH', headers:hdrs(),
+    body: JSON.stringify({isAvailable})
+  });
+  await loadAll();
+}
+
+async function deleteItem(id){
+  if(!confirm('Eliminar item?')) return;
+  await fetch(`/api/admin/menu/items/${id}`, {method:'DELETE', headers:hdrs()});
+  await loadAll();
+}
+
+async function addAlias(itemId){
+  const input = document.getElementById(`alias_${itemId}`);
+  const alias = input.value.trim();
+  if(!alias) return;
+  await fetch(`/api/admin/menu/items/${itemId}/aliases`, {
+    method:'POST', headers:hdrs(),
+    body: JSON.stringify({alias})
+  });
+  input.value = '';
+  await loadAll();
+}
+
+async function deleteAlias(id){
+  await fetch(`/api/admin/menu/aliases/${id}`, {method:'DELETE', headers:hdrs()});
+  await loadAll();
+}
+
+function esc(s){ return (s??'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
+</script>
+</body>
+</html>

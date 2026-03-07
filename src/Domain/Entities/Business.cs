@@ -24,4 +24,6 @@ public class Business
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    public List<MenuCategory> MenuCategories { get; set; } = new();
 }
