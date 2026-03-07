@@ -226,6 +226,37 @@ internal static class Msg
     internal static string StillFillingForm
         => "Env\u00eda los datos que faltan y luego escribe *CONFIRMAR*.";
 
+    // ── Business hours / closed state ──
+
+    internal static string BusinessClosed(string businessName, string schedule)
+        => $"Hola, gracias por escribir a *{businessName}*.\n\n"
+         + $"En este momento estamos *cerrados*.\n\n"
+         + $"\ud83d\udd52 *Horario:* {schedule}\n\n"
+         + "Te esperamos en nuestro horario de atencion.";
+
+    internal static string BusinessClosedNoSchedule(string businessName)
+        => $"Hola, gracias por escribir a *{businessName}*.\n\n"
+         + "En este momento estamos *cerrados*.\n\n"
+         + "Te esperamos pronto.";
+
+    // ── Reorder ──
+
+    internal static string ReorderOffer(string itemsSummary)
+        => $"\ud83d\udd01 Tu ultimo pedido fue:\n{itemsSummary}\n\n"
+         + "\u00bfDeseas *repetir* este pedido? Responde *SI* o elige algo diferente.";
+
+    internal static string ReorderConfirmed
+        => "\u2705 Pedido anterior cargado. Escribe *CONFIRMAR* para finalizar o modifica lo que desees.";
+
+    internal static string NoReorderAvailable
+        => "No encontre un pedido anterior. \u00bfQue deseas ordenar?";
+
+    // ── Saved address ──
+
+    internal static string SavedAddressOffer(string address)
+        => $"\ud83c\udfe1 Tu ultima direccion fue:\n_{address}_\n\n"
+         + "\u00bfDeseas usar esta misma direccion? Responde *SI* o envia una nueva.";
+
     // ── Payment text for receipt ──
 
     internal static string PaymentMethodText(string? method)

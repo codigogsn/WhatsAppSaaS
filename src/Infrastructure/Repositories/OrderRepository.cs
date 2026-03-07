@@ -61,14 +61,35 @@ public sealed class OrderRepository : IOrderRepository
         {
             customer.OrdersCount += 1;
             customer.LastPurchaseAtUtc = now;
-
-            // 🔥 aquí estaba el bug (antes usaba order.Total)
             customer.TotalSpent += order.TotalAmount ?? 0m;
+
+            // Save last delivery address for quick reorder
+            if (!string.IsNullOrWhiteSpace(order.Address))
+                customer.LastDeliveryAddress = order.Address;
         }
 
         _db.Orders.Add(order);
 
         await _db.SaveChangesAsync(ct);
+    }
+
+    public async Task<Order?> GetLastCompletedOrderAsync(string fromPhone, Guid businessId, CancellationToken ct = default)
+    {
+        return await _db.Orders
+            .Include(o => o.Items)
+            .Where(o => o.BusinessId == businessId
+                     && o.From == fromPhone
+                     && o.CheckoutCompleted)
+            .OrderByDescending(o => o.CreatedAtUtc)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<Customer?> GetCustomerByPhoneAsync(string fromPhone, Guid businessId, CancellationToken ct = default)
+    {
+        var phoneE164 = NormalizeToE164(fromPhone) ?? fromPhone;
+        return await _db.Customers
+            .AsNoTracking()
+            .FirstOrDefaultAsync(c => c.BusinessId == businessId && c.PhoneE164 == phoneE164, ct);
     }
 
     // =========================

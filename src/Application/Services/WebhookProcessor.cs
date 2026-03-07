@@ -233,10 +233,97 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     //    HIGHEST PRIORITY — clears stale checkout state
                     if (IsRestartIntent(t))
                     {
+                        // Check business hours before starting order flow
+                        if (ScheduleParser.IsClosed(businessContext.Schedule))
+                        {
+                            var closedMsg = !string.IsNullOrWhiteSpace(businessContext.Schedule)
+                                ? Msg.BusinessClosed(
+                                    !string.IsNullOrWhiteSpace(businessContext.BusinessName) ? businessContext.BusinessName : "nuestro restaurante",
+                                    businessContext.Schedule)
+                                : Msg.BusinessClosedNoSchedule(
+                                    !string.IsNullOrWhiteSpace(businessContext.BusinessName) ? businessContext.BusinessName : "nuestro restaurante");
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = closedMsg,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
 
                         await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
+                    // B2) Reorder intent: "repetir", "lo mismo", "mismo pedido"
+                    if (IsReorderRequest(t) && state.Items.Count == 0)
+                    {
+                        // Check business hours
+                        if (ScheduleParser.IsClosed(businessContext.Schedule))
+                        {
+                            var closedMsg = !string.IsNullOrWhiteSpace(businessContext.Schedule)
+                                ? Msg.BusinessClosed(
+                                    !string.IsNullOrWhiteSpace(businessContext.BusinessName) ? businessContext.BusinessName : "nuestro restaurante",
+                                    businessContext.Schedule)
+                                : Msg.BusinessClosedNoSchedule(
+                                    !string.IsNullOrWhiteSpace(businessContext.BusinessName) ? businessContext.BusinessName : "nuestro restaurante");
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = closedMsg,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        var lastOrder = await _orderRepository.GetLastCompletedOrderAsync(
+                            message.From, businessContext.BusinessId, cancellationToken);
+
+                        if (lastOrder != null && lastOrder.Items.Count > 0)
+                        {
+                            // Load previous order items into current state
+                            foreach (var item in lastOrder.Items)
+                            {
+                                state.Items.Add(new ConversationItemEntry
+                                {
+                                    Name = item.Name,
+                                    Quantity = item.Quantity
+                                });
+                            }
+                            state.DeliveryType = lastOrder.DeliveryType;
+                            state.MenuSent = true;
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.ReorderConfirmed,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
+                        else
+                        {
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.NoReorderAvailable,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -721,6 +808,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // This must have HIGHEST PRIORITY over stale checkout state
     internal static bool IsRestartIntent(string t)
         => IsGreeting(t) || IsMenuRequest(t) || IsOrderingIntent(t);
+
+    internal static bool IsReorderRequest(string t)
+    {
+        var s = StripAccents(t);
+        return s is "repetir" or "lo mismo" or "mismo pedido" or "repetir pedido"
+            or "quiero lo mismo" or "lo de siempre" or "el mismo" or "la misma orden"
+            || s.StartsWith("repetir ")
+            || s.Contains("mismo pedido")
+            || s.Contains("lo mismo de");
+    }
 
     internal static bool IsGreeting(string t)
     {

@@ -23,4 +23,7 @@ public sealed class Customer
     public DateTime FirstSeenAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? LastSeenAtUtc { get; set; }
     public DateTime? LastPurchaseAtUtc { get; set; }
+
+    // Scale: saved address for quick reorder
+    public string? LastDeliveryAddress { get; set; }
 }

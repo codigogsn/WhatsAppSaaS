@@ -436,6 +436,9 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     // ── Missing column on Orders (SpecialInstructions) ──
     ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "SpecialInstructions" text""");
 
+    // ── Missing columns on Customers (scale features) ──
+    ExecSql(conn, """ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "LastDeliveryAddress" text""");
+
     // ── Menu system tables ──
     ExecSql(conn, """CREATE TABLE IF NOT EXISTS "MenuCategories" ("Id" uuid NOT NULL PRIMARY KEY, "BusinessId" uuid NOT NULL REFERENCES "Businesses"("Id") ON DELETE CASCADE, "Name" text NOT NULL, "SortOrder" integer NOT NULL DEFAULT 0, "IsActive" boolean NOT NULL DEFAULT true, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
     ExecSql(conn, """CREATE TABLE IF NOT EXISTS "MenuItems" ("Id" uuid NOT NULL PRIMARY KEY, "CategoryId" uuid NOT NULL REFERENCES "MenuCategories"("Id") ON DELETE CASCADE, "Name" text NOT NULL, "Price" numeric(12,2) NOT NULL DEFAULT 0, "Description" text, "IsAvailable" boolean NOT NULL DEFAULT true, "SortOrder" integer NOT NULL DEFAULT 0, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
@@ -488,6 +491,7 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         "20260306202633_AddSpecialInstructions",
         "20260307035321_AddMenuSystem",
         "20260307044447_AddBusinessProfile",
+        "20260307182204_AddCustomerLastDeliveryAddress",
     ];
     foreach (var mid in allMigrations)
     {
