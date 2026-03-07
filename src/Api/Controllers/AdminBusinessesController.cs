@@ -132,6 +132,16 @@ public class AdminBusinessesController : ControllerBase
         return Ok(RestaurantTemplates.ListSummaries());
     }
 
+    // GET /api/admin/businesses/templates/{type}
+    [HttpGet("templates/{type}")]
+    public IActionResult GetTemplatePreview(string type)
+    {
+        var preview = RestaurantTemplates.GetDetailedPreview(type);
+        if (preview is null)
+            return NotFound(new { error = $"Template '{type}' not found" });
+        return Ok(preview);
+    }
+
     // POST /api/admin/businesses
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateBusinessRequest req, CancellationToken ct)
@@ -172,9 +182,69 @@ public class AdminBusinessesController : ControllerBase
 
         _db.Businesses.Add(biz);
 
-        // Seed menu from template (if provided) or use generic defaults
-        var template = RestaurantTemplates.Get(req.RestaurantType);
+        var (categoryNames, templateName) = await SeedRestaurantTemplateAsync(biz.Id, biz.RestaurantType, ct);
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            biz.Id,
+            biz.Name,
+            biz.PhoneNumberId,
+            biz.AdminKey,
+            biz.IsActive,
+            biz.Greeting,
+            biz.Schedule,
+            biz.Address,
+            biz.RestaurantType,
+            biz.CreatedAtUtc,
+            DefaultCategories = categoryNames,
+            TemplateName = templateName,
+            MenuSeeded = categoryNames.Count > 0
+        });
+    }
+
+    // POST /api/admin/businesses/{id}/seed-menu
+    [HttpPost("{id:guid}/seed-menu")]
+    public async Task<IActionResult> SeedMenu(Guid id, CancellationToken ct)
+    {
+        var biz = await AuthorizeBusinessAsync(id, ct);
+        if (biz is null) return Unauthorized();
+
+        if (string.IsNullOrWhiteSpace(biz.RestaurantType))
+            return BadRequest(new { error = "Business has no RestaurantType set" });
+
+        var (categoryNames, templateName) = await SeedRestaurantTemplateAsync(biz.Id, biz.RestaurantType, ct);
+
+        if (categoryNames.Count == 0)
+            return Ok(new { message = "Menu already exists, skipped seeding", seeded = false });
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            message = "Menu seeded from template",
+            seeded = true,
+            templateName,
+            categories = categoryNames
+        });
+    }
+
+    /// <summary>
+    /// Seeds menu categories, items, and aliases from a restaurant template.
+    /// Idempotent: skips if the business already has any menu categories.
+    /// </summary>
+    private async Task<(List<string> categoryNames, string? templateName)> SeedRestaurantTemplateAsync(
+        Guid businessId, string? restaurantType, CancellationToken ct)
+    {
         var categoryNames = new List<string>();
+
+        // Idempotency: skip if business already has menu data
+        var hasExistingMenu = await _db.MenuCategories.AnyAsync(c => c.BusinessId == businessId, ct);
+        if (hasExistingMenu)
+            return (categoryNames, null);
+
+        var template = RestaurantTemplates.Get(restaurantType);
 
         if (template is not null)
         {
@@ -183,7 +253,7 @@ public class AdminBusinessesController : ControllerBase
                 var tc = template.DefaultCategories[i];
                 var cat = new MenuCategory
                 {
-                    BusinessId = biz.Id,
+                    BusinessId = businessId,
                     Name = tc.Name,
                     SortOrder = i,
                     IsActive = true
@@ -217,12 +287,13 @@ public class AdminBusinessesController : ControllerBase
         }
         else
         {
+            // No template: seed generic starter categories
             var defaultCats = new[] { "Combos", "Bebidas", "Extras" };
             for (var i = 0; i < defaultCats.Length; i++)
             {
                 _db.MenuCategories.Add(new MenuCategory
                 {
-                    BusinessId = biz.Id,
+                    BusinessId = businessId,
                     Name = defaultCats[i],
                     SortOrder = i,
                     IsActive = true
@@ -231,23 +302,7 @@ public class AdminBusinessesController : ControllerBase
             }
         }
 
-        await _db.SaveChangesAsync(ct);
-
-        return Ok(new
-        {
-            biz.Id,
-            biz.Name,
-            biz.PhoneNumberId,
-            biz.AdminKey,
-            biz.IsActive,
-            biz.Greeting,
-            biz.Schedule,
-            biz.Address,
-            biz.RestaurantType,
-            biz.CreatedAtUtc,
-            DefaultCategories = categoryNames,
-            TemplateName = template?.Name
-        });
+        return (categoryNames, template?.Name);
     }
 
     public sealed class UpdateBusinessRequest

@@ -323,4 +323,29 @@ public static class RestaurantTemplates
             t.Description,
             Categories = t.DefaultCategories.Select(c => c.Name).ToList()
         }).ToList();
+
+    public static object? GetDetailedPreview(string? type)
+    {
+        var t = Get(type);
+        if (t is null) return null;
+
+        return new
+        {
+            t.Id,
+            t.Name,
+            t.Description,
+            Categories = t.DefaultCategories.Select(c => new
+            {
+                c.Name,
+                Items = c.Items.Select(i => new
+                {
+                    i.Name,
+                    i.Price,
+                    i.Aliases
+                }).ToList()
+            }).ToList(),
+            TotalItems = t.DefaultCategories.Sum(c => c.Items.Count),
+            UpsellPairings = t.SuggestedUpsells
+        };
+    }
 }

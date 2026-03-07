@@ -257,6 +257,7 @@
             <option value="cafe">Cafeteria</option>
           </select>
           <small class="muted" id="newBizTypeDesc"></small>
+          <div id="templatePreview" style="display:none;margin-top:8px;padding:8px;background:#f5f5f5;border-radius:6px;font-size:12px;max-height:200px;overflow-y:auto;"></div>
         </div>
       </div>
       <div class="biz-actions" style="margin-top:16px;">
@@ -641,10 +642,26 @@ function openCreateBiz(){
   document.getElementById('newBizType').value = '';
   document.getElementById('newBizTypeDesc').textContent = '';
 }
-// Template type descriptions
-document.getElementById('newBizType')?.addEventListener('change', function(){
+// Template type descriptions + live preview
+document.getElementById('newBizType')?.addEventListener('change', async function(){
   const descs = {burger:'Menu con hamburguesas, papas y bebidas',pizza:'Pizzas, pastas y bebidas',sushi:'Rolls, nigiri y bebidas',arepa:'Arepas, empanadas y jugos',cafe:'Cafes, postres y snacks'};
   document.getElementById('newBizTypeDesc').textContent = descs[this.value] || 'Categorias genericas (Combos, Bebidas, Extras)';
+  const preview = document.getElementById('templatePreview');
+  if (!this.value) { preview.style.display = 'none'; preview.innerHTML = ''; return; }
+  try {
+    const res = await fetch('/api/admin/businesses/templates/' + this.value);
+    if (!res.ok) { preview.style.display = 'none'; return; }
+    const t = await res.json();
+    let html = '<strong>' + esc(t.name) + '</strong> &mdash; ' + t.totalItems + ' items<br>';
+    for (const cat of t.categories) {
+      html += '<div style="margin-top:4px;"><b>' + esc(cat.name) + '</b></div>';
+      for (const item of cat.items) {
+        html += '<div style="padding-left:12px;">' + esc(item.name) + ' <span style="color:#888;">$' + item.price.toFixed(2) + '</span></div>';
+      }
+    }
+    preview.innerHTML = html;
+    preview.style.display = 'block';
+  } catch(e) { preview.style.display = 'none'; }
 });
 
 function closeCreateBiz(){
@@ -685,7 +702,8 @@ async function submitCreateBiz(){
       return;
     }
     const result = await res.json();
-    document.getElementById('createBizMsg').innerHTML = '<span class="ok">Negocio creado. Admin Key: <code>' + esc(result.adminKey) + '</code></span>';
+    const seedInfo = result.menuSeeded ? ' Menu: ' + esc(result.templateName || 'generico') + ' (' + (result.defaultCategories||[]).length + ' categorias)' : '';
+    document.getElementById('createBizMsg').innerHTML = '<span class="ok">Negocio creado.' + seedInfo + ' Admin Key: <code>' + esc(result.adminKey) + '</code></span>';
 
     // Refresh and auto-select
     await loadBusinesses();
