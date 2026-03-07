@@ -69,8 +69,11 @@
     </div>
     <div class="row">
       <input id="adminKey" class="key" placeholder="Admin Key" />
-      <input id="businessId" style="width:260px;" placeholder="Business ID (GUID)" />
+      <select id="businessSelect" onchange="onBusinessSelect()" style="min-width:220px;">
+        <option value="">(Seleccionar negocio)</option>
+      </select>
       <button onclick="saveKey()">Guardar</button>
+      <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:16px;padding:4px 8px;">&#x21bb;</button>
       <span id="keyMsg" class="muted small"></span>
     </div>
   </div>
@@ -179,12 +182,39 @@ function saveKey(){
   const v = document.getElementById('adminKey').value.trim();
   if (!v) { localStorage.removeItem('ADMIN_KEY'); document.getElementById('keyMsg').innerHTML = '<span class="danger">Borrada</span>'; return; }
   localStorage.setItem('ADMIN_KEY', v);
-  const bid = document.getElementById('businessId').value.trim();
-  if (bid) localStorage.setItem('BUSINESS_ID', bid); else localStorage.removeItem('BUSINESS_ID');
   document.getElementById('keyMsg').innerHTML = '<span class="ok">OK</span>';
+  loadBusinesses();
 }
 
-function getBusinessId(){ return localStorage.getItem('BUSINESS_ID') || document.getElementById('businessId').value.trim() || ''; }
+function getBusinessId(){
+  return document.getElementById('businessSelect').value || localStorage.getItem('BUSINESS_ID') || '';
+}
+
+function onBusinessSelect(){
+  const bid = document.getElementById('businessSelect').value;
+  if (bid) localStorage.setItem('BUSINESS_ID', bid); else localStorage.removeItem('BUSINESS_ID');
+  load();
+}
+
+async function loadBusinesses(){
+  const key = getAdminKey();
+  const sel = document.getElementById('businessSelect');
+  if (!key) return;
+  try {
+    const res = await fetch('/api/admin/businesses', { headers: adminHeaders() });
+    if (!res.ok) return;
+    const list = await res.json();
+    const saved = localStorage.getItem('BUSINESS_ID') || '';
+    sel.innerHTML = '<option value="">(Todos los negocios)</option>';
+    for (const b of list) {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')';
+      if (b.id === saved) opt.selected = true;
+      sel.appendChild(opt);
+    }
+  } catch {}
+}
 function adminHeaders(){ const key = getAdminKey(); return key ? { 'X-Admin-Key': key } : {}; }
 
 function statusPill(s){
@@ -423,13 +453,13 @@ async function downloadCustomersCsv(){
 // Init
 document.getElementById('baseUrl').textContent = location.origin;
 document.getElementById('adminKey').value = getAdminKey();
-document.getElementById('businessId').value = localStorage.getItem('BUSINESS_ID') || '';
 
 // Set default date filter to today
 const today = new Date().toISOString().slice(0,10);
 document.getElementById('dateFrom').value = today;
 
-load();
+// Load businesses then orders
+loadBusinesses().then(() => load());
 </script>
 </body>
 </html>

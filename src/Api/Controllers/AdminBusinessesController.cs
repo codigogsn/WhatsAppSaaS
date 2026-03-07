@@ -98,6 +98,88 @@ public class AdminBusinessesController : ControllerBase
         });
     }
 
+    public sealed class CreateBusinessRequest
+    {
+        public string Name { get; set; } = "";
+        public string PhoneNumberId { get; set; } = "";
+        public string? AccessToken { get; set; }
+        public string? Greeting { get; set; }
+        public string? Schedule { get; set; }
+        public string? Address { get; set; }
+        public string? LogoUrl { get; set; }
+        public string? PaymentMobileBank { get; set; }
+        public string? PaymentMobileId { get; set; }
+        public string? PaymentMobilePhone { get; set; }
+    }
+
+    // POST /api/admin/businesses
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] CreateBusinessRequest req, CancellationToken ct)
+    {
+        if (!IsGlobalAdmin())
+            return Unauthorized();
+
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return BadRequest(new { error = "Name is required" });
+        if (string.IsNullOrWhiteSpace(req.PhoneNumberId))
+            return BadRequest(new { error = "PhoneNumberId is required" });
+
+        // Check uniqueness
+        var exists = await _db.Businesses.AnyAsync(b => b.PhoneNumberId == req.PhoneNumberId.Trim(), ct);
+        if (exists)
+            return Conflict(new { error = "A business with that PhoneNumberId already exists" });
+
+        // Generate per-business admin key
+        var bizAdminKey = Guid.NewGuid().ToString("N")[..24];
+
+        var biz = new Business
+        {
+            Name = req.Name.Trim(),
+            PhoneNumberId = req.PhoneNumberId.Trim(),
+            AccessToken = req.AccessToken?.Trim() ?? "",
+            AdminKey = bizAdminKey,
+            Greeting = req.Greeting?.Trim(),
+            Schedule = req.Schedule?.Trim(),
+            Address = req.Address?.Trim(),
+            LogoUrl = req.LogoUrl?.Trim(),
+            PaymentMobileBank = req.PaymentMobileBank?.Trim(),
+            PaymentMobileId = req.PaymentMobileId?.Trim(),
+            PaymentMobilePhone = req.PaymentMobilePhone?.Trim(),
+            IsActive = true
+        };
+
+        _db.Businesses.Add(biz);
+
+        // Seed default menu categories
+        var defaultCategories = new[] { "Combos", "Bebidas", "Extras" };
+        for (var i = 0; i < defaultCategories.Length; i++)
+        {
+            _db.MenuCategories.Add(new MenuCategory
+            {
+                BusinessId = biz.Id,
+                Name = defaultCategories[i],
+                SortOrder = i,
+                IsActive = true
+            });
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            biz.Id,
+            biz.Name,
+            biz.PhoneNumberId,
+            biz.AdminKey,
+            biz.IsActive,
+            biz.Greeting,
+            biz.Schedule,
+            biz.Address,
+            biz.CreatedAtUtc,
+            DefaultCategories = defaultCategories
+        });
+    }
+
     public sealed class UpdateBusinessRequest
     {
         public string? Name { get; set; }
