@@ -385,9 +385,12 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
             Log.Information("LEGACY COLUMN ADDED: {Col}", sql.Replace("""ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS """, "Orders."));
     }
 
-    // ── Missing columns on Businesses (multi-restaurant profile) ──
+    // ── Missing columns on Businesses (payment + profile) ──
     string[] businessColumns =
     [
+        """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "PaymentMobileBank" text""",
+        """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "PaymentMobileId" text""",
+        """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "PaymentMobilePhone" text""",
         """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "Greeting" text""",
         """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "Schedule" text""",
         """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "Address" text""",
@@ -398,6 +401,17 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         if (ExecSql(conn, sql))
             Log.Information("LEGACY COLUMN ADDED: {Col}", sql.Replace("""ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS """, "Businesses."));
     }
+
+    // ── Missing column on Orders (SpecialInstructions) ──
+    ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "SpecialInstructions" text""");
+
+    // ── Menu system tables ──
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "MenuCategories" ("Id" uuid NOT NULL PRIMARY KEY, "BusinessId" uuid NOT NULL REFERENCES "Businesses"("Id") ON DELETE CASCADE, "Name" text NOT NULL, "SortOrder" integer NOT NULL DEFAULT 0, "IsActive" boolean NOT NULL DEFAULT true, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "MenuItems" ("Id" uuid NOT NULL PRIMARY KEY, "CategoryId" uuid NOT NULL REFERENCES "MenuCategories"("Id") ON DELETE CASCADE, "Name" text NOT NULL, "Price" numeric(12,2) NOT NULL DEFAULT 0, "Description" text, "IsAvailable" boolean NOT NULL DEFAULT true, "SortOrder" integer NOT NULL DEFAULT 0, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "MenuItemAliases" ("Id" uuid NOT NULL PRIMARY KEY, "MenuItemId" uuid NOT NULL REFERENCES "MenuItems"("Id") ON DELETE CASCADE, "Alias" text NOT NULL)""");
+    ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_MenuCategories_BusinessId" ON "MenuCategories" ("BusinessId")""");
+    ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_MenuItems_CategoryId" ON "MenuItems" ("CategoryId")""");
+    ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_MenuItemAliases_MenuItemId" ON "MenuItemAliases" ("MenuItemId")""");
 
     // ── Boolean column repair ──
     string[] boolRepairs =
@@ -439,6 +453,10 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         "20260305161922_AddAnalyticsFields",
         "20260305170406_AddCompositeIndexBusinessCheckout",
         "20260305200000_FixBooleanColumnsForPostgres",
+        "20260306182317_AddBusinessPaymentMobileFields",
+        "20260306202633_AddSpecialInstructions",
+        "20260307035321_AddMenuSystem",
+        "20260307044447_AddBusinessProfile",
     ];
     foreach (var mid in allMigrations)
     {
