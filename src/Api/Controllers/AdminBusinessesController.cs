@@ -230,6 +230,22 @@ public class AdminBusinessesController : ControllerBase
         });
     }
 
+    // PATCH /api/admin/businesses/{id}/toggle — activate/deactivate
+    [HttpPatch("{id:guid}/toggle")]
+    public async Task<IActionResult> Toggle(Guid id, CancellationToken ct)
+    {
+        if (!IsGlobalAdmin())
+            return Unauthorized();
+
+        var biz = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == id, ct);
+        if (biz is null) return NotFound(new { error = "Business not found" });
+
+        biz.IsActive = !biz.IsActive;
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new { biz.Id, biz.Name, biz.IsActive });
+    }
+
     // POST /api/admin/businesses/seed
     [HttpPost("seed")]
     public async Task<IActionResult> Seed(CancellationToken ct)

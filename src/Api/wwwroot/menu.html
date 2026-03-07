@@ -42,11 +42,12 @@
   </div>
 
   <div class="row" style="margin-bottom:16px;">
-    <label>Negocio:</label>
-    <select id="businessSelect" onchange="onBizSelect()" style="min-width:260px;">
+    <label style="font-weight:600;">Negocio:</label>
+    <select id="businessSelect" onchange="onBizSelect()" style="min-width:260px; font-weight:600; font-size:14px; padding:8px 10px; border:2px solid #1a73e8; border-radius:6px;">
       <option value="">(Seleccionar negocio)</option>
     </select>
     <button onclick="loadBusinesses()">&#x21bb;</button>
+    <span id="bizStatus" class="small"></span>
     <span id="msg" class="muted small"></span>
   </div>
 
@@ -112,9 +113,21 @@ async function loadBusinesses(){
     for (const b of list) {
       const opt = document.createElement('option');
       opt.value = b.id;
-      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')';
+      const status = b.isActive ? '' : ' [INACTIVO]';
+      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')' + status;
+      if (!b.isActive) opt.style.color = '#c62828';
       if (b.id === saved) opt.selected = true;
       sel.appendChild(opt);
+    }
+    // Show status of selected business
+    const statusEl = document.getElementById('bizStatus');
+    const selected = list.find(b => b.id === sel.value);
+    if (selected && statusEl) {
+      statusEl.innerHTML = selected.isActive
+        ? '<span style="color:#2e7d32; font-weight:600;">Activo</span>'
+        : '<span style="color:#c62828; font-weight:600;">Inactivo</span>';
+    } else if (statusEl) {
+      statusEl.innerHTML = '';
     }
     // Auto-load if a business is selected
     if (sel.value) loadAll();

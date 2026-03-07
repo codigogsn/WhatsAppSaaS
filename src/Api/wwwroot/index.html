@@ -17,7 +17,11 @@
     button:hover { background: #f0f0f0; }
     button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
     button.primary:hover { background: #1557b0; }
-    select, input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+    button.success { background: #2e7d32; color: #fff; border-color: #2e7d32; }
+    button.success:hover { background: #1b5e20; }
+    button.warn { background: #e65100; color: #fff; border-color: #e65100; }
+    button.warn:hover { background: #bf360c; }
+    select, input, textarea { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
     .muted { color:#888; }
     .small { font-size: 12px; }
     .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: 16px; }
@@ -37,6 +41,8 @@
     .pill-OutForDelivery { background:#e3f2fd; color:#1565c0; }
     .pill-Completed { background:#e8f5e9; color:#2e7d32; }
     .pill-Cancelled { background:#ffebee; color:#c62828; }
+    .pill-active { background:#e8f5e9; color:#2e7d32; }
+    .pill-inactive { background:#ffebee; color:#c62828; }
 
     /* Expandable detail */
     .detail-row { display: none; }
@@ -57,9 +63,36 @@
     .filters { background: #fff; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
     .filters label { font-size: 12px; color: #666; }
 
+    /* Business admin panel */
+    .biz-panel { background: #fff; border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.06); border: 1px solid #e8e8e8; }
+    .biz-panel h3 { margin: 0 0 12px 0; font-size: 15px; color: #333; }
+    .biz-panel .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+    .biz-panel .form-grid label { font-size: 12px; color: #666; display: block; margin-bottom: 2px; }
+    .biz-panel .form-grid input, .biz-panel .form-grid textarea { width: 100%; }
+    .biz-panel .form-grid .full { grid-column: 1 / -1; }
+    .biz-actions { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
+    .biz-section-toggle { cursor: pointer; user-select: none; display: flex; align-items: center; gap: 6px; }
+    .biz-section-toggle:hover { color: #1a73e8; }
+
+    /* Modal overlay */
+    .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.4); z-index:100; justify-content:center; align-items:flex-start; padding:60px 16px; }
+    .modal-overlay.open { display:flex; }
+    .modal { background:#fff; border-radius:12px; padding:24px; width:100%; max-width:560px; box-shadow: 0 8px 30px rgba(0,0,0,.15); }
+    .modal h3 { margin: 0 0 16px 0; }
+    .modal .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 16px; }
+    .modal .form-grid label { font-size: 12px; color: #666; display: block; margin-bottom: 2px; }
+    .modal .form-grid input, .modal .form-grid textarea { width: 100%; }
+    .modal .form-grid .full { grid-column: 1 / -1; }
+
+    /* Business selector enhanced */
+    .biz-selector-area { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .biz-selector-area select { min-width: 240px; font-weight: 600; font-size: 14px; padding: 8px 10px; border: 2px solid #1a73e8; border-radius: 6px; background: #fff; }
+    .selected-biz-name { font-weight: 700; font-size: 14px; color: #1a73e8; }
+
     @media (max-width: 768px) {
       .detail-grid { grid-template-columns: 1fr; }
       .kpi .card { min-width: 100px; }
+      .biz-panel .form-grid, .modal .form-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -71,12 +104,140 @@
     </div>
     <div class="row">
       <input id="adminKey" class="key" placeholder="Admin Key" />
-      <select id="businessSelect" onchange="onBusinessSelect()" style="min-width:220px;">
-        <option value="">(Seleccionar negocio)</option>
-      </select>
       <button onclick="saveKey()">Guardar</button>
-      <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:16px;padding:4px 8px;">&#x21bb;</button>
       <span id="keyMsg" class="muted small"></span>
+    </div>
+  </div>
+
+  <!-- Business Selector Bar -->
+  <div class="filters" style="margin-bottom:12px;">
+    <div class="row" style="gap:12px;">
+      <label style="font-weight:600;">Negocio:</label>
+      <div class="biz-selector-area">
+        <select id="businessSelect" onchange="onBusinessSelect()">
+          <option value="">(Todos los negocios)</option>
+        </select>
+        <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:16px;padding:4px 8px;">&#x21bb;</button>
+      </div>
+      <button class="primary" onclick="openCreateBiz()">+ Nuevo Negocio</button>
+      <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
+      <span id="selectedBizStatus" class="small"></span>
+    </div>
+  </div>
+
+  <!-- Business Admin Panel (collapsible) -->
+  <div id="bizPanel" class="biz-panel" style="display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h3 id="bizPanelTitle">Perfil del Negocio</h3>
+      <button onclick="toggleBizPanel()" style="border:none; background:none; font-size:18px; cursor:pointer; color:#888;">&times;</button>
+    </div>
+
+    <!-- Profile section -->
+    <div class="form-grid">
+      <div>
+        <label>Nombre</label>
+        <input id="bizName" placeholder="Nombre del restaurante" />
+      </div>
+      <div>
+        <label>Phone Number ID</label>
+        <input id="bizPhone" disabled style="background:#f5f5f5;" />
+      </div>
+      <div class="full">
+        <label>Saludo personalizado</label>
+        <input id="bizGreeting" placeholder="Ej: Bienvenido a Mi Restaurante" />
+      </div>
+      <div>
+        <label>Direccion</label>
+        <input id="bizAddress" placeholder="Direccion del local" />
+      </div>
+      <div>
+        <label>Horario</label>
+        <input id="bizSchedule" placeholder="Ej: Lun-Vie 8am-6pm" />
+      </div>
+      <div class="full">
+        <label>Logo URL</label>
+        <input id="bizLogoUrl" placeholder="https://..." />
+      </div>
+    </div>
+
+    <!-- Payment config section -->
+    <div style="margin-top:16px; padding-top:12px; border-top:1px solid #eee;">
+      <div class="biz-section-toggle" onclick="document.getElementById('paymentSection').style.display = document.getElementById('paymentSection').style.display === 'none' ? 'grid' : 'none';">
+        <span style="font-size:12px;">&#9654;</span>
+        <span style="font-size:13px; font-weight:600;">Configuracion de Pago Movil</span>
+      </div>
+      <div id="paymentSection" class="form-grid" style="display:none; margin-top:8px;">
+        <div>
+          <label>Banco</label>
+          <input id="bizPmBank" placeholder="Ej: Banesco" />
+        </div>
+        <div>
+          <label>C.I. / RIF</label>
+          <input id="bizPmId" placeholder="Ej: V-12345678" />
+        </div>
+        <div>
+          <label>Telefono Pago Movil</label>
+          <input id="bizPmPhone" placeholder="Ej: 0414-1234567" />
+        </div>
+      </div>
+    </div>
+
+    <div class="biz-actions">
+      <button class="success" onclick="saveBizProfile()">Guardar Cambios</button>
+      <button id="btnToggleActive" onclick="toggleBizActive()">Desactivar</button>
+      <span id="bizSaveMsg" class="small muted"></span>
+      <span style="flex:1;"></span>
+      <span class="small muted" id="bizAdminKey"></span>
+    </div>
+  </div>
+
+  <!-- Create Business Modal -->
+  <div id="createBizModal" class="modal-overlay" onclick="if(event.target===this)closeCreateBiz()">
+    <div class="modal">
+      <h3>Nuevo Negocio</h3>
+      <div class="form-grid">
+        <div>
+          <label>Nombre *</label>
+          <input id="newBizName" placeholder="Nombre del restaurante" />
+        </div>
+        <div>
+          <label>Phone Number ID *</label>
+          <input id="newBizPhone" placeholder="Ej: 123456789" />
+        </div>
+        <div>
+          <label>Access Token</label>
+          <input id="newBizToken" placeholder="WhatsApp access token" />
+        </div>
+        <div>
+          <label>Saludo</label>
+          <input id="newBizGreeting" placeholder="Mensaje de bienvenida" />
+        </div>
+        <div>
+          <label>Direccion</label>
+          <input id="newBizAddress" placeholder="Direccion del local" />
+        </div>
+        <div>
+          <label>Horario</label>
+          <input id="newBizSchedule" placeholder="Ej: Lun-Vie 8am-6pm" />
+        </div>
+        <div>
+          <label>Banco (Pago Movil)</label>
+          <input id="newBizPmBank" placeholder="Ej: Banesco" />
+        </div>
+        <div>
+          <label>C.I./RIF (Pago Movil)</label>
+          <input id="newBizPmId" placeholder="Ej: V-12345678" />
+        </div>
+        <div>
+          <label>Tel. Pago Movil</label>
+          <input id="newBizPmPhone" placeholder="Ej: 0414-1234567" />
+        </div>
+      </div>
+      <div class="biz-actions" style="margin-top:16px;">
+        <button class="primary" onclick="submitCreateBiz()">Crear Negocio</button>
+        <button onclick="closeCreateBiz()">Cancelar</button>
+        <span id="createBizMsg" class="small"></span>
+      </div>
     </div>
   </div>
 
@@ -133,7 +294,7 @@
         <option>OutForDelivery</option>
         <option>Completed</option>
         <option>Cancelled</option>
-        <option value="NeedsHuman">🔴 Necesita Humano</option>
+        <option value="NeedsHuman">Necesita Humano</option>
       </select>
 
       <label>Fecha:</label>
@@ -141,7 +302,7 @@
       <span class="muted small">a</span>
       <input id="dateTo" type="date" />
 
-      <label>Teléfono:</label>
+      <label>Telefono:</label>
       <input id="phone" placeholder="0414..." style="width:120px;" />
 
       <label>Order ID:</label>
@@ -172,7 +333,7 @@
         <th>Pedido</th>
         <th>Total</th>
         <th>Obs.</th>
-        <th>Acción</th>
+        <th>Accion</th>
       </tr>
     </thead>
     <tbody id="tbody"></tbody>
@@ -180,7 +341,8 @@
 
 <script>
 let timer = null;
-let handoffPhones = {}; // phone -> handoff info
+let handoffPhones = {};
+let businessList = []; // cached for admin panel
 
 function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 
@@ -201,7 +363,30 @@ function getBusinessId(){
 function onBusinessSelect(){
   const bid = document.getElementById('businessSelect').value;
   if (bid) localStorage.setItem('BUSINESS_ID', bid); else localStorage.removeItem('BUSINESS_ID');
+  updateBizAdminButton();
+  // Close admin panel when switching
+  document.getElementById('bizPanel').style.display = 'none';
   load();
+}
+
+function updateBizAdminButton(){
+  const bid = getBusinessId();
+  const btn = document.getElementById('btnBizAdmin');
+  const statusEl = document.getElementById('selectedBizStatus');
+  if (bid && businessList.length > 0) {
+    btn.style.display = '';
+    const biz = businessList.find(b => b.id === bid);
+    if (biz) {
+      statusEl.innerHTML = biz.isActive
+        ? '<span class="pill pill-active">Activo</span>'
+        : '<span class="pill pill-inactive">Inactivo</span>';
+    } else {
+      statusEl.innerHTML = '';
+    }
+  } else {
+    btn.style.display = 'none';
+    statusEl.innerHTML = '';
+  }
 }
 
 async function loadBusinesses(){
@@ -212,18 +397,190 @@ async function loadBusinesses(){
     const res = await fetch('/api/admin/businesses', { headers: adminHeaders() });
     if (!res.ok) return;
     const list = await res.json();
+    businessList = list;
     const saved = localStorage.getItem('BUSINESS_ID') || '';
     sel.innerHTML = '<option value="">(Todos los negocios)</option>';
     for (const b of list) {
       const opt = document.createElement('option');
       opt.value = b.id;
-      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')';
+      const status = b.isActive ? '' : ' [INACTIVO]';
+      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')' + status;
+      if (!b.isActive) opt.style.color = '#c62828';
       if (b.id === saved) opt.selected = true;
       sel.appendChild(opt);
     }
+    updateBizAdminButton();
   } catch {}
 }
 function adminHeaders(){ const key = getAdminKey(); return key ? { 'X-Admin-Key': key } : {}; }
+
+// ── Business Admin Panel ──
+
+function toggleBizPanel(){
+  const panel = document.getElementById('bizPanel');
+  if (panel.style.display === 'none') {
+    const bid = getBusinessId();
+    if (!bid) { alert('Selecciona un negocio primero'); return; }
+    loadBizProfile(bid);
+    panel.style.display = '';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+async function loadBizProfile(bizId){
+  try {
+    const res = await fetch('/api/admin/businesses/' + bizId, { headers: adminHeaders() });
+    if (!res.ok) { alert('Error cargando perfil'); return; }
+    const b = await res.json();
+    document.getElementById('bizPanelTitle').textContent = 'Perfil: ' + (b.name || 'Sin nombre');
+    document.getElementById('bizName').value = b.name || '';
+    document.getElementById('bizPhone').value = b.phoneNumberId || '';
+    document.getElementById('bizGreeting').value = b.greeting || '';
+    document.getElementById('bizAddress').value = b.address || '';
+    document.getElementById('bizSchedule').value = b.schedule || '';
+    document.getElementById('bizLogoUrl').value = b.logoUrl || '';
+    document.getElementById('bizPmBank').value = b.paymentMobileBank || '';
+    document.getElementById('bizPmId').value = b.paymentMobileId || '';
+    document.getElementById('bizPmPhone').value = b.paymentMobilePhone || '';
+    document.getElementById('bizSaveMsg').textContent = '';
+
+    // Show admin key hint
+    const cached = businessList.find(x => x.id === bizId);
+    document.getElementById('bizAdminKey').textContent = '';
+
+    // Toggle button
+    const toggleBtn = document.getElementById('btnToggleActive');
+    if (b.isActive) {
+      toggleBtn.textContent = 'Desactivar Negocio';
+      toggleBtn.className = 'warn';
+    } else {
+      toggleBtn.textContent = 'Activar Negocio';
+      toggleBtn.className = 'success';
+    }
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function saveBizProfile(){
+  const bid = getBusinessId();
+  if (!bid) return;
+  const body = {
+    name: document.getElementById('bizName').value.trim() || null,
+    greeting: document.getElementById('bizGreeting').value.trim() || null,
+    address: document.getElementById('bizAddress').value.trim() || null,
+    schedule: document.getElementById('bizSchedule').value.trim() || null,
+    logoUrl: document.getElementById('bizLogoUrl').value.trim() || null,
+    paymentMobileBank: document.getElementById('bizPmBank').value.trim() || null,
+    paymentMobileId: document.getElementById('bizPmId').value.trim() || null,
+    paymentMobilePhone: document.getElementById('bizPmPhone').value.trim() || null,
+  };
+  try {
+    const res = await fetch('/api/admin/businesses/' + bid, {
+      method: 'PUT',
+      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) { document.getElementById('bizSaveMsg').innerHTML = '<span class="danger">Error guardando</span>'; return; }
+    document.getElementById('bizSaveMsg').innerHTML = '<span class="ok">Guardado</span>';
+    // Refresh business list to reflect name changes
+    await loadBusinesses();
+    // Update panel title
+    if (body.name) document.getElementById('bizPanelTitle').textContent = 'Perfil: ' + body.name;
+  } catch(e) {
+    document.getElementById('bizSaveMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
+  }
+}
+
+async function toggleBizActive(){
+  const bid = getBusinessId();
+  if (!bid) return;
+  const biz = businessList.find(b => b.id === bid);
+  const action = biz && biz.isActive ? 'desactivar' : 'activar';
+  if (!confirm('Seguro que deseas ' + action + ' este negocio?')) return;
+  try {
+    const res = await fetch('/api/admin/businesses/' + bid + '/toggle', {
+      method: 'PATCH',
+      headers: adminHeaders()
+    });
+    if (!res.ok) { alert('Error cambiando estado'); return; }
+    const result = await res.json();
+    await loadBusinesses();
+    loadBizProfile(bid);
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// ── Create Business Modal ──
+
+function openCreateBiz(){
+  if (!getAdminKey()) { alert('Ingresa tu Admin Key primero'); return; }
+  document.getElementById('createBizModal').classList.add('open');
+  document.getElementById('createBizMsg').textContent = '';
+  // Clear form
+  ['newBizName','newBizPhone','newBizToken','newBizGreeting','newBizAddress','newBizSchedule','newBizPmBank','newBizPmId','newBizPmPhone'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+}
+
+function closeCreateBiz(){
+  document.getElementById('createBizModal').classList.remove('open');
+}
+
+async function submitCreateBiz(){
+  const name = document.getElementById('newBizName').value.trim();
+  const phoneNumberId = document.getElementById('newBizPhone').value.trim();
+  if (!name) { document.getElementById('createBizMsg').innerHTML = '<span class="danger">Nombre requerido</span>'; return; }
+  if (!phoneNumberId) { document.getElementById('createBizMsg').innerHTML = '<span class="danger">Phone Number ID requerido</span>'; return; }
+
+  const body = {
+    name,
+    phoneNumberId,
+    accessToken: document.getElementById('newBizToken').value.trim() || null,
+    greeting: document.getElementById('newBizGreeting').value.trim() || null,
+    address: document.getElementById('newBizAddress').value.trim() || null,
+    schedule: document.getElementById('newBizSchedule').value.trim() || null,
+    paymentMobileBank: document.getElementById('newBizPmBank').value.trim() || null,
+    paymentMobileId: document.getElementById('newBizPmId').value.trim() || null,
+    paymentMobilePhone: document.getElementById('newBizPmPhone').value.trim() || null,
+  };
+
+  document.getElementById('createBizMsg').innerHTML = '<span class="muted">Creando...</span>';
+
+  try {
+    const res = await fetch('/api/admin/businesses', {
+      method: 'POST',
+      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('createBizMsg').innerHTML = '<span class="danger">' + esc(err.error || 'Error creando negocio') + '</span>';
+      return;
+    }
+    const result = await res.json();
+    document.getElementById('createBizMsg').innerHTML = '<span class="ok">Negocio creado. Admin Key: <code>' + esc(result.adminKey) + '</code></span>';
+
+    // Refresh and auto-select
+    await loadBusinesses();
+    const sel = document.getElementById('businessSelect');
+    sel.value = result.id;
+    localStorage.setItem('BUSINESS_ID', result.id);
+    updateBizAdminButton();
+
+    // Close modal after brief delay to show admin key
+    setTimeout(() => {
+      closeCreateBiz();
+      load();
+    }, 3000);
+  } catch(e) {
+    document.getElementById('createBizMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
+  }
+}
+
+// ── Status / display helpers ──
 
 function statusPill(s){
   return `<span class="pill pill-${esc(s)}">${esc(s)}</span>`;
@@ -232,9 +589,7 @@ function statusPill(s){
 function fmtMoney(n){ return (n ?? 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
 function getHandoff(order){
-  // Match by From field (wa_id) which is the first part of conversationId
   const from = order.customerPhone || '';
-  // Try matching directly and with common normalizations
   for (const [phone, info] of Object.entries(handoffPhones)) {
     if (from && (phone === from || from.includes(phone) || phone.includes(from))) return info;
   }
@@ -373,7 +728,7 @@ async function load(auto=false) {
     };
 
     tr.innerHTML = `
-      <td class="toggle-btn">▶</td>
+      <td class="toggle-btn">&#9654;</td>
       <td>${fmtDate(o.createdAtUtc)}<br/><code>${esc(o.id).slice(0,8)}</code></td>
       <td>${statusPill(o.status)}${handoff ? ' <span class="human-tag">HUMANO</span>' : ''}</td>
       <td>
@@ -424,7 +779,7 @@ async function load(auto=false) {
             <div class="dg-value"><b>${esc(o.customerName)}</b><br/>${esc(o.customerPhone)}<br/>${esc(o.customerIdNumber)}</div>
           </div>
           <div>
-            <div class="dg-label">Método de Pago</div>
+            <div class="dg-label">Metodo de Pago</div>
             <div class="dg-value">${esc(o.paymentMethod) || '-'}</div>
           </div>
           <div>
@@ -439,7 +794,7 @@ async function load(auto=false) {
             </div>
           </div>
           <div>
-            <div class="dg-label">Dirección</div>
+            <div class="dg-label">Direccion</div>
             <div class="dg-value">${esc(o.address) || '-'}</div>
           </div>
           <div>
