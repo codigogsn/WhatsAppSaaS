@@ -1707,4 +1707,311 @@ public class WebhookProcessorTests
         receipt.Should().NotBeNull();
         receipt!.Body.Should().Contain("sin cebolla");
     }
+
+    // ══════════════════════════════════════════════════
+    // Order Intelligence Tests
+    // ══════════════════════════════════════════════════
+
+    // ── Menu catalog & normalization ──
+
+    [Theory]
+    [InlineData("hamburguesa", "Hamburguesa")]
+    [InlineData("hamburguesita", "Hamburguesa")]
+    [InlineData("burger", "Hamburguesa")]
+    [InlineData("coca cola", "Coca Cola")]
+    [InlineData("refresco", "Coca Cola")]
+    [InlineData("gaseosa", "Coca Cola")]
+    [InlineData("soda", "Coca Cola")]
+    [InlineData("papas fritas", "Papas")]
+    [InlineData("fritas", "Papas")]
+    [InlineData("papitas", "Papas")]
+    [InlineData("pizza", "Pizza")]
+    [InlineData("sushi roll", "Sushi Roll")]
+    [InlineData("sushi", "Sushi Roll")]
+    [InlineData("combo", "Combo")]
+    [InlineData("hot dog", "Hot Dog")]
+    [InlineData("perro caliente", "Hot Dog")]
+    [InlineData("tequenos", "Teque\u00f1os")]
+    [InlineData("empanada", "Empanada")]
+    [InlineData("jugo", "Jugo")]
+    [InlineData("agua", "Agua")]
+    [InlineData("cerveza", "Cerveza")]
+    [InlineData("birra", "Cerveza")]
+    public void NormalizeMenuItemName_Aliases(string input, string expected)
+    {
+        WebhookProcessor.NormalizeMenuItemName(input).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("hamburgesa")]   // typo
+    [InlineData("hamburguesaz")] // typo
+    [InlineData("hamburguea")]   // typo
+    public void NormalizeMenuItemName_TypoTolerance(string input)
+    {
+        WebhookProcessor.NormalizeMenuItemName(input).Should().Be("Hamburguesa");
+    }
+
+    // ── ParseOrderText ──
+
+    [Fact]
+    public void ParseOrderText_MixedOrder_HamburgerWithPapasAndCoca()
+    {
+        var result = WebhookProcessor.ParseOrderText("3 hamburguesas con papas y coca");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa" && p.Quantity == 3);
+        result.Should().Contain(p => p.Name == "Papas");
+        result.Should().Contain(p => p.Name == "Coca Cola");
+    }
+
+    [Fact]
+    public void ParseOrderText_MultipleItemsWithQuantities()
+    {
+        var result = WebhookProcessor.ParseOrderText("2 sushi roll y 1 coca");
+
+        result.Should().Contain(p => p.Name == "Sushi Roll" && p.Quantity == 2);
+        result.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    [Fact]
+    public void ParseOrderText_WithModifiers()
+    {
+        var result = WebhookProcessor.ParseOrderText("1 hamburguesa sin cebolla extra queso");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa" && p.Quantity == 1);
+        var burger = result.First(p => p.Name == "Hamburguesa");
+        burger.Modifiers.Should().NotBeNullOrWhiteSpace();
+        burger.Modifiers.Should().Contain("sin cebolla");
+    }
+
+    [Fact]
+    public void ParseOrderText_ComboWithSides()
+    {
+        var result = WebhookProcessor.ParseOrderText("2 combos con papas y refresco");
+
+        result.Should().Contain(p => p.Name == "Combo" && p.Quantity == 2);
+        result.Should().Contain(p => p.Name == "Papas");
+        result.Should().Contain(p => p.Name == "Coca Cola"); // refresco -> Coca Cola
+    }
+
+    [Fact]
+    public void ParseOrderText_ConversationalNoise_StrippedCleanly()
+    {
+        var result = WebhookProcessor.ParseOrderText("hola quiero 2 hamburguesas por favor");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa" && p.Quantity == 2);
+    }
+
+    [Fact]
+    public void ParseOrderText_PizzaWithHalfModifier()
+    {
+        var result = WebhookProcessor.ParseOrderText("1 pizza grande mitad pepperoni mitad jam\u00f3n");
+
+        result.Should().Contain(p => p.Name == "Pizza");
+        var pizza = result.First(p => p.Name == "Pizza");
+        pizza.Modifiers.Should().Contain("mitad");
+    }
+
+    [Fact]
+    public void ParseOrderText_SingleItemNoQuantity()
+    {
+        var result = WebhookProcessor.ParseOrderText("hamburguesa delivery");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa");
+    }
+
+    // ── Full flow integration tests ──
+
+    [Fact]
+    public async Task QuickParse_MixedOrder_ParsesAllItems()
+    {
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "2 hamburguesas y 1 coca cola delivery"),
+            _testBusiness);
+
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+        state.DeliveryType.Should().Be("delivery");
+    }
+
+    [Fact]
+    public async Task QuickParse_WithModifiers_StoresModifiers()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "1 hamburguesa sin cebolla extra queso pickup"),
+            _testBusiness);
+
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa");
+        // Modifiers or special instructions should capture the "sin cebolla extra queso"
+        var hasModifiers = state.Items.Any(i => !string.IsNullOrWhiteSpace(i.Modifiers));
+        var hasObs = !string.IsNullOrWhiteSpace(state.SpecialInstructions);
+        (hasModifiers || hasObs).Should().BeTrue("modifiers should be captured as item modifiers or observations");
+    }
+
+    [Fact]
+    public async Task QuickParse_NewMenuItems_Recognized()
+    {
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "2 pizzas y 3 cervezas delivery"),
+            _testBusiness);
+
+        state.Items.Should().Contain(i => i.Name == "Pizza" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Cerveza" && i.Quantity == 3);
+    }
+
+    [Fact]
+    public async Task QuickParse_AliasResolution_RefrescoBecomescoca()
+    {
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "1 refresco pickup"),
+            _testBusiness);
+
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
+
+    [Fact]
+    public void SplitIntoOrderSegments_BasicSplit()
+    {
+        var parts = WebhookProcessor.SplitIntoOrderSegments("2 hamburguesas y 1 coca");
+        parts.Should().HaveCountGreaterOrEqualTo(2);
+    }
+
+    [Fact]
+    public void ExtractItemAndModifiers_WithSinCebolla()
+    {
+        var item = WebhookProcessor.ExtractItemAndModifiers("hamburguesa sin cebolla");
+        item.Should().NotBeNull();
+        item!.Name.Should().Be("Hamburguesa");
+        item.Modifiers.Should().Contain("sin cebolla");
+    }
+
+    [Fact]
+    public void ExtractItemAndModifiers_WithExtraQueso()
+    {
+        var item = WebhookProcessor.ExtractItemAndModifiers("hamburguesa extra queso");
+        item.Should().NotBeNull();
+        item!.Name.Should().Be("Hamburguesa");
+        item.Modifiers.Should().Contain("extra queso");
+    }
+
+    [Fact]
+    public void ExtractItemAndModifiers_UnknownItem_ReturnsNull()
+    {
+        var item = WebhookProcessor.ExtractItemAndModifiers("zapatos deportivos");
+        item.Should().BeNull();
+    }
+
+    [Fact]
+    public void FormatItemText_WithModifiers()
+    {
+        var entry = new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2, Modifiers = "sin cebolla" };
+        WebhookProcessor.FormatItemText(entry).Should().Be("2 Hamburguesa (sin cebolla)");
+    }
+
+    [Fact]
+    public void FormatItemText_WithoutModifiers()
+    {
+        var entry = new ConversationItemEntry { Name = "Papas", Quantity = 3 };
+        WebhookProcessor.FormatItemText(entry).Should().Be("3 Papas");
+    }
+
+    // ── Existing flows still work ──
+
+    [Fact]
+    public async Task ExistingDemoFlow_StillWorks_HamburguessaDelivery()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Step 1: Order
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "2 hamburguesas delivery"),
+            _testBusiness);
+
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 2);
+        state.DeliveryType.Should().Be("delivery");
+
+        // Observation prompt should have been sent
+        state.ObservationPromptSent.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ReceiptShowsModifiers_WhenPresent()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields
+        {
+            CheckoutFormSent = true,
+            CustomerName = "Test",
+            CustomerIdNumber = "12345678",
+            CustomerPhone = "04141234567",
+            Address = "Test address",
+            PaymentMethod = "efectivo",
+            GpsPinReceived = true,
+            DeliveryType = "delivery",
+            ObservationPromptSent = true,
+            ObservationAnswered = true
+        };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1, Modifiers = "sin cebolla" });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        var receipt = sentMessages.FirstOrDefault(m => m.Body.Contains("PEDIDO CONFIRMADO"));
+        receipt.Should().NotBeNull();
+        receipt!.Body.Should().Contain("sin cebolla");
+    }
 }

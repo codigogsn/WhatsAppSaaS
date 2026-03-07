@@ -56,6 +56,7 @@ public sealed class ConversationItemEntry
 {
     public string Name { get; set; } = "";
     public int Quantity { get; set; }
+    public string? Modifiers { get; set; }
 }
 
 public interface IConversationStateStore

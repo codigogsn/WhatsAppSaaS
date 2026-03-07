@@ -337,8 +337,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // E0) Quick parse (no AI)
                     if (TryParseQuickOrder(rawText, out var quickItems, out var quickDelivery, out var quickObs))
                     {
+                        // Use the richer ParseOrderText to get modifiers
+                        var parsedRich = ParseOrderText(rawText);
+                        foreach (var p in parsedRich)
+                            AddOrIncreaseItem(state, p.Name, p.Quantity, p.Modifiers);
+                        // Fallback: if ParseOrderText missed items that regex found, add them
+                        var richNames = new HashSet<string>(parsedRich.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
                         foreach (var (name, qty) in quickItems)
-                            AddOrIncreaseItem(state, name, qty);
+                        {
+                            if (!richNames.Contains(name))
+                                AddOrIncreaseItem(state, name, qty);
+                        }
 
                         if (!string.IsNullOrWhiteSpace(quickDelivery))
                             state.DeliveryType = quickDelivery;
@@ -601,7 +610,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
             Items = state.Items.Select(i => new WhatsAppSaaS.Domain.Entities.OrderItem
             {
-                Name = i.Name,
+                Name = !string.IsNullOrWhiteSpace(i.Modifiers) ? $"{i.Name} ({i.Modifiers})" : i.Name,
                 Quantity = i.Quantity,
                 UnitPrice = 0m
             }).ToList()
@@ -612,7 +621,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         await _orderRepository.AddOrderAsync(order, ct);
 
         var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
-        var itemsText = string.Join(", ", state.Items.Select(i => $"{i.Quantity} {i.Name}"));
+        var itemsText = string.Join(", ", state.Items.Select(i => FormatItemText(i)));
 
         var payText = state.PaymentMethod switch
         {
@@ -744,6 +753,13 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
            || t.Contains("hamburg")
            || t.Contains("coca")
            || t.Contains("papas")
+           || t.Contains("pizza")
+           || t.Contains("sushi")
+           || t.Contains("combo")
+           || t.Contains("hot dog")
+           || t.Contains("hotdog")
+           || t.Contains("tequeno")
+           || t.Contains("empanada")
            || t.Contains("agrega")
            || t.Contains("agregar");
 
@@ -762,16 +778,31 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         return null;
     }
 
-    private static void AddOrIncreaseItem(ConversationFields state, string name, int qty)
+    internal static string FormatItemText(ConversationItemEntry item)
+    {
+        var text = $"{item.Quantity} {item.Name}";
+        if (!string.IsNullOrWhiteSpace(item.Modifiers))
+            text += $" ({item.Modifiers})";
+        return text;
+    }
+
+    private static void AddOrIncreaseItem(ConversationFields state, string name, int qty, string? modifiers = null)
     {
         var existing = state.Items.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
             existing.Quantity += qty;
+            // Merge modifiers if new ones provided
+            if (!string.IsNullOrWhiteSpace(modifiers))
+            {
+                existing.Modifiers = string.IsNullOrWhiteSpace(existing.Modifiers)
+                    ? modifiers
+                    : existing.Modifiers + ", " + modifiers;
+            }
         }
         else
         {
-            state.Items.Add(new ConversationItemEntry { Name = name, Quantity = qty });
+            state.Items.Add(new ConversationItemEntry { Name = name, Quantity = qty, Modifiers = modifiers });
         }
     }
 
@@ -880,18 +911,52 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
     }
 
     // ──────────────────────────────────────────
-    // Menu item normalization (typo-tolerant)
+    // Menu catalog (extensible, alias-aware)
     // ──────────────────────────────────────────
 
-    // Known canonical menu items and their fuzzy variants
-    private static readonly (string Canonical, string[] Patterns)[] MenuItems =
+    internal sealed class MenuEntry
     {
-        ("Hamburguesa", new[] { "hamburguesa", "hamburguesas", "hamburgesa", "hamburgesas",
+        public string Canonical { get; init; } = "";
+        public string[] Aliases { get; init; } = [];
+        public string? Category { get; init; }
+        public bool IsCombo { get; init; }
+    }
+
+    // Catalog: future menu system will load from DB. For now, demo items.
+    internal static readonly MenuEntry[] MenuCatalog =
+    {
+        new() { Canonical = "Hamburguesa", Aliases = new[] { "hamburguesa", "hamburguesas", "hamburgesa", "hamburgesas",
             "hamburguea", "hamburgueas", "hamburgues", "hamburguez", "hamburgue",
-            "hamburga", "hamburgs", "hambur" }),
-        ("Coca Cola", new[] { "coca cola", "cocacola", "cocacolas", "coca", "cocas",
-            "coca-cola", "coca colas" }),
-        ("Papas", new[] { "papas", "papa", "papaas", "papitas", "papita", "papaz" }),
+            "hamburga", "hamburgs", "hambur", "burger", "burgers", "hamburguesita", "hamburguesitas" },
+            Category = "comida" },
+        new() { Canonical = "Coca Cola", Aliases = new[] { "coca cola", "cocacola", "cocacolas", "coca", "cocas",
+            "coca-cola", "coca colas", "refresco", "refrescos", "gaseosa", "gaseosas", "soda" },
+            Category = "bebida" },
+        new() { Canonical = "Papas", Aliases = new[] { "papas", "papa", "papaas", "papitas", "papita", "papaz",
+            "papas fritas", "fritas", "french fries", "fries" },
+            Category = "acompanamiento" },
+        new() { Canonical = "Pizza", Aliases = new[] { "pizza", "pizzas", "piza", "pizas", "pizzita", "pizzitas" },
+            Category = "comida" },
+        new() { Canonical = "Sushi Roll", Aliases = new[] { "sushi roll", "sushi", "sushis", "roll", "rolls",
+            "sushi rolls", "maki", "makis" },
+            Category = "comida" },
+        new() { Canonical = "Combo", Aliases = new[] { "combo", "combos", "combo familiar", "promo", "promocion" },
+            Category = "combo", IsCombo = true },
+        new() { Canonical = "Hot Dog", Aliases = new[] { "hot dog", "hotdog", "hotdogs", "hot dogs", "perro caliente",
+            "perros calientes", "perro", "perros" },
+            Category = "comida" },
+        new() { Canonical = "Tequeños", Aliases = new[] { "tequenos", "tequeño", "tequeños", "tequeno",
+            "tequenitos", "tequeñitos" },
+            Category = "comida" },
+        new() { Canonical = "Empanada", Aliases = new[] { "empanada", "empanadas", "empanadita", "empanaditas" },
+            Category = "comida" },
+        new() { Canonical = "Jugo", Aliases = new[] { "jugo", "jugos", "juguito", "juguitos", "juice" },
+            Category = "bebida" },
+        new() { Canonical = "Agua", Aliases = new[] { "agua", "aguas", "aguita", "botella de agua", "water" },
+            Category = "bebida" },
+        new() { Canonical = "Cerveza", Aliases = new[] { "cerveza", "cervezas", "birra", "birras", "beer", "beers",
+            "chela", "chelas" },
+            Category = "bebida" },
     };
 
     internal static string? NormalizeMenuItemName(string rawItem)
@@ -899,31 +964,29 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         if (string.IsNullOrWhiteSpace(rawItem)) return null;
 
         var t = rawItem.Trim().ToLowerInvariant();
-        // Strip plural trailing 's' for matching
+        t = StripAccents(t);
         var tNoS = t.EndsWith("s") ? t[..^1] : t;
 
-        foreach (var (canonical, patterns) in MenuItems)
+        foreach (var entry in MenuCatalog)
         {
-            // Exact pattern match
-            foreach (var p in patterns)
+            foreach (var alias in entry.Aliases)
             {
-                if (t == p || tNoS == p)
-                    return canonical;
+                var a = StripAccents(alias);
+                if (t == a || tNoS == a)
+                    return entry.Canonical;
             }
 
-            // Prefix match for short inputs (at least 5 chars to avoid false positives)
-            var canonLower = canonical.ToLowerInvariant();
+            var canonLower = StripAccents(entry.Canonical.ToLowerInvariant());
             if (t.Length >= 5 && (canonLower.StartsWith(t) || canonLower.StartsWith(tNoS)))
-                return canonical;
+                return entry.Canonical;
 
-            // Levenshtein distance for close typos (threshold: max 2 edits for words >= 5 chars)
             if (t.Length >= 5)
             {
-                foreach (var p in patterns)
+                foreach (var alias in entry.Aliases)
                 {
-                    var dist = LevenshteinDistance(t, p);
-                    if (dist <= 2)
-                        return canonical;
+                    var a = StripAccents(alias);
+                    if (a.Length >= 4 && LevenshteinDistance(t, a) <= 2)
+                        return entry.Canonical;
                 }
             }
         }
@@ -1236,7 +1299,17 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         return "+" + digits;
     }
 
-    // Quick parse (no AI) — also extracts embedded observations like "sin cebolla"
+    // ──────────────────────────────────────────
+    // Quick parser (no AI) — handles compound orders, modifiers, noise
+    // ──────────────────────────────────────────
+
+    internal sealed class ParsedItem
+    {
+        public string Name { get; set; } = "";
+        public int Quantity { get; set; } = 1;
+        public string? Modifiers { get; set; }
+    }
+
     internal static bool TryParseQuickOrder(
         string rawText,
         out List<(string Name, int Quantity)> items,
@@ -1254,33 +1327,31 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         else if (t.Contains("pick up") || t.Contains("pickup") || t.Contains("recoger"))
             deliveryType = "pickup";
 
-        // Match "N word [word]" patterns, try normalizing single word first, then two words
-        var matches = Regex.Matches(t, @"(\d+)\s+([a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc]+)(?:\s+([a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc]+))?", RegexOptions.IgnoreCase);
+        var parsed = ParseOrderText(rawText);
 
-        foreach (Match m in matches)
+        foreach (var p in parsed)
+            items.Add((p.Name, p.Quantity));
+
+        // Extract observations from modifiers and from text
+        var allObs = new List<string>();
+        foreach (var p in parsed)
         {
-            if (!int.TryParse(m.Groups[1].Value, out var qty)) continue;
-            if (qty <= 0) continue;
-
-            var word1 = m.Groups[2].Value.Trim();
-            var word2 = m.Groups[3].Success ? m.Groups[3].Value.Trim() : null;
-
-            // Try single word first (e.g. "hamburguesa"), then two words (e.g. "coca cola")
-            var name = NormalizeMenuItemName(word1);
-            if (name is null && word2 != null)
-                name = NormalizeMenuItemName(word1 + " " + word2);
-            if (name is null) continue;
-
-            items.Add((name, qty));
+            if (!string.IsNullOrWhiteSpace(p.Modifiers))
+                allObs.Add(p.Modifiers);
         }
 
-        // Extract embedded observations: "sin X", "con extra Y", "sin X y sin Y", etc.
-        embeddedObservation = ExtractEmbeddedObservation(rawText);
+        // Also extract standalone observations not attached to items
+        var standaloneObs = ExtractEmbeddedObservation(rawText, parsed);
+        if (!string.IsNullOrWhiteSpace(standaloneObs))
+            allObs.Add(standaloneObs);
+
+        if (allObs.Count > 0)
+            embeddedObservation = string.Join("; ", allObs.Distinct());
 
         return items.Count > 0;
     }
 
-    // Overload for backward compatibility (existing callers that don't need observation)
+    // Overload for backward compatibility
     private static bool TryParseQuickOrder(
         string rawText,
         out List<(string Name, int Quantity)> items,
@@ -1289,27 +1360,204 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         return TryParseQuickOrder(rawText, out items, out deliveryType, out _);
     }
 
-    // Extract modifier phrases like "sin cebolla", "con extra queso", "uno sin tomate y otro con queso"
-    internal static string? ExtractEmbeddedObservation(string rawText)
+    // Core order text parser: splits by conjunctions, handles "N items con/y other items"
+    internal static List<ParsedItem> ParseOrderText(string rawText)
+    {
+        var results = new List<ParsedItem>();
+        var text = rawText.Trim();
+
+        // Noise words to strip (greetings + filler)
+        var noisePattern = @"\b(hola|buenas?|buenos?\s+d[ií]as?|buenas\s+tardes|buenas\s+noches|hey|epa|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|me\s+das?|dame|necesito|pedimos|para\s+llevar|para\s+comer|mand[ae]\s*me)\b";
+        var cleaned = Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
+
+        // First, split into segments on "con [menu-item]" and " y " boundaries
+        var segments = SplitIntoOrderSegments(cleaned);
+
+        foreach (var seg in segments)
+        {
+            var s = seg.Trim();
+            if (string.IsNullOrWhiteSpace(s)) continue;
+
+            // Try "N items [modifiers]"
+            var m = Regex.Match(s,
+                @"^(\d+)\s+(.+)$",
+                RegexOptions.IgnoreCase);
+
+            if (m.Success && int.TryParse(m.Groups[1].Value, out var qty) && qty > 0)
+            {
+                var rest = m.Groups[2].Value.Trim();
+                var item = ExtractItemAndModifiers(rest);
+                if (item != null)
+                {
+                    item.Quantity = qty;
+                    results.Add(item);
+                    continue;
+                }
+            }
+
+            // No quantity prefix — try as a single item
+            var singleItem = ExtractItemAndModifiers(s);
+            if (singleItem != null)
+            {
+                results.Add(singleItem);
+            }
+        }
+
+        return results;
+    }
+
+    // Split text into segments, separating on " y " and "con [menu-item]"
+    // "3 hamburguesas con papas y coca" -> ["3 hamburguesas", "papas", "coca"]
+    // "1 hamburguesa sin cebolla y 1 coca" -> ["1 hamburguesa sin cebolla", "1 coca"]
+    internal static List<string> SplitIntoOrderSegments(string text)
+    {
+        var results = new List<string>();
+
+        // First split on commas
+        var commaParts = text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var cp in commaParts)
+        {
+            // Split on " y " — always split on conjunction
+            var yParts = Regex.Split(cp, @"\s+y\s+", RegexOptions.IgnoreCase);
+
+            foreach (var yp in yParts)
+            {
+                var part = yp.Trim();
+                if (string.IsNullOrWhiteSpace(part)) continue;
+
+                // Check if this segment has "con [menu-item]" pattern
+                // e.g. "3 hamburguesas con papas" → split into "3 hamburguesas" and "papas"
+                var conSplit = TrySplitOnConMenuItem(part);
+                if (conSplit != null)
+                {
+                    results.AddRange(conSplit);
+                }
+                else
+                {
+                    results.Add(part);
+                }
+            }
+        }
+
+        return results;
+    }
+
+    // If text contains "con [known-menu-item]", split it
+    // "3 hamburguesas con papas" -> ["3 hamburguesas", "papas"]
+    // "hamburguesa con extra queso" -> null (not a menu item link)
+    private static List<string>? TrySplitOnConMenuItem(string text)
+    {
+        var m = Regex.Match(text, @"^(.+?)\s+con\s+(.+)$", RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+
+        var before = m.Groups[1].Value.Trim();
+        var after = m.Groups[2].Value.Trim();
+
+        // Check if the word(s) after "con" start with a known menu item
+        var afterWords = after.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        string? resolved = null;
+
+        // Try first 1-3 words
+        for (int len = Math.Min(afterWords.Length, 3); len >= 1; len--)
+        {
+            var candidate = string.Join(" ", afterWords.Take(len));
+            resolved = NormalizeMenuItemName(candidate);
+            if (resolved != null) break;
+        }
+
+        if (resolved != null)
+        {
+            // "con [menu-item]" — split into two segments
+            return new List<string> { before, after };
+        }
+
+        // "con extra queso" / "con todo" — not a menu item, keep as modifier
+        return null;
+    }
+
+    // Parse "item_name [modifier_phrase]" from text segment
+    internal static ParsedItem? ExtractItemAndModifiers(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return null;
+
+        var t = text.Trim();
+
+        // Try to extract modifiers: "sin X", "extra Y", "con extra Z", "mitad X mitad Y"
+        string? modifiers = null;
+        var itemText = t;
+
+        // Check for modifier phrases
+        var modMatch = Regex.Match(t,
+            @"\s+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|mitad\s+.+|bien\s+(?:cocid|asad|hech).+|al\s+punto|termino\s+\w+|doble\s+\w+)$",
+            RegexOptions.IgnoreCase);
+        if (modMatch.Success)
+        {
+            modifiers = modMatch.Value.Trim();
+            itemText = t[..modMatch.Index].Trim();
+        }
+
+        // Strip trailing noise
+        itemText = StripTrailingNoise(itemText);
+
+        // Try matching word by word, expanding to multi-word names
+        var words = itemText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        string? bestMatch = null;
+        int bestLen = 0;
+
+        // Try longest multi-word match first (up to 3 words)
+        for (int len = Math.Min(words.Length, 3); len >= 1; len--)
+        {
+            for (int start = 0; start <= words.Length - len; start++)
+            {
+                var candidate = string.Join(" ", words.Skip(start).Take(len));
+                var resolved = NormalizeMenuItemName(candidate);
+                if (resolved != null && len > bestLen)
+                {
+                    bestMatch = resolved;
+                    bestLen = len;
+                }
+            }
+        }
+
+        if (bestMatch == null) return null;
+
+        return new ParsedItem
+        {
+            Name = bestMatch,
+            Quantity = 1,
+            Modifiers = modifiers
+        };
+    }
+
+    // Extract standalone observations not already captured as item modifiers
+    internal static string? ExtractEmbeddedObservation(string rawText, List<ParsedItem>? parsedItems = null)
     {
         var observations = new List<string>();
 
-        // Match patterns: "sin X", "con extra X", "con X", "una/uno sin X", "otra/otro con X"
+        // Match: "sin X", "con extra X", but NOT "con [menu-item]"
         var obsMatches = Regex.Matches(rawText,
-            @"(?:un[ao]?\s+|otr[ao]?\s+)?(?:sin\s+[a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc\s]+|con\s+extra\s+[a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc\s]+|con\s+[a-z\u00e1\u00e9\u00ed\u00f3\u00fa\u00f1\u00fc\s]+)",
+            @"(?:un[ao]?\s+|otr[ao]?\s+)?(?:sin\s+[a-záéíóúñü\s]+|con\s+extra\s+[a-záéíóúñü\s]+|extra\s+[a-záéíóúñü]+)",
             RegexOptions.IgnoreCase);
 
         foreach (Match m in obsMatches)
         {
             var obs = m.Value.Trim();
-            // Don't capture "con extra" alone or very short fragments
-            if (obs.Length >= 6)
-                observations.Add(obs);
+            if (obs.Length < 6) continue;
+
+            // Don't count "con [menu-item]" as observation — check if the word after "con" is a menu item
+            // This is already excluded by the regex above (only matches "con extra")
+            // Also skip if this observation was already captured as a per-item modifier
+            if (parsedItems != null && parsedItems.Any(p =>
+                !string.IsNullOrWhiteSpace(p.Modifiers) && p.Modifiers.Contains(obs, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            observations.Add(obs);
         }
 
         if (observations.Count == 0) return null;
 
-        // Clean up: join, collapse spaces, trim trailing conjunctions
         var result = string.Join(", ", observations);
         result = Regex.Replace(result, @"\s+", " ").Trim();
         result = Regex.Replace(result, @"[,\s]+$", "").Trim();
