@@ -135,6 +135,12 @@ public class AppDbContext : DbContext
             b.Property(x => x.AdminKey)
                 .IsRequired();
 
+            // Restaurant profile
+            b.Property(x => x.Greeting).HasMaxLength(500);
+            b.Property(x => x.Schedule).HasMaxLength(500);
+            b.Property(x => x.Address).HasMaxLength(500);
+            b.Property(x => x.LogoUrl).HasMaxLength(500);
+
             // Per-business Pago Móvil config
             b.Property(x => x.PaymentMobileBank);
             b.Property(x => x.PaymentMobileId);

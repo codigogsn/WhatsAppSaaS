@@ -35,6 +35,8 @@
     <div class="row">
       <label class="muted small">X-Admin-Key:</label>
       <input id="adminKey" class="key" placeholder="Pega tu ADMIN_KEY aquí (se guarda en este navegador)" />
+      <label class="muted small">Business ID:</label>
+      <input id="businessId" style="width:300px;" placeholder="GUID del negocio (opcional)" />
       <button onclick="saveKey()">Guardar</button>
       <span id="keyMsg" class="muted small"></span>
     </div>
@@ -146,7 +148,16 @@ function saveKey(){
     return;
   }
   localStorage.setItem('ADMIN_KEY', v);
+
+  const bid = document.getElementById('businessId').value.trim();
+  if (bid) localStorage.setItem('BUSINESS_ID', bid);
+  else localStorage.removeItem('BUSINESS_ID');
+
   document.getElementById('keyMsg').innerHTML = '<span class="ok">Guardada</span>';
+}
+
+function getBusinessId(){
+  return localStorage.getItem('BUSINESS_ID') || document.getElementById('businessId').value.trim() || '';
 }
 
 function adminHeaders(){
@@ -165,7 +176,10 @@ async function loadSummary(){
     return;
   }
 
-  const res = await fetch('/api/admin/analytics/summary?ts=' + Date.now(), { headers: adminHeaders() });
+  const bid = getBusinessId();
+  const summaryQs = new URLSearchParams({ts: Date.now()});
+  if (bid) summaryQs.set('businessId', bid);
+  const res = await fetch('/api/admin/analytics/summary?' + summaryQs.toString(), { headers: adminHeaders() });
   if (!res.ok) {
     document.getElementById('kpiOrdersTotal').textContent = 'err';
     document.getElementById('kpiUniqueCustomers').textContent = 'err';
@@ -205,6 +219,8 @@ async function load(auto=false) {
   const qs = new URLSearchParams();
   if (status) qs.set('status', status);
   qs.set('take', take);
+  const bid = getBusinessId();
+  if (bid) qs.set('businessId', bid);
 
   document.getElementById('msg').textContent = 'Cargando...';
 
@@ -295,7 +311,10 @@ async function updateStatus(btn) {
 }
 
 async function downloadOrdersCsv(){
-  const res = await fetch('/api/admin/exports/orders.csv?take=5000', { headers: adminHeaders() });
+  const bid = getBusinessId();
+  const eqs = new URLSearchParams({take: 5000});
+  if (bid) eqs.set('businessId', bid);
+  const res = await fetch('/api/admin/exports/orders.csv?' + eqs.toString(), { headers: adminHeaders() });
   if (!res.ok) {
     const t = await res.text();
     alert('No se pudo descargar orders.csv: ' + t);
@@ -313,7 +332,10 @@ async function downloadOrdersCsv(){
 }
 
 async function downloadCustomersCsv(){
-  const res = await fetch('/api/admin/exports/customers.csv?take=5000', { headers: adminHeaders() });
+  const bid = getBusinessId();
+  const cqs = new URLSearchParams({take: 5000});
+  if (bid) cqs.set('businessId', bid);
+  const res = await fetch('/api/admin/exports/customers.csv?' + cqs.toString(), { headers: adminHeaders() });
   if (!res.ok) {
     const t = await res.text();
     alert('No se pudo descargar customers.csv: ' + t);
@@ -332,6 +354,7 @@ async function downloadCustomersCsv(){
 
 document.getElementById('baseUrl').textContent = location.origin;
 document.getElementById('adminKey').value = getAdminKey();
+document.getElementById('businessId').value = localStorage.getItem('BUSINESS_ID') || '';
 
 load();
 </script>

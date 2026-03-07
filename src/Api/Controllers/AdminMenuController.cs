@@ -18,6 +18,26 @@ public sealed class AdminMenuController : ControllerBase
         _config = config;
     }
 
+    private async Task<bool> IsAuthorizedForBusinessAsync(Guid businessId, CancellationToken ct)
+    {
+        if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk) || string.IsNullOrWhiteSpace(hk))
+            return false;
+
+        // Accept global admin key
+        var globalKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
+        if (!string.IsNullOrWhiteSpace(globalKey) && hk.ToString() == globalKey)
+            return true;
+
+        // Accept per-business admin key
+        var biz = await _db.Businesses
+            .AsNoTracking()
+            .Where(b => b.Id == businessId && b.IsActive)
+            .Select(b => new { b.AdminKey })
+            .FirstOrDefaultAsync(ct);
+
+        return biz is not null && biz.AdminKey == hk.ToString();
+    }
+
     private bool IsAuthorized()
     {
         var adminKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
@@ -31,7 +51,7 @@ public sealed class AdminMenuController : ControllerBase
     [HttpGet("categories")]
     public async Task<IActionResult> ListCategories([FromQuery] Guid businessId, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
+        if (!await IsAuthorizedForBusinessAsync(businessId, ct)) return Unauthorized();
 
         var cats = await _db.MenuCategories
             .AsNoTracking()
@@ -62,7 +82,7 @@ public sealed class AdminMenuController : ControllerBase
     [HttpPost("categories")]
     public async Task<IActionResult> CreateCategory([FromBody] CategoryRequest req, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
+        if (!await IsAuthorizedForBusinessAsync(req.BusinessId, ct)) return Unauthorized();
         if (string.IsNullOrWhiteSpace(req.Name)) return BadRequest(new { error = "Name required" });
 
         var cat = new MenuCategory
@@ -83,10 +103,10 @@ public sealed class AdminMenuController : ControllerBase
     [HttpPut("categories/{id:guid}")]
     public async Task<IActionResult> UpdateCategory(Guid id, [FromBody] CategoryRequest req, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
-
         var cat = await _db.MenuCategories.FindAsync(new object[] { id }, ct);
         if (cat is null) return NotFound();
+
+        if (!await IsAuthorizedForBusinessAsync(cat.BusinessId, ct)) return Unauthorized();
 
         if (!string.IsNullOrWhiteSpace(req.Name)) cat.Name = req.Name.Trim();
         cat.SortOrder = req.SortOrder;
@@ -100,12 +120,12 @@ public sealed class AdminMenuController : ControllerBase
     [HttpDelete("categories/{id:guid}")]
     public async Task<IActionResult> DeleteCategory(Guid id, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
-
         var cat = await _db.MenuCategories
             .Include(c => c.Items).ThenInclude(i => i.Aliases)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
         if (cat is null) return NotFound();
+
+        if (!await IsAuthorizedForBusinessAsync(cat.BusinessId, ct)) return Unauthorized();
 
         _db.MenuCategories.Remove(cat);
         await _db.SaveChangesAsync(ct);
@@ -118,7 +138,11 @@ public sealed class AdminMenuController : ControllerBase
     [HttpGet("items")]
     public async Task<IActionResult> ListItems([FromQuery] Guid? categoryId, [FromQuery] Guid? businessId, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
+        if (businessId.HasValue)
+        {
+            if (!await IsAuthorizedForBusinessAsync(businessId.Value, ct)) return Unauthorized();
+        }
+        else if (!IsAuthorized()) return Unauthorized();
 
         var q = _db.MenuItems
             .AsNoTracking()
@@ -165,7 +189,13 @@ public sealed class AdminMenuController : ControllerBase
     [HttpPost("items")]
     public async Task<IActionResult> CreateItem([FromBody] ItemRequest req, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
+        // Resolve businessId from category
+        var catBiz = await _db.MenuCategories.AsNoTracking()
+            .Where(c => c.Id == req.CategoryId)
+            .Select(c => c.BusinessId)
+            .FirstOrDefaultAsync(ct);
+        if (catBiz == Guid.Empty) return BadRequest(new { error = "Invalid categoryId" });
+        if (!await IsAuthorizedForBusinessAsync(catBiz, ct)) return Unauthorized();
         if (string.IsNullOrWhiteSpace(req.Name)) return BadRequest(new { error = "Name required" });
 
         var item = new MenuItem
@@ -205,12 +235,13 @@ public sealed class AdminMenuController : ControllerBase
     [HttpPut("items/{id:guid}")]
     public async Task<IActionResult> UpdateItem(Guid id, [FromBody] ItemRequest req, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
-
         var item = await _db.MenuItems
             .Include(i => i.Aliases)
+            .Include(i => i.Category)
             .FirstOrDefaultAsync(i => i.Id == id, ct);
         if (item is null) return NotFound();
+
+        if (!await IsAuthorizedForBusinessAsync(item.Category!.BusinessId, ct)) return Unauthorized();
 
         if (!string.IsNullOrWhiteSpace(req.Name)) item.Name = req.Name.Trim();
         item.Price = req.Price;
@@ -245,12 +276,13 @@ public sealed class AdminMenuController : ControllerBase
     [HttpDelete("items/{id:guid}")]
     public async Task<IActionResult> DeleteItem(Guid id, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
-
         var item = await _db.MenuItems
             .Include(i => i.Aliases)
+            .Include(i => i.Category)
             .FirstOrDefaultAsync(i => i.Id == id, ct);
         if (item is null) return NotFound();
+
+        if (!await IsAuthorizedForBusinessAsync(item.Category!.BusinessId, ct)) return Unauthorized();
 
         _db.MenuItems.Remove(item);
         await _db.SaveChangesAsync(ct);
@@ -261,10 +293,12 @@ public sealed class AdminMenuController : ControllerBase
     [HttpPatch("items/{id:guid}/availability")]
     public async Task<IActionResult> ToggleAvailability(Guid id, [FromBody] AvailabilityRequest req, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
-
-        var item = await _db.MenuItems.FindAsync(new object[] { id }, ct);
+        var item = await _db.MenuItems
+            .Include(i => i.Category)
+            .FirstOrDefaultAsync(i => i.Id == id, ct);
         if (item is null) return NotFound();
+
+        if (!await IsAuthorizedForBusinessAsync(item.Category!.BusinessId, ct)) return Unauthorized();
 
         item.IsAvailable = req.IsAvailable;
         await _db.SaveChangesAsync(ct);
@@ -283,11 +317,14 @@ public sealed class AdminMenuController : ControllerBase
     [HttpPost("items/{itemId:guid}/aliases")]
     public async Task<IActionResult> AddAlias(Guid itemId, [FromBody] AliasRequest req, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
         if (string.IsNullOrWhiteSpace(req.Alias)) return BadRequest(new { error = "Alias required" });
 
-        var item = await _db.MenuItems.FindAsync(new object[] { itemId }, ct);
+        var item = await _db.MenuItems
+            .Include(i => i.Category)
+            .FirstOrDefaultAsync(i => i.Id == itemId, ct);
         if (item is null) return NotFound();
+
+        if (!await IsAuthorizedForBusinessAsync(item.Category!.BusinessId, ct)) return Unauthorized();
 
         var alias = new MenuItemAlias
         {
@@ -305,10 +342,12 @@ public sealed class AdminMenuController : ControllerBase
     [HttpDelete("aliases/{id:guid}")]
     public async Task<IActionResult> DeleteAlias(Guid id, CancellationToken ct)
     {
-        if (!IsAuthorized()) return Unauthorized();
-
-        var alias = await _db.MenuItemAliases.FindAsync(new object[] { id }, ct);
+        var alias = await _db.MenuItemAliases
+            .Include(a => a.MenuItem).ThenInclude(i => i!.Category)
+            .FirstOrDefaultAsync(a => a.Id == id, ct);
         if (alias is null) return NotFound();
+
+        if (!await IsAuthorizedForBusinessAsync(alias.MenuItem!.Category!.BusinessId, ct)) return Unauthorized();
 
         _db.MenuItemAliases.Remove(alias);
         await _db.SaveChangesAsync(ct);

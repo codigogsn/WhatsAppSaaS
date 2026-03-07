@@ -385,6 +385,20 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
             Log.Information("LEGACY COLUMN ADDED: {Col}", sql.Replace("""ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS """, "Orders."));
     }
 
+    // ── Missing columns on Businesses (multi-restaurant profile) ──
+    string[] businessColumns =
+    [
+        """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "Greeting" text""",
+        """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "Schedule" text""",
+        """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "Address" text""",
+        """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "LogoUrl" text""",
+    ];
+    foreach (var sql in businessColumns)
+    {
+        if (ExecSql(conn, sql))
+            Log.Information("LEGACY COLUMN ADDED: {Col}", sql.Replace("""ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS """, "Businesses."));
+    }
+
     // ── Boolean column repair ──
     string[] boolRepairs =
     [

@@ -26,14 +26,17 @@ public sealed class OrdersController : ControllerBase
         _logger = logger;
     }
 
-    // GET /api/orders?take=50&status=Pending
+    // GET /api/orders?take=50&status=Pending&businessId=xxx
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] int take = 50, [FromQuery] string? status = null)
+    public async Task<IActionResult> GetAll([FromQuery] int take = 50, [FromQuery] string? status = null, [FromQuery] Guid? businessId = null)
     {
         if (take < 1) take = 1;
         if (take > 200) take = 200;
 
         var q = _context.Orders.AsNoTracking().Include(o => o.Items).AsQueryable();
+
+        if (businessId.HasValue)
+            q = q.Where(o => o.BusinessId == businessId.Value);
 
         if (!string.IsNullOrWhiteSpace(status))
             q = q.Where(o => o.Status == status);

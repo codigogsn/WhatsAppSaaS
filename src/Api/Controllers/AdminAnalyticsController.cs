@@ -37,10 +37,17 @@ public class AdminAnalyticsController : ControllerBase
     }
 
     // ── Legacy summary (kept for backward compat, route unchanged) ──
+    // Accepts optional businessId for tenant scoping
     [HttpGet("/api/admin/analytics/summary")]
-    public async Task<IActionResult> GetSummary(CancellationToken ct)
+    public async Task<IActionResult> GetSummary([FromQuery] Guid? businessId, CancellationToken ct)
     {
-        var result = await _analytics.GetSummaryAsync(ct);
+        if (businessId.HasValue)
+        {
+            var bizId = await AuthorizeBusinessAsync(businessId.Value, ct);
+            if (bizId is null) return Unauthorized();
+        }
+
+        var result = await _analytics.GetSummaryAsync(businessId, ct);
         return Ok(result);
     }
 

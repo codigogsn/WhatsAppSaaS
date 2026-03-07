@@ -81,6 +81,7 @@ public class BusinessResolver : IBusinessResolver
         }
 
         return new BusinessContext(biz.Id, biz.PhoneNumberId, biz.AccessToken, biz.Name,
+            biz.Greeting, biz.Schedule, biz.Address, biz.LogoUrl,
             biz.PaymentMobileBank, biz.PaymentMobileId, biz.PaymentMobilePhone);
     }
 
@@ -95,7 +96,8 @@ public class BusinessResolver : IBusinessResolver
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT "Id", "PhoneNumberId", "AccessToken", "Name",
-                   "PaymentMobileBank", "PaymentMobileId", "PaymentMobilePhone"
+                   "PaymentMobileBank", "PaymentMobileId", "PaymentMobilePhone",
+                   "Greeting", "Schedule", "Address", "LogoUrl"
             FROM "Businesses"
             WHERE "PhoneNumberId" = @pid AND "IsActive" = true
             LIMIT 1
@@ -123,8 +125,13 @@ public class BusinessResolver : IBusinessResolver
         var pmBank = reader.IsDBNull(4) ? null : reader.GetString(4);
         var pmId = reader.IsDBNull(5) ? null : reader.GetString(5);
         var pmPhone = reader.IsDBNull(6) ? null : reader.GetString(6);
+        var greeting = reader.IsDBNull(7) ? null : reader.GetString(7);
+        var schedule = reader.IsDBNull(8) ? null : reader.GetString(8);
+        var address = reader.IsDBNull(9) ? null : reader.GetString(9);
+        var logoUrl = reader.IsDBNull(10) ? null : reader.GetString(10);
 
-        return new BusinessContext(bizId, bizPhone, bizToken, bizName, pmBank, pmId, pmPhone);
+        return new BusinessContext(bizId, bizPhone, bizToken, bizName,
+            greeting, schedule, address, logoUrl, pmBank, pmId, pmPhone);
     }
 
     public static string? EnvResolve(params string[] keys)

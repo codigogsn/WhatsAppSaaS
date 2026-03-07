@@ -22,15 +22,22 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
     // ── Legacy summary (unscoped) ──
 
-    public async Task<AnalyticsSummaryDto> GetSummaryAsync(CancellationToken ct)
+    public async Task<AnalyticsSummaryDto> GetSummaryAsync(Guid? businessId = null, CancellationToken ct = default)
     {
-        // Pull minimal projections client-side to avoid Npgsql bare-boolean translation issues
-        var orderRows = await _db.Orders
-            .AsNoTracking()
+        var orderQ = _db.Orders.AsNoTracking().AsQueryable();
+        var customerQ = _db.Customers.AsNoTracking().AsQueryable();
+
+        if (businessId.HasValue)
+        {
+            orderQ = orderQ.Where(o => o.BusinessId == businessId.Value);
+            customerQ = customerQ.Where(c => c.BusinessId == businessId.Value);
+        }
+
+        var orderRows = await orderQ
             .Select(o => new { o.CheckoutCompleted, o.TotalAmount })
             .ToListAsync(ct);
 
-        var totalCustomers = await _db.Customers.AsNoTracking().CountAsync(ct);
+        var totalCustomers = await customerQ.CountAsync(ct);
 
         var totalOrders = orderRows.Count;
         var completedOrders = orderRows.Count(o => o.CheckoutCompleted);

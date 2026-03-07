@@ -17,17 +17,42 @@ public class AdminExportsController : ControllerBase
         _db = db;
     }
 
-    // GET /api/admin/exports/orders.csv?take=5000
+    private async Task<Guid?> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
+    {
+        if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || string.IsNullOrWhiteSpace(headerKey))
+            return null;
+
+        var biz = await _db.Businesses
+            .AsNoTracking()
+            .Where(b => b.Id == businessId && b.IsActive)
+            .Select(b => new { b.Id, b.AdminKey })
+            .FirstOrDefaultAsync(ct);
+
+        if (biz is null || biz.AdminKey != headerKey.ToString())
+            return null;
+
+        return biz.Id;
+    }
+
+    // GET /api/admin/exports/orders.csv?take=5000&businessId=xxx
     [HttpGet("orders.csv")]
-    public async Task<IActionResult> ExportOrdersCsv([FromQuery] int? take = null)
+    public async Task<IActionResult> ExportOrdersCsv([FromQuery] int? take = null, [FromQuery] Guid? businessId = null, CancellationToken ct = default)
     {
         var max = ClampTake(take);
 
-        var orders = await _db.Orders
-            .AsNoTracking()
+        var q = _db.Orders.AsNoTracking().AsQueryable();
+
+        if (businessId.HasValue)
+        {
+            var bizId = await AuthorizeBusinessAsync(businessId.Value, ct);
+            if (bizId is null) return Unauthorized();
+            q = q.Where(o => o.BusinessId == bizId);
+        }
+
+        var orders = await q
             .OrderByDescending(o => o.CreatedAtUtc)
             .Take(max)
-            .ToListAsync();
+            .ToListAsync(ct);
 
         var sb = new StringBuilder();
 
@@ -56,16 +81,23 @@ public class AdminExportsController : ControllerBase
         );
     }
 
-    // GET /api/admin/exports/customers.csv
+    // GET /api/admin/exports/customers.csv?businessId=xxx
     [HttpGet("customers.csv")]
-    public async Task<IActionResult> ExportCustomersCsv([FromQuery] int? take = null)
+    public async Task<IActionResult> ExportCustomersCsv([FromQuery] int? take = null, [FromQuery] Guid? businessId = null, CancellationToken ct = default)
     {
         var max = ClampTake(take);
 
-        var orders = await _db.Orders
-            .AsNoTracking()
-            .Where(o => o.CustomerPhone != null && o.CustomerPhone != "")
-            .ToListAsync();
+        var q = _db.Orders.AsNoTracking()
+            .Where(o => o.CustomerPhone != null && o.CustomerPhone != "");
+
+        if (businessId.HasValue)
+        {
+            var bizId = await AuthorizeBusinessAsync(businessId.Value, ct);
+            if (bizId is null) return Unauthorized();
+            q = q.Where(o => o.BusinessId == bizId);
+        }
+
+        var orders = await q.ToListAsync(ct);
 
         var customers = orders
             .GroupBy(o => (o.CustomerPhone ?? "").Trim())

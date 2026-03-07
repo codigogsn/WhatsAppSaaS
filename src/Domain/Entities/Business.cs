@@ -16,6 +16,12 @@ public class Business
     // Admin key por negocio (para dashboard/admin). Esto sustituye el single ADMIN_KEY global.
     public string AdminKey { get; set; } = "";
 
+    // Restaurant profile
+    public string? Greeting { get; set; }
+    public string? Schedule { get; set; }
+    public string? Address { get; set; }
+    public string? LogoUrl { get; set; }
+
     // Per-business Pago Móvil config (multi-restaurant)
     public string? PaymentMobileBank { get; set; }
     public string? PaymentMobileId { get; set; }

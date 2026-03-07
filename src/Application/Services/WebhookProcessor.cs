@@ -432,20 +432,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
             ? biz.BusinessName
             : "nuestro restaurante";
 
-        // Message 1: Welcome
+        // Message 1: Welcome (custom greeting or default)
+        var greeting = !string.IsNullOrWhiteSpace(biz.Greeting)
+            ? biz.Greeting
+            : $"\ud83d\udc4b Hola, bienvenido a {businessName}";
+
         await SendAsync(new OutgoingMessage
         {
             To = to,
-            Body = $"\ud83d\udc4b Hola, bienvenido a {businessName}",
+            Body = greeting,
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
 
-        // Message 2: Menu
+        // Message 2: Menu (dynamic from DB or demo fallback)
+        var menuBody = BuildMenuMessage();
+
         await SendAsync(new OutgoingMessage
         {
             To = to,
-            Body = "\ud83d\udccb *MEN\u00da (DEMO)*\n1) Hamburguesa\n2) Coca Cola\n3) Papas\n\n_(En producci\u00f3n aqu\u00ed va foto/PDF del men\u00fa del restaurante)_",
+            Body = menuBody,
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
@@ -458,6 +464,29 @@ public sealed class WebhookProcessor : IWebhookProcessor
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
+    }
+
+    private string BuildMenuMessage()
+    {
+        var catalog = _activeMenu ?? MenuCatalog;
+
+        // If using the built-in demo catalog, show demo message
+        if (catalog == MenuCatalog)
+            return "\ud83d\udccb *MEN\u00da (DEMO)*\n1) Hamburguesa\n2) Coca Cola\n3) Papas\n\n_(En producci\u00f3n aqu\u00ed va foto/PDF del men\u00fa del restaurante)_";
+
+        // Build dynamic menu from DB items
+        var sb = new StringBuilder();
+        sb.AppendLine("\ud83d\udccb *MEN\u00da*");
+
+        var idx = 1;
+        foreach (var item in catalog)
+        {
+            var priceStr = item.Price > 0 ? $" — ${item.Price:0.00}" : "";
+            sb.AppendLine($"{idx}) {item.Canonical}{priceStr}");
+            idx++;
+        }
+
+        return sb.ToString().TrimEnd();
     }
 
     // ──────────────────────────────────────────
