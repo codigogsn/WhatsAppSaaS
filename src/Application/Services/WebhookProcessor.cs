@@ -270,6 +270,29 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                         }
 
+                        // Abandoned order resume: if customer greets but has items from a stale session
+                        // Only resume if: items exist, not in checkout, observation not yet handled,
+                        // and last activity was > 10 minutes ago (stale session)
+                        if (IsGreeting(t) && state.Items.Count > 0
+                            && !state.CheckoutFormSent && !state.ObservationAnswered
+                            && state.LastActivityUtc.HasValue
+                            && (DateTime.UtcNow - state.LastActivityUtc.Value).TotalMinutes > 10)
+                        {
+                            var itemsSummary = string.Join(", ", state.Items.Select(i => FormatItemText(i)));
+                            state.LastActivityUtc = DateTime.UtcNow;
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.AbandonedResume(itemsSummary),
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
 
@@ -320,6 +343,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             }
                             state.DeliveryType = lastOrder.DeliveryType;
                             state.MenuSent = true;
+                            state.LastActivityUtc = DateTime.UtcNow;
+
+                            // Build a summary of what was loaded
+                            var reorderSummary = string.Join(", ", state.Items.Select(i => FormatItemText(i)));
 
                             await SendAsync(new OutgoingMessage
                             {
@@ -414,6 +441,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                        // Smart suggestions after adding items
+                        if (orderMod.Type == ModificationType.Add && state.Items.Count > 0)
+                            await TrySendSmartSuggestionAsync(state, message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+
+                        state.LastActivityUtc = DateTime.UtcNow;
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
@@ -504,6 +536,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                        // Smart suggestions: upsell + combo (one per step, after order reply)
+                        await TrySendSmartSuggestionAsync(state, message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+
+                        state.LastActivityUtc = DateTime.UtcNow;
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
@@ -532,6 +568,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         AccessToken = businessContext.AccessToken
                     }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                    // Smart suggestions after AI parse adds items
+                    if (effectiveIntent == RestaurantIntent.OrderCreate && state.Items.Count > 0)
+                        await TrySendSmartSuggestionAsync(state, message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+
+                    state.LastActivityUtc = DateTime.UtcNow;
                     await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                     }
                     catch (Exception ex)
@@ -981,6 +1022,135 @@ public sealed class WebhookProcessor : IWebhookProcessor
         {
             state.Items.Add(new ConversationItemEntry { Name = name, Quantity = qty, Modifiers = modifiers });
         }
+    }
+
+    // ──────────────────────────────────────────
+    // AI Assistant: smart suggestions (upsell, combo)
+    // ──────────────────────────────────────────
+
+    private async Task TrySendSmartSuggestionAsync(
+        ConversationFields state,
+        string to, string phoneNumberId,
+        BusinessContext biz, string conversationId, CancellationToken ct)
+    {
+        // Only one suggestion per order flow, only before checkout
+        if (state.UpsellSent || state.CheckoutFormSent || state.ObservationPromptSent) return;
+        if (state.Items.Count == 0) return;
+
+        // Priority 1: combo suggestion
+        var comboMsg = BuildComboSuggestion(state);
+        if (comboMsg != null)
+        {
+            state.ComboSuggestionSent = true;
+            state.UpsellSent = true;
+            await SendAsync(new OutgoingMessage
+            {
+                To = to, Body = comboMsg,
+                PhoneNumberId = phoneNumberId, AccessToken = biz.AccessToken
+            }, biz.BusinessId, conversationId, ct);
+            return;
+        }
+
+        // Priority 2: upsell addon
+        var upsellMsg = BuildUpsellSuggestion(state);
+        if (upsellMsg != null)
+        {
+            state.UpsellSent = true;
+            await SendAsync(new OutgoingMessage
+            {
+                To = to, Body = upsellMsg,
+                PhoneNumberId = phoneNumberId, AccessToken = biz.AccessToken
+            }, biz.BusinessId, conversationId, ct);
+        }
+    }
+
+    // ──────────────────────────────────────────
+    // AI Assistant: upsell, combo, and resume builders
+    // ──────────────────────────────────────────
+
+    // Upsell pairing rules: item category → suggested category/item
+    private static readonly Dictionary<string, string[]> UpsellPairings = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["comida"] = new[] { "bebida", "acompanamiento" },
+        ["bebida"] = new[] { "comida", "acompanamiento" },
+        ["acompanamiento"] = new[] { "bebida" },
+    };
+
+    internal string? BuildUpsellSuggestion(ConversationFields state)
+    {
+        var catalog = _activeMenu ?? MenuCatalog;
+        if (catalog.Length == 0) return null;
+
+        var orderedCategories = state.Items
+            .Select(i => catalog.FirstOrDefault(m => m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase)))
+            .Where(m => m != null)
+            .Select(m => m!.Category ?? "")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var orderedNames = state.Items
+            .Select(i => i.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        // Find a suggestion from paired categories not already in the order
+        foreach (var cat in orderedCategories)
+        {
+            if (!UpsellPairings.TryGetValue(cat, out var targetCats)) continue;
+
+            foreach (var targetCat in targetCats)
+            {
+                if (orderedCategories.Contains(targetCat)) continue;
+
+                var suggestion = catalog
+                    .Where(m => string.Equals(m.Category, targetCat, StringComparison.OrdinalIgnoreCase)
+                             && !m.IsCombo
+                             && !orderedNames.Contains(m.Canonical))
+                    .OrderByDescending(m => m.Price)
+                    .FirstOrDefault();
+
+                if (suggestion != null)
+                {
+                    return suggestion.Price > 0
+                        ? Msg.UpsellWithPrice(suggestion.Canonical, suggestion.Price)
+                        : Msg.Upsell(suggestion.Canonical);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    internal string? BuildComboSuggestion(ConversationFields state)
+    {
+        var catalog = _activeMenu ?? MenuCatalog;
+        if (catalog.Length == 0 || state.ComboSuggestionSent) return null;
+
+        var combos = catalog.Where(m => m.IsCombo).ToList();
+        if (combos.Count == 0) return null;
+
+        // Only suggest if customer has individual items (not already ordering a combo)
+        var hasCombo = state.Items.Any(i =>
+            catalog.Any(m => m.IsCombo && m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase)));
+        if (hasCombo) return null;
+
+        // Suggest the best-priced combo
+        var bestCombo = combos.OrderByDescending(c => c.Price).First();
+
+        // Calculate individual item total to see if combo saves money
+        var itemTotal = state.Items.Sum(i =>
+        {
+            var entry = catalog.FirstOrDefault(m => m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase));
+            return (entry?.Price ?? 0) * i.Quantity;
+        });
+
+        if (bestCombo.Price > 0 && itemTotal > 0 && bestCombo.Price < itemTotal)
+        {
+            var savings = itemTotal - bestCombo.Price;
+            return Msg.ComboUpgrade(bestCombo.Canonical, savings);
+        }
+
+        return bestCombo.Price > 0
+            ? Msg.ComboUpgradeSimple(bestCombo.Canonical)
+            : null;
     }
 
     // ──────────────────────────────────────────

@@ -33,6 +33,10 @@ public sealed class ConversationFields
     public DateTime? HumanHandoffAtUtc { get; set; }
     public int HumanHandoffNotifiedCount { get; set; }
 
+    public bool UpsellSent { get; set; }
+    public bool ComboSuggestionSent { get; set; }
+    public DateTime? LastActivityUtc { get; set; }
+
     public void ResetAfterConfirm()
     {
         MenuSent = false;
@@ -55,6 +59,9 @@ public sealed class ConversationFields
         HumanHandoffRequested = false;
         HumanHandoffAtUtc = null;
         HumanHandoffNotifiedCount = 0;
+        UpsellSent = false;
+        ComboSuggestionSent = false;
+        LastActivityUtc = null;
     }
 }
 

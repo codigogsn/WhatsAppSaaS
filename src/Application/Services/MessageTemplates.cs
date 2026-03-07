@@ -251,6 +251,23 @@ internal static class Msg
     internal static string NoReorderAvailable
         => "No encontre un pedido anterior. \u00bfQue deseas ordenar?";
 
+    // ── AI Assistant: upsell / combo / resume ──
+
+    internal static string Upsell(string suggestedItem)
+        => $"Te agrego *{suggestedItem}* para completar tu pedido?";
+
+    internal static string UpsellWithPrice(string suggestedItem, decimal price)
+        => $"Te agrego *{suggestedItem}* por solo *${price:0.00}*?";
+
+    internal static string ComboUpgrade(string comboName, decimal savings)
+        => $"Por *${savings:0.00} mas* puedes llevar el *{comboName}*. Te lo agrego?";
+
+    internal static string ComboUpgradeSimple(string comboName)
+        => $"Tambien tenemos *{comboName}*. Te interesa?";
+
+    internal static string AbandonedResume(string itemsSummary)
+        => $"Hola de nuevo! Tienes un pedido pendiente:\n{itemsSummary}\n\nQuieres continuar o empezar de nuevo?";
+
     // ── Saved address ──
 
     internal static string SavedAddressOffer(string address)

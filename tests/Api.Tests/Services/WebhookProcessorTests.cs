@@ -915,19 +915,21 @@ public class WebhookProcessorTests
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        string? sentBody = null;
+        var sentBodies = new List<string>();
         _whatsAppClientMock
             .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
-            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentBody = msg.Body)
+            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentBodies.Add(msg.Body))
             .ReturnsAsync(true);
 
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999","agrega 3 hamburgueas mas porfavor"), _testBusiness);
 
-        sentBody.Should().NotBeNull();
-        sentBody.Should().Contain("3 Hamburguesa");
-        sentBody.Should().Contain("CONFIRMAR");
-        sentBody.Should().NotContain("hamburgueAs");
-        sentBody.Should().NotContain("porfavor");
+        sentBodies.Should().NotBeEmpty();
+        // The modification response (first message) should mention the clean item name
+        var modResponse = sentBodies.First();
+        modResponse.Should().Contain("3 Hamburguesa");
+        modResponse.Should().Contain("CONFIRMAR");
+        modResponse.Should().NotContain("hamburgueAs");
+        modResponse.Should().NotContain("porfavor");
     }
 
     [Fact]
