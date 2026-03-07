@@ -94,6 +94,9 @@ public sealed class WebhookMessage
 
     [JsonPropertyName("image")]
     public WebhookMedia? Image { get; set; }
+
+    [JsonPropertyName("document")]
+    public WebhookMedia? Document { get; set; }
 }
 
 public sealed class WebhookMedia

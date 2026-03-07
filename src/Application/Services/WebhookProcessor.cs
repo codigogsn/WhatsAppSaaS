@@ -122,14 +122,21 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     }
 
                     // 2) Media: payment evidence
+                    //    Accept proof image when: explicitly requested, OR payment method
+                    //    is pago_movil/divisas and we have items (even if not formally requested)
                     if (message.Type != "text")
                     {
-                        if (state.PaymentEvidenceRequested && !state.PaymentEvidenceReceived)
+                        var shouldCaptureProof = !state.PaymentEvidenceReceived
+                            && (state.PaymentEvidenceRequested
+                                || (state.Items.Count > 0 && state.PaymentMethod is "pago_movil" or "divisas"));
+
+                        if (shouldCaptureProof && message.Type is "image" or "document")
                         {
                             state.PaymentEvidenceReceived = true;
 
-                            // Capture media ID from image message
-                            if (message.Image?.Id is { Length: > 0 } mediaId)
+                            // Capture media ID from image or document message
+                            var mediaId = message.Image?.Id ?? message.Document?.Id;
+                            if (!string.IsNullOrWhiteSpace(mediaId))
                                 state.PaymentProofMediaId = mediaId;
 
                             await SendAsync(new OutgoingMessage
@@ -448,6 +455,52 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.LastActivityUtc = DateTime.UtcNow;
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
+                    }
+
+                    // D0) Standalone payment method at ANY stage with items in cart
+                    //     Only for single-line messages — multiline may be a checkout form
+                    if (state.Items.Count > 0 && !IsRestartIntent(t) && !rawText.Contains('\n'))
+                    {
+                        var payMethod = NormalizePaymentMethod(rawText);
+                        if (payMethod is not null && state.PaymentMethod is null)
+                        {
+                            state.PaymentMethod = payMethod;
+
+                            // Trigger evidence request for pago_movil / divisas
+                            if (payMethod is "pago_movil" or "divisas")
+                            {
+                                if (!state.PaymentEvidenceRequested)
+                                {
+                                    state.PaymentEvidenceRequested = true;
+
+                                    if (payMethod == "pago_movil")
+                                    {
+                                        await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+                                    }
+                                    else
+                                    {
+                                        await SendAsync(new OutgoingMessage
+                                        {
+                                            To = message.From,
+                                            Body = Msg.DivisasProofRequest,
+                                            PhoneNumberId = phoneNumberId,
+                                            AccessToken = businessContext.AccessToken
+                                        }, businessContext.BusinessId, conversationId, cancellationToken);
+                                    }
+                                }
+                            }
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.CheckoutDataReceived,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
                     }
 
                     // D) Checkout form capture (supports incremental field submission)

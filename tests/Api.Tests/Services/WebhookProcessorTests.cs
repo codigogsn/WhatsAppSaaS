@@ -2265,6 +2265,222 @@ public class WebhookProcessorTests
     // REGRESSION: Delivery type not re-asked
     // ──────────────────────────────────────────
 
+    // ──────────────────────────────────────────
+    // REGRESSION: Standalone payment method recognition
+    // ──────────────────────────────────────────
+
+    [Fact]
+    public async Task StandalonePaymentMethod_SingleLine_SetsPaymentMethod()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "pago movil"),
+            _testBusiness);
+
+        state.PaymentMethod.Should().Be("pago_movil");
+        state.PaymentEvidenceRequested.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task StandalonePaymentMethod_MultilineCheckout_DoesNotIntercept()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.CheckoutFormSent = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "Ana\n12345678\n04141234567\naltamira\nefectivo"),
+            _testBusiness);
+
+        // Should parse as checkout form, not standalone payment
+        state.CustomerName.Should().Be("Ana");
+        state.PaymentMethod.Should().Be("efectivo");
+    }
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Proof image capture without explicit request
+    // ──────────────────────────────────────────
+
+    [Fact]
+    public async Task ProofImage_CapturedWhenPaymentMethodSet_WithoutExplicitRequest()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "pago_movil";
+        // PaymentEvidenceRequested is false — user sends proof proactively
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Send an image message
+        var imagePayload = CreateImageMessagePayload("5511999999999", "media_proof_123");
+        await _sut.ProcessAsync(imagePayload, _testBusiness);
+
+        state.PaymentEvidenceReceived.Should().BeTrue();
+        state.PaymentProofMediaId.Should().Be("media_proof_123");
+
+        var proofMsg = sentMessages.FirstOrDefault(m => m.Body.Contains("Comprobante recibido"));
+        proofMsg.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task ProofDocument_CapturedViaDocumentProperty()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "divisas";
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Send a document message (PDF receipt)
+        var docPayload = CreateDocumentMessagePayload("5511999999999", "doc_media_456");
+        await _sut.ProcessAsync(docPayload, _testBusiness);
+
+        state.PaymentEvidenceReceived.Should().BeTrue();
+        state.PaymentProofMediaId.Should().Be("doc_media_456");
+    }
+
+    private static WebhookPayload CreateImageMessagePayload(string from, string mediaId) => new()
+    {
+        Object = "whatsapp_business_account",
+        Entry =
+        [
+            new WebhookEntry
+            {
+                Id = "entry1",
+                Changes =
+                [
+                    new WebhookChange
+                    {
+                        Field = "messages",
+                        Value = new WebhookChangeValue
+                        {
+                            MessagingProduct = "whatsapp",
+                            Metadata = new WebhookMetadata
+                            {
+                                DisplayPhoneNumber = "15551234567",
+                                PhoneNumberId = "123456789"
+                            },
+                            Contacts =
+                            [
+                                new WebhookContact
+                                {
+                                    WaId = from,
+                                    Profile = new WebhookProfile { Name = "Test User" }
+                                }
+                            ],
+                            Messages =
+                            [
+                                new WebhookMessage
+                                {
+                                    From = from,
+                                    Id = $"wamid.test{Interlocked.Increment(ref _msgCounter)}",
+                                    Timestamp = "1234567890",
+                                    Type = "image",
+                                    Image = new WebhookMedia { Id = mediaId, MimeType = "image/jpeg" }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    };
+
+    private static WebhookPayload CreateDocumentMessagePayload(string from, string mediaId) => new()
+    {
+        Object = "whatsapp_business_account",
+        Entry =
+        [
+            new WebhookEntry
+            {
+                Id = "entry1",
+                Changes =
+                [
+                    new WebhookChange
+                    {
+                        Field = "messages",
+                        Value = new WebhookChangeValue
+                        {
+                            MessagingProduct = "whatsapp",
+                            Metadata = new WebhookMetadata
+                            {
+                                DisplayPhoneNumber = "15551234567",
+                                PhoneNumberId = "123456789"
+                            },
+                            Contacts =
+                            [
+                                new WebhookContact
+                                {
+                                    WaId = from,
+                                    Profile = new WebhookProfile { Name = "Test User" }
+                                }
+                            ],
+                            Messages =
+                            [
+                                new WebhookMessage
+                                {
+                                    From = from,
+                                    Id = $"wamid.test{Interlocked.Increment(ref _msgCounter)}",
+                                    Timestamp = "1234567890",
+                                    Type = "document",
+                                    Document = new WebhookMedia { Id = mediaId, MimeType = "application/pdf" }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    };
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Delivery type not re-asked
+    // ──────────────────────────────────────────
+
     [Fact]
     public void BuildOrderReplyFromState_DeliveryAlreadySet_DoesNotReAsk()
     {
