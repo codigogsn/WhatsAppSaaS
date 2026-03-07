@@ -254,16 +254,25 @@ internal static class Msg
     // ── AI Assistant: upsell / combo / resume ──
 
     internal static string Upsell(string suggestedItem)
-        => $"Te agrego *{suggestedItem}* para completar tu pedido?";
+        => $"Tambien te puedo agregar *{suggestedItem}* si quieres.";
 
     internal static string UpsellWithPrice(string suggestedItem, decimal price)
-        => $"Te agrego *{suggestedItem}* por solo *${price:0.00}*?";
+        => $"Te agrego una *{suggestedItem}* por solo *${price:0.00}*?";
 
     internal static string ComboUpgrade(string comboName, decimal savings)
         => $"Por *${savings:0.00} mas* puedes llevar el *{comboName}*. Te lo agrego?";
 
     internal static string ComboUpgradeSimple(string comboName)
-        => $"Tambien tenemos *{comboName}*. Te interesa?";
+        => $"Tambien tenemos el *{comboName}*. Te interesa?";
+
+    internal static string ComboMissing(string missingItem, string comboName, decimal comboPrice)
+        => $"Si le agregas una *{missingItem}* completas el *{comboName}* por *${comboPrice:0.00}*. Te lo armo?";
+
+    internal static string SuggestionAccepted(string item)
+        => $"Listo, agregue *{item}* a tu pedido.";
+
+    internal static string SuggestionDeclined
+        => "Perfecto, asi queda tu pedido. Escribe *CONFIRMAR* para finalizar.";
 
     internal static string AbandonedResume(string itemsSummary)
         => $"Hola de nuevo! Tienes un pedido pendiente:\n{itemsSummary}\n\nQuieres continuar o empezar de nuevo?";

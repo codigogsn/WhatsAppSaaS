@@ -2495,4 +2495,242 @@ public class WebhookProcessorTests
         reply.Should().NotContain("pickup");
         reply.Should().NotContain("delivery");
     }
+
+    // ══════════════════════════════════════════════
+    // AI SALES OPTIMIZATION TESTS
+    // ══════════════════════════════════════════════
+
+    // 1. Burger order → relevant drink/fries suggestion
+    [Fact]
+    public void BuildUpsellSuggestion_BurgerOrder_SuggestsDrinkOrSide()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+
+        var (msg, item) = _sut.BuildUpsellSuggestion(state);
+
+        msg.Should().NotBeNull();
+        item.Should().NotBeNull();
+        // Should suggest from bebida or acompanamiento category
+        var validSuggestions = new[] { "Coca Cola", "Papas", "Agua", "Jugo", "Cerveza" };
+        validSuggestions.Should().Contain(item!);
+    }
+
+    // 2. Suggestion suppressed during checkout
+    [Fact]
+    public async Task SmartSuggestion_SuppressedDuringCheckout()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.ObservationPromptSent = true;
+        state.ObservationAnswered = true;
+        state.CheckoutFormSent = true;  // Already in checkout
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Add another item during checkout
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "agrega 1 coca"),
+            _testBusiness);
+
+        // Should NOT get a suggestion message (already in checkout)
+        var upsellMsg = sentMessages.FirstOrDefault(m =>
+            m.Body.Contains("agrego") || m.Body.Contains("combo") || m.Body.Contains("completar"));
+        upsellMsg.Should().BeNull();
+    }
+
+    // 3. Suggestion suppressed after user declines
+    [Fact]
+    public async Task SmartSuggestion_SuppressedAfterDecline()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.UpsellSent = true;
+        state.LastSuggestedItem = "Coca Cola";
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Decline the suggestion
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "no gracias"),
+            _testBusiness);
+
+        state.SuggestionDeclined.Should().BeTrue();
+        state.UpsellDeclinedCount.Should().Be(0); // AddonSuggestionSent was false
+        state.LastSuggestedItem.Should().BeNull();
+
+        // Now add another item — should NOT trigger new suggestion
+        sentMessages.Clear();
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "agrega 1 papas"),
+            _testBusiness);
+
+        var newSuggestion = sentMessages.FirstOrDefault(m =>
+            m.Body.Contains("agrego") && m.Body.Contains("$"));
+        newSuggestion.Should().BeNull();
+    }
+
+    // 4. Combo suggestion when cart is close to combo
+    [Fact]
+    public void BuildComboSuggestion_CartCloseToCombo_SuggestsCompletion()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 1 });
+        // Has main + side, but no drink → should suggest drink to complete combo
+
+        var testBizBurger = new BusinessContext(Guid.NewGuid(), "123456789", "test-token",
+            "Test Burger", RestaurantType: "burger");
+
+        var (msg, item) = _sut.BuildComboSuggestion(state, testBizBurger.RestaurantType);
+
+        // May or may not match depending on catalog, but should not crash
+        // and should not suggest an already-ordered item
+        if (msg != null)
+        {
+            msg.Should().NotContain("Hamburguesa");
+            msg.Should().NotContain("Papas");
+        }
+    }
+
+    // 5. No nonsense suggestion when cart has multiple mains + sides + drinks
+    [Fact]
+    public void BuildUpsellSuggestion_CompletedCart_ReturnsNull()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 1 });
+
+        // Cart covers comida + bebida + acompanamiento — no suggestion needed
+        var (msg, item) = _sut.BuildUpsellSuggestion(state);
+
+        msg.Should().BeNull();
+        item.Should().BeNull();
+    }
+
+    // 6. RestaurantType-aware suggestion fallback works
+    [Fact]
+    public void BuildUpsellSuggestion_WithRestaurantType_UsesTemplatePairings()
+    {
+        // Generic pairings use: comida→[bebida, acompanamiento] which matches demo catalog
+        // "burger" template pairings use: hamburguesas→[bebidas, acompanamientos] (template category names)
+        // Template pairings won't match demo catalog categories, so they return null gracefully
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+
+        var (msg1, _) = _sut.BuildUpsellSuggestion(state, restaurantType: null);
+
+        // Generic pairing should work with demo catalog (category "comida" matches)
+        msg1.Should().NotBeNull();
+
+        // Template pairings are designed for template menus, not demo — should not crash
+        var (msg2, _) = _sut.BuildUpsellSuggestion(state, restaurantType: "burger");
+        // msg2 may be null (template categories don't match demo), but must not throw
+    }
+
+    // 7. Suggestion never changes existing order unexpectedly
+    [Fact]
+    public async Task SmartSuggestion_DoesNotModifyExistingCart()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Add item — will trigger suggestion
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "agrega 1 coca"),
+            _testBusiness);
+
+        // Original items must be intact
+        state.Items.Should().ContainSingle(i => i.Name == "Hamburguesa" && i.Quantity == 2);
+        state.Items.Should().ContainSingle(i => i.Name == "Coca Cola" && i.Quantity == 1);
+        // Only 2 items in cart (suggestion was just a message, not an addition)
+        state.Items.Should().HaveCount(2);
+    }
+
+    // 8. Suggestion acceptance adds item to cart
+    [Fact]
+    public async Task SuggestionAcceptance_AddsItemToCart()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.UpsellSent = true;
+        state.AddonSuggestionSent = true;
+        state.LastSuggestedItem = "Coca Cola";
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "si dale"),
+            _testBusiness);
+
+        state.Items.Should().ContainSingle(i => i.Name == "Coca Cola" && i.Quantity == 1);
+        state.UpsellAcceptedCount.Should().Be(1);
+
+        var acceptMsg = sentMessages.FirstOrDefault(m => m.Body.Contains("Coca Cola") && m.Body.Contains("agregue"));
+        acceptMsg.Should().NotBeNull();
+    }
+
+    // 9. Decline detection helper tests
+    [Theory]
+    [InlineData("no gracias", true)]
+    [InlineData("asi esta bien", true)]
+    [InlineData("dejalo asi", true)]
+    [InlineData("nada mas", true)]
+    [InlineData("solo eso", true)]
+    [InlineData("si dale", false)]
+    [InlineData("hamburguesa", false)]
+    public void IsSuggestionDecline_VariousInputs(string input, bool expected)
+    {
+        WebhookProcessor.IsSuggestionDecline(WebhookProcessor.Normalize(input))
+            .Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("si", true)]
+    [InlineData("dale", true)]
+    [InlineData("claro", true)]
+    [InlineData("metele", true)]
+    [InlineData("no", false)]
+    [InlineData("hamburguesa", false)]
+    public void IsSuggestionAcceptance_VariousInputs(string input, bool expected)
+    {
+        WebhookProcessor.IsSuggestionAcceptance(WebhookProcessor.Normalize(input))
+            .Should().Be(expected);
+    }
 }

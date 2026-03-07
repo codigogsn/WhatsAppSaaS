@@ -35,6 +35,18 @@ public sealed class ConversationFields
 
     public bool UpsellSent { get; set; }
     public bool ComboSuggestionSent { get; set; }
+    public bool SuggestionDeclined { get; set; }
+    public string? LastSuggestedItem { get; set; }
+    public bool AddonSuggestionSent { get; set; }
+
+    // Analytics counters (lightweight, per-order)
+    public int UpsellSuggestedCount { get; set; }
+    public int UpsellAcceptedCount { get; set; }
+    public int UpsellDeclinedCount { get; set; }
+    public int ComboSuggestedCount { get; set; }
+    public int ComboAcceptedCount { get; set; }
+    public int ComboDeclinedCount { get; set; }
+
     public DateTime? LastActivityUtc { get; set; }
 
     public void ResetAfterConfirm()
@@ -61,6 +73,15 @@ public sealed class ConversationFields
         HumanHandoffNotifiedCount = 0;
         UpsellSent = false;
         ComboSuggestionSent = false;
+        SuggestionDeclined = false;
+        LastSuggestedItem = null;
+        AddonSuggestionSent = false;
+        UpsellSuggestedCount = 0;
+        UpsellAcceptedCount = 0;
+        UpsellDeclinedCount = 0;
+        ComboSuggestedCount = 0;
+        ComboAcceptedCount = 0;
+        ComboDeclinedCount = 0;
         LastActivityUtc = null;
     }
 }

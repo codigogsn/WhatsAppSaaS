@@ -234,6 +234,63 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // A1) Suggestion acceptance/decline
+                    if (state.UpsellSent && !string.IsNullOrWhiteSpace(state.LastSuggestedItem))
+                    {
+                        if (IsSuggestionAcceptance(t))
+                        {
+                            // Add suggested item to cart
+                            AddOrIncreaseItem(state, state.LastSuggestedItem, 1);
+                            if (state.AddonSuggestionSent)
+                                state.UpsellAcceptedCount++;
+                            if (state.ComboSuggestionSent)
+                                state.ComboAcceptedCount++;
+
+                            var acceptReply = Msg.SuggestionAccepted(state.LastSuggestedItem);
+                            state.LastSuggestedItem = null;
+
+                            // Continue to next flow step
+                            acceptReply += "\n\n" + BuildOrderReplyFromState(state);
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = acceptReply,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        if (IsSuggestionDecline(t))
+                        {
+                            state.SuggestionDeclined = true;
+                            if (state.AddonSuggestionSent)
+                                state.UpsellDeclinedCount++;
+                            if (state.ComboSuggestionSent)
+                                state.ComboDeclinedCount++;
+                            state.LastSuggestedItem = null;
+
+                            var declineReply = Msg.SuggestionDeclined;
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = declineReply,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        // If user didn't explicitly accept/decline, clear suggestion and let normal flow handle
+                        state.LastSuggestedItem = null;
+                    }
+
                     // A) Confirmar
                     if (IsConfirmCommand(t))
                     {
@@ -924,7 +981,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Helpers
     // ──────────────────────────────────────────
 
-    private static string Normalize(string input)
+    internal static string Normalize(string input)
         => input.Trim().ToLowerInvariant();
 
     private static string StripAccents(string input)
@@ -1028,6 +1085,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
             or "no, gracias" or "sin obs";
     }
 
+    internal static bool IsSuggestionAcceptance(string t)
+    {
+        var s = StripAccents(t);
+        return s is "si" or "sí" or "dale" or "va" or "listo" or "ok"
+            or "claro" or "por supuesto" or "bueno" or "sale" or "orale"
+            or "si dale" or "dale si" or "claro que si" or "mete le"
+            or "metele" or "agregalo" or "agregala" or "si porfa"
+            or "si por favor" or "si, dale" or "si, porfa";
+    }
+
+    internal static bool IsSuggestionDecline(string t)
+    {
+        var s = StripAccents(t);
+        return s is "no" or "no gracias" or "no, gracias" or "nop"
+            or "asi esta bien" or "dejalo asi" or "nada mas"
+            or "esta bien asi" or "sin mas nada" or "solo eso"
+            or "con eso" or "no quiero" or "no gracias asi esta bien"
+            or "asi" or "na" or "nel" or "paso";
+    }
+
     private static bool LooksLikeOrderIntent(string t)
         => t.Contains("pedido")
            || t.Contains("orden")
@@ -1098,16 +1175,19 @@ public sealed class WebhookProcessor : IWebhookProcessor
         string to, string phoneNumberId,
         BusinessContext biz, string conversationId, CancellationToken ct)
     {
-        // Only one suggestion per order flow, only before checkout
-        if (state.UpsellSent || state.CheckoutFormSent || state.ObservationPromptSent) return;
+        // Suppress if already suggested, declined, or in checkout/observation/payment stages
+        if (state.UpsellSent || state.SuggestionDeclined) return;
+        if (state.CheckoutFormSent || state.ObservationPromptSent) return;
         if (state.Items.Count == 0) return;
 
-        // Priority 1: combo suggestion
-        var comboMsg = BuildComboSuggestion(state);
+        // Priority 1: combo suggestion (close-to-combo detection)
+        var (comboMsg, comboItem) = BuildComboSuggestion(state, biz.RestaurantType);
         if (comboMsg != null)
         {
             state.ComboSuggestionSent = true;
             state.UpsellSent = true;
+            state.LastSuggestedItem = comboItem;
+            state.ComboSuggestedCount++;
             await SendAsync(new OutgoingMessage
             {
                 To = to, Body = comboMsg,
@@ -1116,11 +1196,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return;
         }
 
-        // Priority 2: upsell addon
-        var upsellMsg = BuildUpsellSuggestion(state);
+        // Priority 2: restaurant-type-aware upsell addon
+        var (upsellMsg, upsellItem) = BuildUpsellSuggestion(state, biz.RestaurantType);
         if (upsellMsg != null)
         {
             state.UpsellSent = true;
+            state.AddonSuggestionSent = true;
+            state.LastSuggestedItem = upsellItem;
+            state.UpsellSuggestedCount++;
             await SendAsync(new OutgoingMessage
             {
                 To = to, Body = upsellMsg,
@@ -1133,18 +1216,35 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // AI Assistant: upsell, combo, and resume builders
     // ──────────────────────────────────────────
 
-    // Upsell pairing rules: item category → suggested category/item
+    // Generic upsell pairing rules (fallback when no restaurant template)
     private static readonly Dictionary<string, string[]> UpsellPairings = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["comida"] = new[] { "bebida", "acompanamiento" },
-        ["bebida"] = new[] { "comida", "acompanamiento" },
-        ["acompanamiento"] = new[] { "bebida" },
+        ["comida"] = ["bebida", "acompanamiento"],
+        ["bebida"] = ["comida", "acompanamiento"],
+        ["acompanamiento"] = ["bebida"],
     };
 
-    internal string? BuildUpsellSuggestion(ConversationFields state)
+    /// <summary>
+    /// Resolves the active upsell pairings: restaurant template pairings take priority,
+    /// then falls back to generic pairings.
+    /// </summary>
+    private static Dictionary<string, string[]> GetUpsellPairings(string? restaurantType)
+    {
+        if (restaurantType is not null)
+        {
+            var template = RestaurantTemplates.Get(restaurantType);
+            if (template?.SuggestedUpsells.Count > 0)
+                return template.SuggestedUpsells;
+        }
+        return UpsellPairings;
+    }
+
+    internal (string? message, string? itemName) BuildUpsellSuggestion(ConversationFields state, string? restaurantType = null)
     {
         var catalog = _activeMenu ?? MenuCatalog;
-        if (catalog.Length == 0) return null;
+        if (catalog.Length == 0) return (null, null);
+
+        var pairings = GetUpsellPairings(restaurantType);
 
         var orderedCategories = state.Items
             .Select(i => catalog.FirstOrDefault(m => m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase)))
@@ -1159,63 +1259,136 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Find a suggestion from paired categories not already in the order
         foreach (var cat in orderedCategories)
         {
-            if (!UpsellPairings.TryGetValue(cat, out var targetCats)) continue;
+            if (!pairings.TryGetValue(cat, out var targetCats)) continue;
 
             foreach (var targetCat in targetCats)
             {
                 if (orderedCategories.Contains(targetCat)) continue;
 
-                var suggestion = catalog
+                // Prefer mid-range items (not cheapest, not most expensive) for better acceptance
+                var candidates = catalog
                     .Where(m => string.Equals(m.Category, targetCat, StringComparison.OrdinalIgnoreCase)
                              && !m.IsCombo
                              && !orderedNames.Contains(m.Canonical))
-                    .OrderByDescending(m => m.Price)
-                    .FirstOrDefault();
+                    .OrderBy(m => m.Price)
+                    .ToList();
+
+                if (candidates.Count == 0) continue;
+
+                // Pick the median-priced item (best value perception)
+                var suggestion = candidates[candidates.Count / 2];
 
                 if (suggestion != null)
                 {
-                    return suggestion.Price > 0
+                    var msg = suggestion.Price > 0
                         ? Msg.UpsellWithPrice(suggestion.Canonical, suggestion.Price)
                         : Msg.Upsell(suggestion.Canonical);
+                    return (msg, suggestion.Canonical);
                 }
             }
         }
 
-        return null;
+        return (null, null);
     }
 
-    internal string? BuildComboSuggestion(ConversationFields state)
+    internal (string? message, string? itemName) BuildComboSuggestion(ConversationFields state, string? restaurantType = null)
     {
         var catalog = _activeMenu ?? MenuCatalog;
-        if (catalog.Length == 0 || state.ComboSuggestionSent) return null;
+        if (catalog.Length == 0 || state.ComboSuggestionSent) return (null, null);
 
         var combos = catalog.Where(m => m.IsCombo).ToList();
-        if (combos.Count == 0) return null;
+        if (combos.Count == 0) return (null, null);
 
-        // Only suggest if customer has individual items (not already ordering a combo)
+        // Don't suggest if already ordering a combo
         var hasCombo = state.Items.Any(i =>
             catalog.Any(m => m.IsCombo && m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase)));
-        if (hasCombo) return null;
+        if (hasCombo) return (null, null);
 
-        // Suggest the best-priced combo
-        var bestCombo = combos.OrderByDescending(c => c.Price).First();
+        var orderedNames = state.Items
+            .Select(i => i.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        // Calculate individual item total to see if combo saves money
+        // Close-to-combo detection: if template has combos with known components,
+        // check if user is one item away from completing a combo
+        if (restaurantType != null)
+        {
+            var template = RestaurantTemplates.Get(restaurantType);
+            if (template != null)
+            {
+                var mainCats = template.DefaultCategories
+                    .Where(c => !c.Name.Equals("Combos", StringComparison.OrdinalIgnoreCase)
+                             && !c.Name.Equals("Bebidas", StringComparison.OrdinalIgnoreCase)
+                             && !c.Name.Equals("Bebidas Frias", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var drinkCats = template.DefaultCategories
+                    .Where(c => c.Name.Contains("Bebida", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+                var sideCats = template.DefaultCategories
+                    .Where(c => c.Name.Equals("Acompanamientos", StringComparison.OrdinalIgnoreCase)
+                             || c.Name.Equals("Extras", StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                // Check if user has a main but no drink — suggest drink to "complete combo"
+                var orderedCatNames = state.Items
+                    .Select(i => catalog.FirstOrDefault(m => m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase)))
+                    .Where(m => m != null)
+                    .Select(m => m!.Category ?? "")
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                bool hasMain = mainCats.Any(mc => orderedCatNames.Contains(mc.Name.ToLowerInvariant()));
+                bool hasDrink = drinkCats.Any(dc => orderedCatNames.Contains(dc.Name.ToLowerInvariant()));
+                bool hasSide = sideCats.Any(sc => orderedCatNames.Contains(sc.Name.ToLowerInvariant()));
+
+                // Has main + side but no drink → suggest drink to complete combo
+                if (hasMain && hasSide && !hasDrink && combos.Count > 0)
+                {
+                    var bestCombo = combos.OrderBy(c => c.Price).First();
+                    var drink = catalog
+                        .Where(m => drinkCats.Any(dc => string.Equals(m.Category, dc.Name, StringComparison.OrdinalIgnoreCase))
+                                 && !orderedNames.Contains(m.Canonical) && !m.IsCombo)
+                        .OrderBy(m => m.Price)
+                        .FirstOrDefault();
+                    if (drink != null && bestCombo.Price > 0)
+                    {
+                        return (Msg.ComboMissing(drink.Canonical, bestCombo.Canonical, bestCombo.Price), drink.Canonical);
+                    }
+                }
+
+                // Has main + drink but no side → suggest side to complete combo
+                if (hasMain && hasDrink && !hasSide && sideCats.Count > 0 && combos.Count > 0)
+                {
+                    var bestCombo = combos.OrderBy(c => c.Price).First();
+                    var side = catalog
+                        .Where(m => sideCats.Any(sc => string.Equals(m.Category, sc.Name, StringComparison.OrdinalIgnoreCase))
+                                 && !orderedNames.Contains(m.Canonical) && !m.IsCombo)
+                        .OrderBy(m => m.Price)
+                        .FirstOrDefault();
+                    if (side != null && bestCombo.Price > 0)
+                    {
+                        return (Msg.ComboMissing(side.Canonical, bestCombo.Canonical, bestCombo.Price), side.Canonical);
+                    }
+                }
+            }
+        }
+
+        // Fallback: generic combo suggestion based on price savings
+        var bestFallbackCombo = combos.OrderByDescending(c => c.Price).First();
+
         var itemTotal = state.Items.Sum(i =>
         {
             var entry = catalog.FirstOrDefault(m => m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase));
             return (entry?.Price ?? 0) * i.Quantity;
         });
 
-        if (bestCombo.Price > 0 && itemTotal > 0 && bestCombo.Price < itemTotal)
+        if (bestFallbackCombo.Price > 0 && itemTotal > 0 && bestFallbackCombo.Price < itemTotal)
         {
-            var savings = itemTotal - bestCombo.Price;
-            return Msg.ComboUpgrade(bestCombo.Canonical, savings);
+            var savings = itemTotal - bestFallbackCombo.Price;
+            return (Msg.ComboUpgrade(bestFallbackCombo.Canonical, savings), bestFallbackCombo.Canonical);
         }
 
-        return bestCombo.Price > 0
-            ? Msg.ComboUpgradeSimple(bestCombo.Canonical)
-            : null;
+        return bestFallbackCombo.Price > 0
+            ? (Msg.ComboUpgradeSimple(bestFallbackCombo.Canonical), bestFallbackCombo.Canonical)
+            : (null, null);
     }
 
     // ──────────────────────────────────────────
