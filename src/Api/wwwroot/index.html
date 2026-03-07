@@ -3,128 +3,165 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>WhatsAppSaaS - Dashboard</title>
+  <title>WhatsAppSaaS - Dashboard Pro</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 16px; }
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; margin: 0; padding: 16px; background: #f5f6fa; color: #333; }
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-    table { border-collapse: collapse; width: 100%; margin-top: 12px; }
-    th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
-    th { background: #f6f6f6; }
-    code { background:#f1f1f1; padding:2px 4px; }
-    button { padding: 6px 10px; cursor: pointer; }
-    select, input { padding: 6px; }
-    .muted { color:#666; }
-    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eee; }
-    .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
-    .card { border:1px solid #eee; border-radius:10px; padding:10px 12px; background:#fff; }
-    .kpi { display:flex; gap:10px; flex-wrap:wrap; }
-    .kpi .card { min-width: 160px; }
-    .danger { color:#b00020; }
-    .ok { color:#0a7a0a; }
-    .key { width: 360px; max-width: 100%; }
+    table { border-collapse: collapse; width: 100%; margin-top: 12px; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    th, td { border-bottom: 1px solid #eee; padding: 10px 12px; vertical-align: top; text-align: left; }
+    th { background: #f8f9fa; font-weight: 600; font-size: 13px; color: #555; text-transform: uppercase; letter-spacing: .3px; }
+    tr:hover { background: #fafbfc; }
+    code { background:#eef; padding:2px 5px; border-radius:3px; font-size:11px; }
+    button { padding: 6px 12px; cursor: pointer; border: 1px solid #ddd; border-radius: 4px; background: #fff; font-size: 13px; }
+    button:hover { background: #f0f0f0; }
+    button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
+    button.primary:hover { background: #1557b0; }
+    select, input { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+    .muted { color:#888; }
     .small { font-size: 12px; }
+    .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: 16px; }
+    .card { border:1px solid #e8e8e8; border-radius:10px; padding:12px 16px; background:#fff; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+    .kpi { display:flex; gap:10px; flex-wrap:wrap; margin-bottom: 16px; }
+    .kpi .card { min-width: 140px; flex:1; }
+    .kpi .card .label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 4px; }
+    .kpi .card .value { font-size: 24px; font-weight: 700; }
+    .danger { color:#d32f2f; }
+    .ok { color:#2e7d32; }
+    .key { width: 280px; max-width: 100%; }
+
+    /* Status pills */
+    .pill { display:inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+    .pill-Pending { background:#f5f5f5; color:#757575; }
+    .pill-Preparing { background:#fff3e0; color:#e65100; }
+    .pill-OutForDelivery { background:#e3f2fd; color:#1565c0; }
+    .pill-Completed { background:#e8f5e9; color:#2e7d32; }
+    .pill-Cancelled { background:#ffebee; color:#c62828; }
+
+    /* Expandable detail */
+    .detail-row { display: none; }
+    .detail-row.open { display: table-row; }
+    .detail-row td { background: #fafbfc; padding: 12px 20px; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; max-width: 800px; }
+    .detail-grid .dg-label { font-size: 11px; color: #888; text-transform: uppercase; }
+    .detail-grid .dg-value { font-size: 14px; margin-top: 2px; }
+    .items-list { list-style: none; padding: 0; margin: 4px 0 0 0; }
+    .items-list li { padding: 3px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+    .items-list li:last-child { border-bottom: none; }
+    .toggle-btn { background: none; border: none; cursor: pointer; font-size: 16px; padding: 2px 6px; color: #1a73e8; }
+    .obs-tag { background: #fff8e1; color: #f57f17; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+
+    /* Filters bar */
+    .filters { background: #fff; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
+    .filters label { font-size: 12px; color: #666; }
+
+    @media (max-width: 768px) {
+      .detail-grid { grid-template-columns: 1fr; }
+      .kpi .card { min-width: 100px; }
+    }
   </style>
 </head>
 <body>
   <div class="top">
     <div>
-      <h2 style="margin:0;">Pedidos (Admin Pro)</h2>
+      <h2 style="margin:0;">Dashboard Pro</h2>
       <div class="muted small">API: <code id="baseUrl"></code> | <a href="/menu.html">Menu Manager</a></div>
     </div>
-
     <div class="row">
-      <label class="muted small">X-Admin-Key:</label>
-      <input id="adminKey" class="key" placeholder="Pega tu ADMIN_KEY aquí (se guarda en este navegador)" />
-      <label class="muted small">Business ID:</label>
-      <input id="businessId" style="width:300px;" placeholder="GUID del negocio (opcional)" />
+      <input id="adminKey" class="key" placeholder="Admin Key" />
+      <input id="businessId" style="width:260px;" placeholder="Business ID (GUID)" />
       <button onclick="saveKey()">Guardar</button>
       <span id="keyMsg" class="muted small"></span>
     </div>
   </div>
 
-  <div class="kpi" style="margin-top:12px;">
-    <!-- KPIs de NEGOCIO (desde /api/admin/analytics/summary) -->
+  <!-- KPIs -->
+  <div class="kpi">
     <div class="card">
-      <div class="muted small">Pedidos (Total)</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiOrdersTotal">-</div>
+      <div class="label">Pedidos Hoy</div>
+      <div class="value" id="kpiOrdersToday">-</div>
     </div>
     <div class="card">
-      <div class="muted small">Clientes únicos</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiUniqueCustomers">-</div>
+      <div class="label">Ventas Hoy</div>
+      <div class="value" id="kpiRevenueToday">-</div>
     </div>
     <div class="card">
-      <div class="muted small">Ventas totales</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiTotalRevenue">-</div>
+      <div class="label">Pedidos (Total)</div>
+      <div class="value" id="kpiOrdersTotal">-</div>
     </div>
     <div class="card">
-      <div class="muted small">Ticket promedio</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiAvgTicket">-</div>
-    </div>
-
-    <!-- KPIs operativos (por status, sobre la lista cargada en pantalla) -->
-    <div class="card">
-      <div class="muted small">Cargados</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiTotal">0</div>
+      <div class="label">Clientes</div>
+      <div class="value" id="kpiUniqueCustomers">-</div>
     </div>
     <div class="card">
-      <div class="muted small">Pending</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiPending">0</div>
+      <div class="label">Ventas Totales</div>
+      <div class="value" id="kpiTotalRevenue">-</div>
     </div>
     <div class="card">
-      <div class="muted small">Preparing</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiPreparing">0</div>
-    </div>
-    <div class="card">
-      <div class="muted small">OutForDelivery</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiOut">0</div>
-    </div>
-    <div class="card">
-      <div class="muted small">Completed</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiCompleted">0</div>
-    </div>
-    <div class="card">
-      <div class="muted small">Cancelled</div>
-      <div style="font-size:22px; font-weight:700;" id="kpiCancelled">0</div>
+      <div class="label">Ticket Prom.</div>
+      <div class="value" id="kpiAvgTicket">-</div>
     </div>
   </div>
 
-  <div class="row" style="margin-top:12px;">
-    <label>Status:</label>
-    <select id="status">
-      <option value="">(Todos)</option>
-      <option>Pending</option>
-      <option>Preparing</option>
-      <option>OutForDelivery</option>
-      <option>Completed</option>
-      <option>Cancelled</option>
-    </select>
-
-    <label>Teléfono contiene:</label>
-    <input id="phone" placeholder="Ej: 0414 o +58414" />
-
-    <label>Take:</label>
-    <input id="take" type="number" value="50" min="1" max="200" />
-
-    <button onclick="load()">Cargar</button>
-    <button onclick="load(true)">Auto (5s)</button>
-
-    <button onclick="downloadOrdersCsv()">Descargar Orders CSV</button>
-    <button onclick="downloadCustomersCsv()">Descargar Customers CSV</button>
-
-    <span class="muted" id="msg"></span>
+  <!-- Status counters -->
+  <div class="kpi">
+    <div class="card"><div class="label">Cargados</div><div class="value" id="kpiTotal">0</div></div>
+    <div class="card"><div class="label" style="color:#757575;">Pending</div><div class="value" style="color:#757575;" id="kpiPending">0</div></div>
+    <div class="card"><div class="label" style="color:#e65100;">Preparing</div><div class="value" style="color:#e65100;" id="kpiPreparing">0</div></div>
+    <div class="card"><div class="label" style="color:#1565c0;">En Camino</div><div class="value" style="color:#1565c0;" id="kpiOut">0</div></div>
+    <div class="card"><div class="label" style="color:#2e7d32;">Completed</div><div class="value" style="color:#2e7d32;" id="kpiCompleted">0</div></div>
+    <div class="card"><div class="label" style="color:#c62828;">Cancelled</div><div class="value" style="color:#c62828;" id="kpiCancelled">0</div></div>
   </div>
 
+  <!-- Filters -->
+  <div class="filters">
+    <div class="row">
+      <label>Status:</label>
+      <select id="status">
+        <option value="">(Todos)</option>
+        <option>Pending</option>
+        <option>Preparing</option>
+        <option>OutForDelivery</option>
+        <option>Completed</option>
+        <option>Cancelled</option>
+      </select>
+
+      <label>Fecha:</label>
+      <input id="dateFrom" type="date" />
+      <span class="muted small">a</span>
+      <input id="dateTo" type="date" />
+
+      <label>Teléfono:</label>
+      <input id="phone" placeholder="0414..." style="width:120px;" />
+
+      <label>Order ID:</label>
+      <input id="searchId" placeholder="uuid..." style="width:180px;" />
+
+      <label>Take:</label>
+      <input id="take" type="number" value="50" min="1" max="200" style="width:60px;" />
+
+      <button class="primary" onclick="load()">Cargar</button>
+      <button onclick="load(true)">Auto 5s</button>
+      <button onclick="if(timer){clearInterval(timer);timer=null;this.textContent='Auto 5s';}">Stop</button>
+
+      <button onclick="downloadOrdersCsv()">CSV Orders</button>
+      <button onclick="downloadCustomersCsv()">CSV Customers</button>
+
+      <span class="muted small" id="msg"></span>
+    </div>
+  </div>
+
+  <!-- Orders Table -->
   <table>
     <thead>
       <tr>
+        <th style="width:30px;"></th>
         <th>Fecha</th>
-        <th>ID</th>
         <th>Status</th>
         <th>Cliente</th>
-        <th>Pago</th>
         <th>Pedido</th>
+        <th>Total</th>
         <th>Obs.</th>
-        <th>Direcci&oacute;n / GPS</th>
         <th>Acción</th>
       </tr>
     </thead>
@@ -136,70 +173,55 @@ let timer = null;
 
 function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 
-function getAdminKey(){
-  return localStorage.getItem('ADMIN_KEY') || '';
-}
+function getAdminKey(){ return localStorage.getItem('ADMIN_KEY') || ''; }
 
 function saveKey(){
   const v = document.getElementById('adminKey').value.trim();
-  if (!v) {
-    localStorage.removeItem('ADMIN_KEY');
-    document.getElementById('keyMsg').innerHTML = '<span class="danger">Key borrada</span>';
-    return;
-  }
+  if (!v) { localStorage.removeItem('ADMIN_KEY'); document.getElementById('keyMsg').innerHTML = '<span class="danger">Borrada</span>'; return; }
   localStorage.setItem('ADMIN_KEY', v);
-
   const bid = document.getElementById('businessId').value.trim();
-  if (bid) localStorage.setItem('BUSINESS_ID', bid);
-  else localStorage.removeItem('BUSINESS_ID');
-
-  document.getElementById('keyMsg').innerHTML = '<span class="ok">Guardada</span>';
+  if (bid) localStorage.setItem('BUSINESS_ID', bid); else localStorage.removeItem('BUSINESS_ID');
+  document.getElementById('keyMsg').innerHTML = '<span class="ok">OK</span>';
 }
 
-function getBusinessId(){
-  return localStorage.getItem('BUSINESS_ID') || document.getElementById('businessId').value.trim() || '';
+function getBusinessId(){ return localStorage.getItem('BUSINESS_ID') || document.getElementById('businessId').value.trim() || ''; }
+function adminHeaders(){ const key = getAdminKey(); return key ? { 'X-Admin-Key': key } : {}; }
+
+function statusPill(s){
+  return `<span class="pill pill-${esc(s)}">${esc(s)}</span>`;
 }
 
-function adminHeaders(){
-  const key = getAdminKey();
-  return key ? { 'X-Admin-Key': key } : {};
+function fmtMoney(n){ return (n ?? 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+
+function fmtDate(d){
+  if (!d) return '-';
+  const dt = new Date(d);
+  return dt.toLocaleDateString('es-VE', {day:'2-digit',month:'2-digit'}) + ' ' + dt.toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'});
 }
 
-// KPIs de negocio (desde /api/admin/analytics/summary)
+// ── KPIs ──
 async function loadSummary(){
   const key = getAdminKey();
-  if (!key) {
-    document.getElementById('kpiOrdersTotal').textContent = '-';
-    document.getElementById('kpiUniqueCustomers').textContent = '-';
-    document.getElementById('kpiTotalRevenue').textContent = '-';
-    document.getElementById('kpiAvgTicket').textContent = '-';
-    return;
-  }
+  const ids = ['kpiOrdersTotal','kpiUniqueCustomers','kpiTotalRevenue','kpiAvgTicket'];
+  if (!key) { ids.forEach(id => document.getElementById(id).textContent = '-'); return; }
 
   const bid = getBusinessId();
-  const summaryQs = new URLSearchParams({ts: Date.now()});
-  if (bid) summaryQs.set('businessId', bid);
-  const res = await fetch('/api/admin/analytics/summary?' + summaryQs.toString(), { headers: adminHeaders() });
-  if (!res.ok) {
-    document.getElementById('kpiOrdersTotal').textContent = 'err';
-    document.getElementById('kpiUniqueCustomers').textContent = 'err';
-    document.getElementById('kpiTotalRevenue').textContent = 'err';
-    document.getElementById('kpiAvgTicket').textContent = 'err';
-    return;
-  }
-
-  const s = await res.json();
-  document.getElementById('kpiOrdersTotal').textContent = s.totalOrders ?? 0;
-  document.getElementById('kpiUniqueCustomers').textContent = s.uniqueCustomers ?? 0;
-  document.getElementById('kpiTotalRevenue').textContent = (s.totalRevenue ?? 0).toLocaleString('es-VE', {minimumFractionDigits:2});
-  document.getElementById('kpiAvgTicket').textContent = (s.averageTicket ?? 0).toLocaleString('es-VE', {minimumFractionDigits:2});
+  const qs = new URLSearchParams({ts: Date.now()});
+  if (bid) qs.set('businessId', bid);
+  try {
+    const res = await fetch('/api/admin/analytics/summary?' + qs.toString(), { headers: adminHeaders() });
+    if (!res.ok) { ids.forEach(id => document.getElementById(id).textContent = 'err'); return; }
+    const s = await res.json();
+    document.getElementById('kpiOrdersTotal').textContent = s.totalOrders ?? 0;
+    document.getElementById('kpiUniqueCustomers').textContent = s.uniqueCustomers ?? 0;
+    document.getElementById('kpiTotalRevenue').textContent = fmtMoney(s.totalRevenue);
+    document.getElementById('kpiAvgTicket').textContent = fmtMoney(s.averageTicket);
+  } catch { ids.forEach(id => document.getElementById(id).textContent = 'err'); }
 }
 
-// KPIs operativos (sobre la lista cargada)
 function setKpis(list){
   const c = { Pending:0, Preparing:0, OutForDelivery:0, Completed:0, Cancelled:0 };
   for (const o of list) c[o.status] = (c[o.status] || 0) + 1;
-
   document.getElementById('kpiTotal').textContent = list.length;
   document.getElementById('kpiPending').textContent = c.Pending || 0;
   document.getElementById('kpiPreparing').textContent = c.Preparing || 0;
@@ -208,6 +230,16 @@ function setKpis(list){
   document.getElementById('kpiCancelled').textContent = c.Cancelled || 0;
 }
 
+function setTodayKpis(list){
+  const now = new Date();
+  const todayStr = now.toISOString().slice(0,10);
+  const todayOrders = list.filter(o => (o.createdAtUtc||'').slice(0,10) === todayStr);
+  document.getElementById('kpiOrdersToday').textContent = todayOrders.length;
+  const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
+  document.getElementById('kpiRevenueToday').textContent = fmtMoney(todayRevenue);
+}
+
+// ── Load ──
 async function load(auto=false) {
   if (timer) { clearInterval(timer); timer = null; }
   if (auto) timer = setInterval(load, 5000);
@@ -215,6 +247,9 @@ async function load(auto=false) {
   const status = document.getElementById('status').value;
   const take = document.getElementById('take').value || 50;
   const phone = (document.getElementById('phone').value || '').trim();
+  const searchId = (document.getElementById('searchId').value || '').trim();
+  const dateFrom = document.getElementById('dateFrom').value;
+  const dateTo = document.getElementById('dateTo').value;
 
   const qs = new URLSearchParams();
   if (status) qs.set('status', status);
@@ -223,90 +258,141 @@ async function load(auto=false) {
   if (bid) qs.set('businessId', bid);
 
   document.getElementById('msg').textContent = 'Cargando...';
-
-  // KPIs de negocio (requiere key, pero si no hay, no rompe)
   await loadSummary();
 
   const res = await fetch('/api/orders?' + qs.toString());
-  if (!res.ok) {
-    document.getElementById('msg').textContent = 'Error cargando pedidos';
-    return;
-  }
+  if (!res.ok) { document.getElementById('msg').textContent = 'Error cargando pedidos'; return; }
 
   let data = await res.json();
 
-  // Filtro por teléfono (front-end)
-  if (phone) {
-    const p = phone.toLowerCase();
-    data = data.filter(o => ((o.customerPhone || '') + '').toLowerCase().includes(p));
-  }
+  // Front-end filters
+  if (phone) { const p = phone.toLowerCase(); data = data.filter(o => ((o.customerPhone||'')+'').toLowerCase().includes(p)); }
+  if (searchId) { const s = searchId.toLowerCase(); data = data.filter(o => (o.id||'').toLowerCase().includes(s)); }
+  if (dateFrom) { data = data.filter(o => (o.createdAtUtc||'').slice(0,10) >= dateFrom); }
+  if (dateTo) { const to = dateTo + 'T23:59:59'; data = data.filter(o => (o.createdAtUtc||'') <= to); }
 
   setKpis(data);
+  setTodayKpis(data);
 
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
 
   for (const o of data) {
-    const items = (o.items || []).map(i => `${i.quantity} ${i.name}`).join(', ');
-    const gps = (o.locationLat != null && o.locationLng != null) ? `${o.locationLat}, ${o.locationLng}` : (o.locationText || '');
+    const itemsSummary = (o.items || []).map(i => `${i.quantity}x ${i.name}`).join(', ');
+    const hasObs = o.specialInstructions ? true : false;
+    const gps = (o.locationLat != null && o.locationLng != null) ? `${o.locationLat}, ${o.locationLng}` : '';
+    const gpsLink = gps ? `https://maps.google.com/?q=${o.locationLat},${o.locationLng}` : '';
+
+    // Main row
     const tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.setAttribute('data-detail', o.id);
+    tr.onclick = function(e) {
+      if (e.target.tagName === 'SELECT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'OPTION') return;
+      const detail = document.getElementById('detail-' + o.id);
+      if (detail) detail.classList.toggle('open');
+    };
 
     tr.innerHTML = `
-      <td>${new Date(o.createdAtUtc).toLocaleString()}</td>
-      <td><code>${esc(o.id)}</code></td>
-      <td><span class="pill">${esc(o.status)}</span></td>
+      <td class="toggle-btn">▶</td>
+      <td>${fmtDate(o.createdAtUtc)}<br/><code>${esc(o.id).slice(0,8)}</code></td>
+      <td>${statusPill(o.status)}</td>
       <td>
         <b>${esc(o.customerName)}</b><br/>
-        <span class="muted">${esc(o.customerPhone)}</span><br/>
-        <span class="muted">${esc(o.customerIdNumber)}</span>
+        <span class="muted small">${esc(o.customerPhone)}</span>
       </td>
-      <td>${esc(o.paymentMethod)}</td>
-      <td>${esc(items)}</td>
-      <td class="muted small">${esc(o.specialInstructions)}</td>
-      <td>
-        ${esc(o.address)}<br/>
-        <span class="muted">${esc(gps)}</span>
+      <td style="max-width:250px;">
+        <span class="small">${esc(itemsSummary).slice(0,80)}${itemsSummary.length > 80 ? '...' : ''}</span>
       </td>
+      <td style="white-space:nowrap;">${o.totalAmount != null ? fmtMoney(o.totalAmount) : '-'}</td>
+      <td>${hasObs ? '<span class="obs-tag">OBS</span>' : ''}</td>
       <td>
-        <select data-id="${esc(o.id)}">
+        <select data-id="${esc(o.id)}" onclick="event.stopPropagation()">
           <option ${o.status==='Pending'?'selected':''}>Pending</option>
           <option ${o.status==='Preparing'?'selected':''}>Preparing</option>
           <option ${o.status==='OutForDelivery'?'selected':''}>OutForDelivery</option>
           <option ${o.status==='Completed'?'selected':''}>Completed</option>
           <option ${o.status==='Cancelled'?'selected':''}>Cancelled</option>
         </select>
-        <button onclick="updateStatus(this)">Guardar</button>
+        <button onclick="event.stopPropagation();updateStatus(this)">OK</button>
       </td>
     `;
-
     tbody.appendChild(tr);
+
+    // Detail row (expandable)
+    const detailTr = document.createElement('tr');
+    detailTr.className = 'detail-row';
+    detailTr.id = 'detail-' + o.id;
+
+    const itemsHtml = (o.items || []).map(i => {
+      const price = i.unitPrice != null ? ` — $${fmtMoney(i.unitPrice)}` : '';
+      return `<li><b>${i.quantity}x</b> ${esc(i.name)}${price}</li>`;
+    }).join('');
+
+    detailTr.innerHTML = `
+      <td colspan="8">
+        <div class="detail-grid">
+          <div>
+            <div class="dg-label">ID Completo</div>
+            <div class="dg-value"><code>${esc(o.id)}</code></div>
+          </div>
+          <div>
+            <div class="dg-label">Fecha</div>
+            <div class="dg-value">${new Date(o.createdAtUtc).toLocaleString('es-VE')}</div>
+          </div>
+          <div>
+            <div class="dg-label">Cliente</div>
+            <div class="dg-value"><b>${esc(o.customerName)}</b><br/>${esc(o.customerPhone)}<br/>${esc(o.customerIdNumber)}</div>
+          </div>
+          <div>
+            <div class="dg-label">Método de Pago</div>
+            <div class="dg-value">${esc(o.paymentMethod) || '-'}</div>
+          </div>
+          <div>
+            <div class="dg-label">Items del Pedido</div>
+            <div class="dg-value"><ul class="items-list">${itemsHtml || '<li class="muted">Sin items</li>'}</ul></div>
+          </div>
+          <div>
+            <div class="dg-label">Montos</div>
+            <div class="dg-value">
+              Subtotal: $${fmtMoney(o.subtotalAmount)}<br/>
+              <b>Total: $${fmtMoney(o.totalAmount)}</b>
+            </div>
+          </div>
+          <div>
+            <div class="dg-label">Dirección</div>
+            <div class="dg-value">${esc(o.address) || '-'}</div>
+          </div>
+          <div>
+            <div class="dg-label">GPS</div>
+            <div class="dg-value">${gpsLink ? `<a href="${gpsLink}" target="_blank">${esc(gps)}</a>` : (esc(o.locationText) || '-')}</div>
+          </div>
+          <div style="grid-column: 1 / -1;">
+            <div class="dg-label">Observaciones / Instrucciones Especiales</div>
+            <div class="dg-value" style="background:#fff8e1; padding:6px 10px; border-radius:4px; ${hasObs ? '' : 'color:#aaa;'}">${hasObs ? esc(o.specialInstructions) : 'Sin observaciones'}</div>
+          </div>
+        </div>
+      </td>
+    `;
+    tbody.appendChild(detailTr);
   }
 
-  document.getElementById('msg').textContent = `Listo: ${data.length} pedidos`;
+  document.getElementById('msg').textContent = `${data.length} pedidos`;
 }
 
 async function updateStatus(btn) {
   const select = btn.parentElement.querySelector('select');
   const id = select.getAttribute('data-id');
   const status = select.value;
-
   btn.disabled = true;
   try {
     const res = await fetch(`/api/orders/${id}/status`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' }, // (este endpoint aún no está protegido)
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
-
-    if (!res.ok) {
-      const t = await res.text();
-      alert('Error: ' + t);
-      return;
-    }
-  } finally {
-    btn.disabled = false;
-  }
-
+    if (!res.ok) { const t = await res.text(); alert('Error: ' + t); return; }
+  } finally { btn.disabled = false; }
   await load();
 }
 
@@ -315,20 +401,11 @@ async function downloadOrdersCsv(){
   const eqs = new URLSearchParams({take: 5000});
   if (bid) eqs.set('businessId', bid);
   const res = await fetch('/api/admin/exports/orders.csv?' + eqs.toString(), { headers: adminHeaders() });
-  if (!res.ok) {
-    const t = await res.text();
-    alert('No se pudo descargar orders.csv: ' + t);
-    return;
-  }
+  if (!res.ok) { alert('Error descargando orders.csv: ' + await res.text()); return; }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'orders.csv';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  const a = document.createElement('a'); a.href = url; a.download = 'orders.csv';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
 async function downloadCustomersCsv(){
@@ -336,25 +413,21 @@ async function downloadCustomersCsv(){
   const cqs = new URLSearchParams({take: 5000});
   if (bid) cqs.set('businessId', bid);
   const res = await fetch('/api/admin/exports/customers.csv?' + cqs.toString(), { headers: adminHeaders() });
-  if (!res.ok) {
-    const t = await res.text();
-    alert('No se pudo descargar customers.csv: ' + t);
-    return;
-  }
+  if (!res.ok) { alert('Error descargando customers.csv: ' + await res.text()); return; }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = 'customers.csv';
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+  const a = document.createElement('a'); a.href = url; a.download = 'customers.csv';
+  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
+// Init
 document.getElementById('baseUrl').textContent = location.origin;
 document.getElementById('adminKey').value = getAdminKey();
 document.getElementById('businessId').value = localStorage.getItem('BUSINESS_ID') || '';
+
+// Set default date filter to today
+const today = new Date().toISOString().slice(0,10);
+document.getElementById('dateFrom').value = today;
 
 load();
 </script>

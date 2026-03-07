@@ -64,7 +64,9 @@ public sealed class OrdersController : ControllerBase
                 o.LastNotifiedStatus,
                 o.LastNotifiedAtUtc,
                 o.SpecialInstructions,
-                Items = o.Items.Select(i => new { i.Id, i.Name, i.Quantity })
+                o.SubtotalAmount,
+                o.TotalAmount,
+                Items = o.Items.Select(i => new { i.Id, i.Name, i.Quantity, i.UnitPrice, i.LineTotal })
             })
             .ToListAsync();
 
