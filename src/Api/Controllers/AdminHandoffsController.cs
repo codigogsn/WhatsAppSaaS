@@ -1,5 +1,8 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -7,6 +10,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/admin/handoffs")]
+[EnableRateLimiting("admin")]
 public class AdminHandoffsController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -25,7 +29,7 @@ public class AdminHandoffsController : ControllerBase
             return false;
 
         var globalKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
-        if (!string.IsNullOrWhiteSpace(globalKey) && headerKey.ToString() == globalKey)
+        if (!string.IsNullOrWhiteSpace(globalKey) && ConstantTimeEquals(headerKey.ToString(), globalKey))
             return true;
 
         // Also accept per-business admin keys
@@ -130,5 +134,12 @@ public class AdminHandoffsController : ControllerBase
         {
             return StatusCode(500, new { error = ex.Message });
         }
+    }
+
+    private static bool ConstantTimeEquals(string a, string b)
+    {
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(a),
+            Encoding.UTF8.GetBytes(b));
     }
 }

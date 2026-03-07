@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -7,6 +8,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("admin/export")]
+[EnableRateLimiting("admin")]
 public class AdminExportController : ControllerBase
 {
     private readonly AppDbContext _db;

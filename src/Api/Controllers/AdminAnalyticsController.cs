@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -7,6 +8,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("admin/analytics")]
+[EnableRateLimiting("admin")]
 public class AdminAnalyticsController : ControllerBase
 {
     private readonly AppDbContext _db;

@@ -2,6 +2,7 @@ using System.Text;
 using System.Text.Json;
 using Api.Services;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Serilog;
 using WhatsAppSaaS.Application.Common;
@@ -13,6 +14,7 @@ namespace Api.Controllers;
 [ApiController]
 [Route("webhook")]
 [Route("api/webhook")]
+[EnableRateLimiting("webhook")]
 public class WebhookController : ControllerBase
 {
     private readonly IBusinessResolver _businessResolver;
@@ -93,7 +95,10 @@ public class WebhookController : ControllerBase
         if (rawBody.Length > MaxBodySize)
             return BadRequest("Payload too large");
 
-        if (_whatsAppOptions.RequireSignatureValidation)
+        // Auto-enable signature validation when AppSecret is configured
+        var requireSig = _whatsAppOptions.RequireSignatureValidation
+                         || !string.IsNullOrEmpty(_whatsAppOptions.AppSecret);
+        if (requireSig)
         {
             var sig = Request.Headers["X-Hub-Signature-256"].FirstOrDefault();
             if (!_signatureValidator.IsValid(rawBody, sig ?? ""))

@@ -1,4 +1,7 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -7,6 +10,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/admin/businesses")]
+[EnableRateLimiting("admin")]
 public class AdminBusinessesController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -25,7 +29,7 @@ public class AdminBusinessesController : ControllerBase
             return false;
 
         return Request.Headers.TryGetValue("X-Admin-Key", out var headerKey)
-               && headerKey.ToString() == adminKey;
+               && ConstantTimeEquals(headerKey.ToString(), adminKey);
     }
 
     private async Task<Business?> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
@@ -38,7 +42,9 @@ public class AdminBusinessesController : ControllerBase
 
         // Accept global admin key OR per-business admin key
         var globalKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
-        if (headerKey.ToString() == globalKey || headerKey.ToString() == biz.AdminKey)
+        var key = headerKey.ToString();
+        if ((!string.IsNullOrWhiteSpace(globalKey) && ConstantTimeEquals(key, globalKey))
+            || (!string.IsNullOrWhiteSpace(biz.AdminKey) && ConstantTimeEquals(key, biz.AdminKey)))
             return biz;
 
         return null;
@@ -232,7 +238,7 @@ public class AdminBusinessesController : ControllerBase
         if (string.IsNullOrWhiteSpace(adminKey))
             return StatusCode(500, "ADMIN_KEY missing.");
 
-        if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || headerKey.ToString() != adminKey)
+        if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || !ConstantTimeEquals(headerKey.ToString(), adminKey))
             return Unauthorized();
 
         var phoneNumberId =
@@ -282,5 +288,12 @@ public class AdminBusinessesController : ControllerBase
             business.PhoneNumberId,
             business.IsActive
         });
+    }
+
+    private static bool ConstantTimeEquals(string a, string b)
+    {
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(a),
+            Encoding.UTF8.GetBytes(b));
     }
 }

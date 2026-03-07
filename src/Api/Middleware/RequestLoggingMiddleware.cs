@@ -15,23 +15,29 @@ public sealed class RequestLoggingMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
+        var correlationId = context.TraceIdentifier;
+        context.Response.Headers["X-Correlation-Id"] = correlationId;
+
         var sw = Stopwatch.StartNew();
 
-        _logger.LogInformation(
-            "HTTP {Method} {Path} started from {RemoteIp}",
-            context.Request.Method,
-            context.Request.Path,
-            context.Connection.RemoteIpAddress);
+        using (_logger.BeginScope(new Dictionary<string, object> { ["CorrelationId"] = correlationId }))
+        {
+            _logger.LogInformation(
+                "HTTP {Method} {Path} started from {RemoteIp}",
+                context.Request.Method,
+                context.Request.Path,
+                context.Connection.RemoteIpAddress);
 
-        await _next(context);
+            await _next(context);
 
-        sw.Stop();
+            sw.Stop();
 
-        _logger.LogInformation(
-            "HTTP {Method} {Path} responded {StatusCode} in {ElapsedMs}ms",
-            context.Request.Method,
-            context.Request.Path,
-            context.Response.StatusCode,
-            sw.ElapsedMilliseconds);
+            _logger.LogInformation(
+                "HTTP {Method} {Path} responded {StatusCode} in {ElapsedMs}ms",
+                context.Request.Method,
+                context.Request.Path,
+                context.Response.StatusCode,
+                sw.ElapsedMilliseconds);
+        }
     }
 }

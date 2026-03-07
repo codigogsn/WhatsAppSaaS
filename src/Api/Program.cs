@@ -2,9 +2,11 @@ using System;
 using System.IO;
 using System.Text.Json.Serialization;
 using System.Threading;
+using System.Threading.RateLimiting;
 using FluentValidation;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -92,6 +94,34 @@ try
     builder.Services.AddHealthChecks();
     builder.Services.AddHostedService<WhatsAppSaaS.Api.Services.ConversationCleanupService>();
 
+    // ────────────────────────────────────────
+    // Rate limiting
+    // ────────────────────────────────────────
+    builder.Services.AddRateLimiter(options =>
+    {
+        options.RejectionStatusCode = 429;
+
+        // Webhook: 60 requests per minute per IP
+        options.AddPolicy("webhook", context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 60,
+                    Window = TimeSpan.FromMinutes(1)
+                }));
+
+        // Admin: 30 requests per minute per IP
+        options.AddPolicy("admin", context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 30,
+                    Window = TimeSpan.FromMinutes(1)
+                }));
+    });
+
     var app = builder.Build();
 
     // ────────────────────────────────────────
@@ -158,6 +188,7 @@ try
 
     app.UseGlobalExceptionHandling();
     app.UseRequestLogging();
+    app.UseRateLimiter();
 
     app.UseDefaultFiles();
     app.UseStaticFiles();

@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -7,6 +8,7 @@ namespace WhatsAppSaaS.Api.Controllers;
 
 [ApiController]
 [Route("api/admin/menu")]
+[EnableRateLimiting("admin")]
 public sealed class AdminMenuController : ControllerBase
 {
     private readonly AppDbContext _db;
