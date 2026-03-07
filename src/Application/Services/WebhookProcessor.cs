@@ -450,9 +450,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // D) Checkout form capture
-                    if (state.CheckoutFormSent && TryParseCheckoutForm(rawText, out var form))
+                    // D) Checkout form capture (supports incremental field submission)
+                    if (state.CheckoutFormSent && TryParseCheckoutForm(rawText, out var form, isMerge: true))
                     {
+                        // Merge: overwrite only null fields with newly-parsed values
                         state.CustomerName ??= form.CustomerName;
                         state.CustomerIdNumber ??= form.CustomerIdNumber;
                         state.CustomerPhone ??= form.CustomerPhone;
@@ -518,12 +519,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         if (!string.IsNullOrWhiteSpace(quickDelivery))
                             state.DeliveryType = quickDelivery;
 
-                        // Store embedded observation if detected
+                        // Store embedded observation if detected — and skip observation prompt
                         if (!string.IsNullOrWhiteSpace(quickObs))
                         {
                             state.SpecialInstructions = string.IsNullOrWhiteSpace(state.SpecialInstructions)
                                 ? quickObs
                                 : state.SpecialInstructions + "; " + quickObs;
+                            state.ObservationAnswered = true;
                         }
 
                         var quickReply = BuildOrderReplyFromState(state);
@@ -729,7 +731,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return Msg.PickupOrDelivery;
 
         // Observation prompt — after items+delivery, before checkout form
-        if (!state.ObservationPromptSent)
+        // Skip if observation was already answered inline (e.g., "sin cebolla" in order text)
+        if (!state.ObservationPromptSent && !state.ObservationAnswered)
         {
             state.ObservationPromptSent = true;
 
@@ -801,11 +804,20 @@ public sealed class WebhookProcessor : IWebhookProcessor
             PaymentProofMediaId = state.PaymentProofMediaId,
             PaymentProofSubmittedAtUtc = !string.IsNullOrWhiteSpace(state.PaymentProofMediaId) ? DateTime.UtcNow : null,
 
-            Items = state.Items.Select(i => new WhatsAppSaaS.Domain.Entities.OrderItem
+            Items = state.Items.Select(i =>
             {
-                Name = !string.IsNullOrWhiteSpace(i.Modifiers) ? $"{i.Name} ({i.Modifiers})" : i.Name,
-                Quantity = i.Quantity,
-                UnitPrice = 0m
+                var catalog = _activeMenu ?? MenuCatalog;
+                var entry = catalog.FirstOrDefault(m =>
+                    m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase));
+                var unitPrice = entry?.Price ?? 0m;
+
+                return new WhatsAppSaaS.Domain.Entities.OrderItem
+                {
+                    Name = !string.IsNullOrWhiteSpace(i.Modifiers) ? $"{i.Name} ({i.Modifiers})" : i.Name,
+                    Quantity = i.Quantity,
+                    UnitPrice = unitPrice,
+                    LineTotal = unitPrice * i.Quantity
+                };
             }).ToList()
         };
 
@@ -1279,13 +1291,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
     {
         new() { Canonical = "Hamburguesa", Aliases = new[] { "hamburguesa", "hamburguesas", "hamburgesa", "hamburgesas",
             "hamburguea", "hamburgueas", "hamburgues", "hamburguez", "hamburgue",
-            "hamburga", "hamburgs", "hambur", "burger", "burgers", "hamburguesita", "hamburguesitas" },
+            "hamburga", "hamburgs", "hambur", "burger", "burgers", "hamburguesita", "hamburguesitas",
+            "hamburgueaas", "hamburgueaa", "hambuguesa", "hambuguesas", "hamburgusa", "hamburgusas" },
             Category = "comida" },
         new() { Canonical = "Coca Cola", Aliases = new[] { "coca cola", "cocacola", "cocacolas", "coca", "cocas",
-            "coca-cola", "coca colas", "refresco", "refrescos", "gaseosa", "gaseosas", "soda" },
+            "coca-cola", "coca colas", "refresco", "refrescos", "gaseosa", "gaseosas", "soda",
+            "coka", "cokas", "coka cola" },
             Category = "bebida" },
         new() { Canonical = "Papas", Aliases = new[] { "papas", "papa", "papaas", "papitas", "papita", "papaz",
-            "papas fritas", "fritas", "french fries", "fries" },
+            "papas fritas", "fritas", "french fries", "fries", "papss", "papitas fritas" },
             Category = "acompanamiento" },
         new() { Canonical = "Pizza", Aliases = new[] { "pizza", "pizzas", "piza", "pizas", "pizzita", "pizzitas" },
             Category = "comida" },
@@ -1371,15 +1385,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 return entry.Canonical;
 
             // Levenshtein distance for close typos
+            // Allow distance 2 for short words, distance 3 for words >= 8 chars
             if (t.Length >= 5)
             {
-                if (canonLower.Length >= 4 && LevenshteinDistance(t, canonLower) <= 2)
+                var maxDist = t.Length >= 8 ? 3 : 2;
+
+                if (canonLower.Length >= 4 && LevenshteinDistance(t, canonLower) <= maxDist)
                     return entry.Canonical;
 
                 foreach (var alias in entry.Aliases)
                 {
                     var a = StripAccents(alias);
-                    if (a.Length >= 4 && LevenshteinDistance(t, a) <= 2)
+                    if (a.Length >= 4 && LevenshteinDistance(t, a) <= maxDist)
                         return entry.Canonical;
                 }
             }
@@ -1419,7 +1436,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         public string? LocationText { get; set; }
     }
 
-    internal static bool TryParseCheckoutForm(string rawText, out CheckoutForm form)
+    internal static bool TryParseCheckoutForm(string rawText, out CheckoutForm form, bool isMerge = false)
     {
         form = new CheckoutForm();
 
@@ -1557,7 +1574,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
             + (string.IsNullOrWhiteSpace(form.PaymentMethod) ? 0 : 1)
             + (string.IsNullOrWhiteSpace(form.LocationText) ? 0 : 1);
 
-        return filled >= 2;
+        // In merge mode (checkout already sent), accept even a single field
+        return filled >= (isMerge ? 1 : 2);
     }
 
     internal static bool IsVenezuelanPhone(string value)
@@ -1612,9 +1630,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (p.Contains('/') && p.Contains("efectivo") && p.Contains("divis"))
             return null;
 
-        if (p.Contains("pago") && p.Contains("mov"))
+        if (p.Contains("pago") && (p.Contains("mov") || p.Contains("moc") || p.Contains("mobi")))
             return "pago_movil";
-        if (p is "pm")
+        if (p is "pm" or "pagomovil" or "pago movil" or "pago mocil" or "pago mobil")
             return "pago_movil";
         if (p.Contains("divis") || p.Contains("usd") || p.Contains("dolar"))
             return "divisas";
@@ -1741,6 +1759,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
     }
 
     // Core order text parser: splits by conjunctions, handles "N items con/y other items"
+    // Supports compound orders like "3 hamburguesas cada una con papas y refresco"
+    // where the parent quantity (3) propagates to companion items (papas, refresco).
     internal static List<ParsedItem> ParseOrderText(string rawText)
     {
         var results = new List<ParsedItem>();
@@ -1751,8 +1771,20 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var cleaned = Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase);
         cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
 
+        // Detect "cada una/uno" propagation pattern — strip phrase, remember to propagate
+        bool propagateQty = false;
+        cleaned = Regex.Replace(cleaned, @"\s+cada\s+un[ao]?\b", " ", RegexOptions.IgnoreCase);
+        if (!string.Equals(cleaned, Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase).Replace("  ", " ").Trim()))
+            propagateQty = true;
+        // Also detect "todas con", "todos con" pattern
+        if (Regex.IsMatch(text, @"\b(tod[ao]s?\s+con)\b", RegexOptions.IgnoreCase))
+            propagateQty = true;
+        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
+
         // First, split into segments on "con [menu-item]" and " y " boundaries
         var segments = SplitIntoOrderSegments(cleaned);
+
+        int leadQty = 0; // the quantity from the first segment (for propagation)
 
         foreach (var seg in segments)
         {
@@ -1772,6 +1804,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 {
                     item.Quantity = qty;
                     results.Add(item);
+                    if (results.Count == 1) leadQty = qty; // remember first item's quantity
                     continue;
                 }
             }
@@ -1780,6 +1813,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
             var singleItem = ExtractItemAndModifiers(s);
             if (singleItem != null)
             {
+                // Propagate lead quantity to companion items when pattern detected
+                if (propagateQty && leadQty > 1 && results.Count > 0)
+                    singleItem.Quantity = leadQty;
                 results.Add(singleItem);
             }
         }

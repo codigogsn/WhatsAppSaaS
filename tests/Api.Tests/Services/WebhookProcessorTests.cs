@@ -2016,4 +2016,267 @@ public class WebhookProcessorTests
         receipt.Should().NotBeNull();
         receipt!.Body.Should().Contain("sin cebolla");
     }
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Compound order quantity propagation
+    // ──────────────────────────────────────────
+
+    [Fact]
+    public void ParseOrderText_CompoundOrder_CadaUnaPropagatesQuantity()
+    {
+        // "3 hamburguesas cada una con papas y refresco"
+        var items = WebhookProcessor.ParseOrderText("3 hamburguesas cada una con papas y refresco");
+
+        items.Should().HaveCountGreaterOrEqualTo(3);
+        items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 3);
+        items.Should().Contain(i => i.Name == "Papas" && i.Quantity == 3);
+        items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 3);
+    }
+
+    [Fact]
+    public void ParseOrderText_CompoundOrder_TodosConPropagatesQuantity()
+    {
+        // "2 hamburguesas todas con papas"
+        var items = WebhookProcessor.ParseOrderText("2 hamburguesas todas con papas");
+
+        items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Papas" && i.Quantity == 2);
+    }
+
+    [Fact]
+    public void ParseOrderText_NormalCompound_NoPropagation()
+    {
+        // "2 hamburguesas y 1 coca" — no "cada una", quantities stay independent
+        var items = WebhookProcessor.ParseOrderText("2 hamburguesas y 1 coca");
+
+        items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Checkout single-field merge
+    // ──────────────────────────────────────────
+
+    [Fact]
+    public void TryParseCheckoutForm_SinglePhoneInMerge_ParsesSuccessfully()
+    {
+        var parsed = WebhookProcessor.TryParseCheckoutForm(
+            "0414-1234567", out var form, isMerge: true);
+
+        parsed.Should().BeTrue();
+        form.CustomerPhone.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void TryParseCheckoutForm_SinglePhoneNoMerge_Rejects()
+    {
+        var parsed = WebhookProcessor.TryParseCheckoutForm(
+            "0414-1234567", out var form, isMerge: false);
+
+        parsed.Should().BeFalse("requires >= 2 fields without merge mode");
+    }
+
+    [Fact]
+    public void TryParseCheckoutForm_SinglePaymentMethod_MergesInCheckout()
+    {
+        var parsed = WebhookProcessor.TryParseCheckoutForm(
+            "efectivo", out var form, isMerge: true);
+
+        parsed.Should().BeTrue();
+        form.PaymentMethod.Should().Be("efectivo");
+    }
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Observation skip when inline
+    // ──────────────────────────────────────────
+
+    [Fact]
+    public void BuildOrderReplyFromState_InlineObservation_SkipsPrompt()
+    {
+        var state = new ConversationFields
+        {
+            DeliveryType = "delivery",
+            SpecialInstructions = "sin cebolla",
+            ObservationAnswered = true
+        };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Should skip observation prompt and go straight to checkout form
+        reply.Should().NotContain("observaci\u00f3n");
+        state.CheckoutFormSent.Should().BeTrue();
+    }
+
+    [Fact]
+    public void BuildOrderReplyFromState_NoInlineObservation_ShowsPrompt()
+    {
+        var state = new ConversationFields
+        {
+            DeliveryType = "delivery"
+        };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Should show observation prompt
+        reply.Should().Contain("observaci\u00f3n");
+        state.ObservationPromptSent.Should().BeTrue();
+    }
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Typo tolerance
+    // ──────────────────────────────────────────
+
+    [Theory]
+    [InlineData("hamburgueaas", "Hamburguesa")]
+    [InlineData("cocas", "Coca Cola")]
+    [InlineData("hamburgusa", "Hamburguesa")]
+    [InlineData("papitas", "Papas")]
+    [InlineData("coka", "Coca Cola")]
+    public void NormalizeMenuItemName_TypoVariants_ResolveCorrectly(string input, string expected)
+    {
+        var resolved = WebhookProcessor.NormalizeMenuItemName(input, WebhookProcessor.MenuCatalog);
+        resolved.Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("pago mocil", "pago_movil")]
+    [InlineData("pago movil", "pago_movil")]
+    [InlineData("efectivo", "efectivo")]
+    [InlineData("divisas", "divisas")]
+    [InlineData("pm", "pago_movil")]
+    public void NormalizePaymentMethod_TypoVariants_ResolveCorrectly(string input, string expected)
+    {
+        var result = WebhookProcessor.NormalizePaymentMethod(input);
+        result.Should().Be(expected);
+    }
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Observation "sin cebolla todas" during quick parse
+    // ──────────────────────────────────────────
+
+    [Fact]
+    public void ParseOrderText_SinCebollaWithItem_ExtractsObservation()
+    {
+        var items = WebhookProcessor.ParseOrderText("2 hamburguesas sin cebolla");
+
+        items.Should().ContainSingle();
+        items[0].Name.Should().Be("Hamburguesa");
+        items[0].Quantity.Should().Be(2);
+        items[0].Modifiers.Should().Contain("sin cebolla");
+    }
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Receipt must match cart
+    // ──────────────────────────────────────────
+
+    [Fact]
+    public async Task FullFlow_ReceiptMatchesCartContents()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields
+        {
+            MenuSent = true,
+            CheckoutFormSent = true,
+            CustomerName = "Juan",
+            CustomerIdNumber = "V-12345678",
+            CustomerPhone = "0414-1234567",
+            Address = "Calle 1",
+            PaymentMethod = "efectivo",
+            GpsPinReceived = true,
+            DeliveryType = "delivery",
+            ObservationPromptSent = true,
+            ObservationAnswered = true,
+            SpecialInstructions = "sin cebolla"
+        };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 3 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 3 });
+        state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 3 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        var receipt = sentMessages.FirstOrDefault(m => m.Body.Contains("PEDIDO CONFIRMADO"));
+        receipt.Should().NotBeNull();
+        receipt!.Body.Should().Contain("3 Hamburguesa");
+        receipt!.Body.Should().Contain("3 Papas");
+        receipt!.Body.Should().Contain("3 Coca Cola");
+        receipt!.Body.Should().Contain("sin cebolla");
+    }
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Payment proof persists to order
+    // ──────────────────────────────────────────
+
+    [Fact]
+    public async Task FullFlow_PaymentProof_PersistedToOrder()
+    {
+        Order? savedOrder = null;
+        _orderRepositoryMock
+            .Setup(x => x.AddOrderAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()))
+            .Callback<Order, CancellationToken>((o, _) => savedOrder = o)
+            .Returns(Task.CompletedTask);
+
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields
+        {
+            MenuSent = true,
+            CheckoutFormSent = true,
+            CustomerName = "Maria",
+            CustomerIdNumber = "V-87654321",
+            CustomerPhone = "0412-9876543",
+            Address = "Av Principal",
+            PaymentMethod = "pago_movil",
+            GpsPinReceived = true,
+            DeliveryType = "delivery",
+            ObservationPromptSent = true,
+            ObservationAnswered = true,
+            PaymentEvidenceRequested = true,
+            PaymentEvidenceReceived = true,
+            PaymentProofMediaId = "media_12345"
+        };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        savedOrder.Should().NotBeNull();
+        savedOrder!.PaymentProofMediaId.Should().Be("media_12345");
+        savedOrder.PaymentMethod.Should().Be("pago_movil");
+    }
+
+    // ──────────────────────────────────────────
+    // REGRESSION: Delivery type not re-asked
+    // ──────────────────────────────────────────
+
+    [Fact]
+    public void BuildOrderReplyFromState_DeliveryAlreadySet_DoesNotReAsk()
+    {
+        var state = new ConversationFields
+        {
+            DeliveryType = "delivery"
+        };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        reply.Should().NotContain("pickup");
+        reply.Should().NotContain("delivery");
+    }
 }
