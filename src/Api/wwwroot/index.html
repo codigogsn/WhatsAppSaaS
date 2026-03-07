@@ -50,6 +50,8 @@
     .items-list li:last-child { border-bottom: none; }
     .toggle-btn { background: none; border: none; cursor: pointer; font-size: 16px; padding: 2px 6px; color: #1a73e8; }
     .obs-tag { background: #fff8e1; color: #f57f17; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .human-tag { background: #fce4ec; color: #c62828; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .3px; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.6;} }
 
     /* Filters bar */
     .filters { background: #fff; border-radius: 8px; padding: 12px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
@@ -104,6 +106,10 @@
       <div class="label">Ticket Prom.</div>
       <div class="value" id="kpiAvgTicket">-</div>
     </div>
+    <div class="card" style="border-left:3px solid #c62828;">
+      <div class="label" style="color:#c62828;">Necesitan Humano</div>
+      <div class="value" style="color:#c62828;" id="kpiHandoffs">0</div>
+    </div>
   </div>
 
   <!-- Status counters -->
@@ -127,6 +133,7 @@
         <option>OutForDelivery</option>
         <option>Completed</option>
         <option>Cancelled</option>
+        <option value="NeedsHuman">🔴 Necesita Humano</option>
       </select>
 
       <label>Fecha:</label>
@@ -173,6 +180,7 @@
 
 <script>
 let timer = null;
+let handoffPhones = {}; // phone -> handoff info
 
 function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 
@@ -223,6 +231,16 @@ function statusPill(s){
 
 function fmtMoney(n){ return (n ?? 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2}); }
 
+function getHandoff(order){
+  // Match by From field (wa_id) which is the first part of conversationId
+  const from = order.customerPhone || '';
+  // Try matching directly and with common normalizations
+  for (const [phone, info] of Object.entries(handoffPhones)) {
+    if (from && (phone === from || from.includes(phone) || phone.includes(from))) return info;
+  }
+  return null;
+}
+
 function fmtDate(d){
   if (!d) return '-';
   const dt = new Date(d);
@@ -269,6 +287,34 @@ function setTodayKpis(list){
   document.getElementById('kpiRevenueToday').textContent = fmtMoney(todayRevenue);
 }
 
+// ── Handoffs ──
+async function loadHandoffs(){
+  handoffPhones = {};
+  const key = getAdminKey();
+  if (!key) return;
+  const bid = getBusinessId();
+  const qs = new URLSearchParams();
+  if (bid) qs.set('businessId', bid);
+  try {
+    const res = await fetch('/api/admin/handoffs?' + qs.toString(), { headers: adminHeaders() });
+    if (!res.ok) return;
+    const list = await res.json();
+    document.getElementById('kpiHandoffs').textContent = list.length;
+    for (const h of list) {
+      handoffPhones[h.fromPhone] = h;
+    }
+  } catch {}
+}
+
+async function resolveHandoff(conversationId){
+  if (!confirm('Resolver handoff y reactivar el bot para esta conversacion?')) return;
+  const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/resolve', {
+    method: 'POST', headers: adminHeaders()
+  });
+  if (!res.ok) { alert('Error resolviendo handoff'); return; }
+  await load();
+}
+
 // ── Load ──
 async function load(auto=false) {
   if (timer) { clearInterval(timer); timer = null; }
@@ -288,9 +334,10 @@ async function load(auto=false) {
   if (bid) qs.set('businessId', bid);
 
   document.getElementById('msg').textContent = 'Cargando...';
-  await loadSummary();
+  await Promise.all([loadSummary(), loadHandoffs()]);
 
-  const res = await fetch('/api/orders?' + qs.toString());
+  const isHandoffFilter = status === 'NeedsHuman';
+  const res = await fetch('/api/orders?' + qs.toString().replace('status=NeedsHuman',''));
   if (!res.ok) { document.getElementById('msg').textContent = 'Error cargando pedidos'; return; }
 
   let data = await res.json();
@@ -300,6 +347,7 @@ async function load(auto=false) {
   if (searchId) { const s = searchId.toLowerCase(); data = data.filter(o => (o.id||'').toLowerCase().includes(s)); }
   if (dateFrom) { data = data.filter(o => (o.createdAtUtc||'').slice(0,10) >= dateFrom); }
   if (dateTo) { const to = dateTo + 'T23:59:59'; data = data.filter(o => (o.createdAtUtc||'') <= to); }
+  if (isHandoffFilter) { data = data.filter(o => getHandoff(o) !== null); }
 
   setKpis(data);
   setTodayKpis(data);
@@ -312,6 +360,7 @@ async function load(auto=false) {
     const hasObs = o.specialInstructions ? true : false;
     const gps = (o.locationLat != null && o.locationLng != null) ? `${o.locationLat}, ${o.locationLng}` : '';
     const gpsLink = gps ? `https://maps.google.com/?q=${o.locationLat},${o.locationLng}` : '';
+    const handoff = getHandoff(o);
 
     // Main row
     const tr = document.createElement('tr');
@@ -326,7 +375,7 @@ async function load(auto=false) {
     tr.innerHTML = `
       <td class="toggle-btn">▶</td>
       <td>${fmtDate(o.createdAtUtc)}<br/><code>${esc(o.id).slice(0,8)}</code></td>
-      <td>${statusPill(o.status)}</td>
+      <td>${statusPill(o.status)}${handoff ? ' <span class="human-tag">HUMANO</span>' : ''}</td>
       <td>
         <b>${esc(o.customerName)}</b><br/>
         <span class="muted small">${esc(o.customerPhone)}</span>
@@ -401,6 +450,16 @@ async function load(auto=false) {
             <div class="dg-label">Observaciones / Instrucciones Especiales</div>
             <div class="dg-value" style="background:#fff8e1; padding:6px 10px; border-radius:4px; ${hasObs ? '' : 'color:#aaa;'}">${hasObs ? esc(o.specialInstructions) : 'Sin observaciones'}</div>
           </div>
+          ${handoff ? `
+          <div style="grid-column: 1 / -1;">
+            <div class="dg-label" style="color:#c62828;">Estado de Handoff Humano</div>
+            <div class="dg-value" style="background:#fce4ec; padding:10px 12px; border-radius:4px;">
+              <b style="color:#c62828;">NECESITA ATENCION HUMANA</b><br/>
+              <span class="small muted">Solicitado: ${handoff.handoffAtUtc ? new Date(handoff.handoffAtUtc).toLocaleString('es-VE') : '-'}</span><br/>
+              <span class="small muted">Mensajes en espera: ${handoff.notifiedCount || 0}</span><br/>
+              <button onclick="event.stopPropagation();resolveHandoff('${esc(handoff.conversationId)}')" style="margin-top:6px;background:#2e7d32;color:#fff;border-color:#2e7d32;">Resolver (reactivar bot)</button>
+            </div>
+          </div>` : ''}
         </div>
       </td>
     `;

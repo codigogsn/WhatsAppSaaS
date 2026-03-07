@@ -29,6 +29,8 @@ public sealed class ConversationFields
     public bool ObservationPromptSent { get; set; }
     public bool ObservationAnswered { get; set; }
     public bool HumanHandoffRequested { get; set; }
+    public DateTime? HumanHandoffAtUtc { get; set; }
+    public int HumanHandoffNotifiedCount { get; set; }
 
     public void ResetAfterConfirm()
     {
@@ -49,6 +51,8 @@ public sealed class ConversationFields
         ObservationPromptSent = false;
         ObservationAnswered = false;
         HumanHandoffRequested = false;
+        HumanHandoffAtUtc = null;
+        HumanHandoffNotifiedCount = 0;
     }
 }
 

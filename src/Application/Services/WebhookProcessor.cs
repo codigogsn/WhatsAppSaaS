@@ -147,14 +147,36 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (IsHumanHandoffRequest(t))
                     {
                         state.HumanHandoffRequested = true;
+                        state.HumanHandoffAtUtc = DateTime.UtcNow;
+                        state.HumanHandoffNotifiedCount = 1;
 
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = "\ud83d\ude4b Perfecto. Te pondremos en contacto con un humano para ayudarte con tu pedido.",
+                            Body = "\ud83d\ude4b Perfecto. Tu conversaci\u00f3n fue derivada a un agente humano. En breve te atenderemos.",
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
+                    // 0b) If already in human handoff, pause all bot logic
+                    if (state.HumanHandoffRequested)
+                    {
+                        // Send reminder max 2 more times, then stay silent
+                        if (state.HumanHandoffNotifiedCount < 3)
+                        {
+                            state.HumanHandoffNotifiedCount++;
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "\u23f3 Tu conversaci\u00f3n est\u00e1 en espera de atenci\u00f3n humana. Un agente te atender\u00e1 pronto.",
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -773,8 +795,18 @@ $"\u2705 *PEDIDO CONFIRMADO*\n\ud83e\uddfe Pedido: #{orderNumber}\n\n\ud83d\udc6
         => t == "confirmar" || t == "confirmado" || t == "listo";
 
     internal static bool IsHumanHandoffRequest(string t)
-        => t is "humano" or "agente" or "asesor" or "persona" or "soporte"
-           or "operador" or "asistente";
+    {
+        if (t is "humano" or "agente" or "asesor" or "persona" or "soporte"
+            or "operador" or "asistente" or "ayuda")
+            return true;
+
+        var s = StripAccents(t);
+        return s.Contains("hablar con alguien") || s.Contains("hablar con un humano")
+            || s.Contains("hablar con una persona") || s.Contains("ayuda humana")
+            || s.Contains("necesito ayuda") || s.Contains("quiero hablar con")
+            || s.Contains("atencion humana") || s.Contains("agente humano")
+            || s.Contains("operador humano") || s.Contains("soporte humano");
+    }
 
     internal static bool IsNoObservation(string t)
     {
