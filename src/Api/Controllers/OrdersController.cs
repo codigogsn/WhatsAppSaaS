@@ -66,6 +66,10 @@ public sealed class OrdersController : ControllerBase
                 o.SpecialInstructions,
                 o.SubtotalAmount,
                 o.TotalAmount,
+                o.PaymentProofMediaId,
+                o.PaymentProofSubmittedAtUtc,
+                o.PaymentVerifiedAtUtc,
+                o.PaymentVerifiedBy,
                 Items = o.Items.Select(i => new { i.Id, i.Name, i.Quantity, i.UnitPrice, i.LineTotal })
             })
             .ToListAsync();
@@ -100,6 +104,10 @@ public sealed class OrdersController : ControllerBase
                 x.LastNotifiedStatus,
                 x.LastNotifiedAtUtc,
                 x.SpecialInstructions,
+                x.PaymentProofMediaId,
+                x.PaymentProofSubmittedAtUtc,
+                x.PaymentVerifiedAtUtc,
+                x.PaymentVerifiedBy,
                 Items = x.Items.Select(i => new { i.Id, i.Name, i.Quantity })
             })
             .SingleOrDefaultAsync();
@@ -269,6 +277,72 @@ public sealed class OrdersController : ControllerBase
         }
 
         return StatusCode(503, new { error = "DB temporarily unavailable. Please retry." });
+    }
+
+    // PATCH /api/orders/{id}/verify-payment
+    [HttpPatch("{id:guid}/verify-payment")]
+    public async Task<IActionResult> VerifyPayment(Guid id)
+    {
+        var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound(new { error = "Order not found" });
+
+        order.PaymentVerifiedAtUtc = DateTime.UtcNow;
+        order.PaymentVerifiedBy = "dashboard";
+        await _context.SaveChangesAsync();
+
+        // Notify customer
+        if (!string.IsNullOrWhiteSpace(order.From) && !string.IsNullOrWhiteSpace(order.PhoneNumberId))
+        {
+            try
+            {
+                await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
+                {
+                    To = order.From,
+                    PhoneNumberId = order.PhoneNumberId,
+                    Body = "\u2705 Tu pago ha sido verificado. \u00a1Gracias!"
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to notify customer about payment verification for order {OrderId}", id);
+            }
+        }
+
+        return Ok(new { success = true, id = order.Id, paymentVerifiedAtUtc = order.PaymentVerifiedAtUtc });
+    }
+
+    // PATCH /api/orders/{id}/reject-payment
+    [HttpPatch("{id:guid}/reject-payment")]
+    public async Task<IActionResult> RejectPayment(Guid id)
+    {
+        var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound(new { error = "Order not found" });
+
+        order.PaymentVerifiedAtUtc = null;
+        order.PaymentVerifiedBy = null;
+        order.PaymentProofMediaId = null;
+        order.PaymentProofSubmittedAtUtc = null;
+        await _context.SaveChangesAsync();
+
+        // Notify customer
+        if (!string.IsNullOrWhiteSpace(order.From) && !string.IsNullOrWhiteSpace(order.PhoneNumberId))
+        {
+            try
+            {
+                await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
+                {
+                    To = order.From,
+                    PhoneNumberId = order.PhoneNumberId,
+                    Body = "\u26a0\ufe0f Tu comprobante de pago fue rechazado. Por favor env\u00eda un nuevo comprobante."
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to notify customer about payment rejection for order {OrderId}", id);
+            }
+        }
+
+        return Ok(new { success = true, id = order.Id, paymentRejected = true });
     }
 
     private static (bool shouldNotify, string message) MapStatusToMessage(string status)

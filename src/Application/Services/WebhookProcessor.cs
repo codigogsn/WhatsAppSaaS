@@ -128,6 +128,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         {
                             state.PaymentEvidenceReceived = true;
 
+                            // Capture media ID from image message
+                            if (message.Image?.Id is { Length: > 0 } mediaId)
+                                state.PaymentProofMediaId = mediaId;
+
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -752,6 +756,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
             CheckoutCompleted = true,
             CheckoutCompletedAtUtc = DateTime.UtcNow,
             CheckoutFormSent = state.CheckoutFormSent,
+
+            PaymentProofMediaId = state.PaymentProofMediaId,
+            PaymentProofSubmittedAtUtc = !string.IsNullOrWhiteSpace(state.PaymentProofMediaId) ? DateTime.UtcNow : null,
 
             Items = state.Items.Select(i => new WhatsAppSaaS.Domain.Entities.OrderItem
             {

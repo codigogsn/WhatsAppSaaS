@@ -91,6 +91,18 @@ public sealed class WebhookMessage
 
     [JsonPropertyName("type")]
     public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("image")]
+    public WebhookMedia? Image { get; set; }
+}
+
+public sealed class WebhookMedia
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("mime_type")]
+    public string MimeType { get; set; } = string.Empty;
 }
 
 public sealed class WebhookText

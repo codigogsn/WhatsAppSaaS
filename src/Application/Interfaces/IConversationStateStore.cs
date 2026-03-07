@@ -24,6 +24,7 @@ public sealed class ConversationFields
 
     public bool PaymentEvidenceRequested { get; set; }
     public bool PaymentEvidenceReceived { get; set; }
+    public string? PaymentProofMediaId { get; set; }
 
     public string? SpecialInstructions { get; set; }
     public bool ObservationPromptSent { get; set; }
@@ -47,6 +48,7 @@ public sealed class ConversationFields
         LocationText = null;
         PaymentEvidenceRequested = false;
         PaymentEvidenceReceived = false;
+        PaymentProofMediaId = null;
         SpecialInstructions = null;
         ObservationPromptSent = false;
         ObservationAnswered = false;

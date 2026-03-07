@@ -14,6 +14,14 @@ public sealed class AnalyticsSummaryDto
     public int TotalCustomers { get; set; }
     public int UniqueCustomers { get; set; }
     public decimal AverageTicket { get; set; }
+
+    // Enhanced analytics
+    public int OrdersToday { get; set; }
+    public decimal RevenueToday { get; set; }
+    public int OrdersThisWeek { get; set; }
+    public decimal ReturningCustomersPct { get; set; }
+    public string? TopSellingItem { get; set; }
+    public int PaymentsPendingVerification { get; set; }
 }
 
 public sealed class TopProductDto

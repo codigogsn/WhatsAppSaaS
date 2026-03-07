@@ -52,6 +52,12 @@ public class Order
     public decimal? DeliveryFee { get; set; }
     public decimal? TotalAmount { get; set; }
 
+    // Payment proof
+    public string? PaymentProofMediaId { get; set; }
+    public DateTime? PaymentProofSubmittedAtUtc { get; set; }
+    public DateTime? PaymentVerifiedAtUtc { get; set; }
+    public string? PaymentVerifiedBy { get; set; }
+
     // ⏱️ Operational timestamps
     public DateTime? AcceptedAtUtc { get; set; }
     public DateTime? PreparingAtUtc { get; set; }

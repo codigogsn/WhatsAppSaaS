@@ -437,6 +437,12 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     // ── Missing column on Orders (SpecialInstructions) ──
     ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "SpecialInstructions" text""");
 
+    // ── Payment proof columns on Orders ──
+    ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PaymentProofMediaId" text""");
+    ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PaymentProofSubmittedAtUtc" timestamp""");
+    ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PaymentVerifiedAtUtc" timestamp""");
+    ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PaymentVerifiedBy" text""");
+
     // ── Missing columns on Customers (scale features) ──
     ExecSql(conn, """ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "LastDeliveryAddress" text""");
 
@@ -494,6 +500,7 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         "20260307044447_AddBusinessProfile",
         "20260307182204_AddCustomerLastDeliveryAddress",
         "20260307184701_AddBusinessNotificationPhone",
+        "20260307191229_AddPaymentProofFields",
     ];
     foreach (var mid in allMigrations)
     {

@@ -52,6 +52,12 @@ public class AppDbContext : DbContext
             b.Property(x => x.CheckoutCompleted).IsRequired();
             b.Property(x => x.CheckoutCompletedAtUtc);
 
+            // Payment proof
+            b.Property(x => x.PaymentProofMediaId);
+            b.Property(x => x.PaymentProofSubmittedAtUtc);
+            b.Property(x => x.PaymentVerifiedAtUtc);
+            b.Property(x => x.PaymentVerifiedBy);
+
             // 🛡️ Anti doble notificación
             b.Property(x => x.LastNotifiedStatus);
             b.Property(x => x.LastNotifiedAtUtc);

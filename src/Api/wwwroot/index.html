@@ -280,6 +280,22 @@
       <div class="label">Ticket Prom.</div>
       <div class="value" id="kpiAvgTicket">-</div>
     </div>
+    <div class="card">
+      <div class="label">Semana</div>
+      <div class="value" id="kpiOrdersWeek">-</div>
+    </div>
+    <div class="card">
+      <div class="label">% Recurrentes</div>
+      <div class="value" id="kpiReturning">-</div>
+    </div>
+    <div class="card">
+      <div class="label">Top Producto</div>
+      <div class="value" id="kpiTopItem" style="font-size:13px;">-</div>
+    </div>
+    <div class="card" style="border-left:3px solid #e65100;">
+      <div class="label" style="color:#e65100;">Pagos Pendientes</div>
+      <div class="value" style="color:#e65100;" id="kpiPaymentsPending">0</div>
+    </div>
     <div class="card" style="border-left:3px solid #c62828;">
       <div class="label" style="color:#c62828;">Necesitan Humano</div>
       <div class="value" style="color:#c62828;" id="kpiHandoffs">0</div>
@@ -621,7 +637,7 @@ function fmtDate(d){
 // ── KPIs ──
 async function loadSummary(){
   const key = getAdminKey();
-  const ids = ['kpiOrdersTotal','kpiUniqueCustomers','kpiTotalRevenue','kpiAvgTicket'];
+  const ids = ['kpiOrdersTotal','kpiUniqueCustomers','kpiTotalRevenue','kpiAvgTicket','kpiOrdersToday','kpiRevenueToday','kpiOrdersWeek','kpiReturning','kpiTopItem','kpiPaymentsPending'];
   if (!key) { ids.forEach(id => document.getElementById(id).textContent = '-'); return; }
 
   const bid = getBusinessId();
@@ -635,6 +651,12 @@ async function loadSummary(){
     document.getElementById('kpiUniqueCustomers').textContent = s.uniqueCustomers ?? 0;
     document.getElementById('kpiTotalRevenue').textContent = fmtMoney(s.totalRevenue);
     document.getElementById('kpiAvgTicket').textContent = fmtMoney(s.averageTicket);
+    document.getElementById('kpiOrdersToday').textContent = s.ordersToday ?? 0;
+    document.getElementById('kpiRevenueToday').textContent = fmtMoney(s.revenueToday);
+    document.getElementById('kpiOrdersWeek').textContent = s.ordersThisWeek ?? 0;
+    document.getElementById('kpiReturning').textContent = (s.returningCustomersPct ?? 0) + '%';
+    document.getElementById('kpiTopItem').textContent = s.topSellingItem || '-';
+    document.getElementById('kpiPaymentsPending').textContent = s.paymentsPendingVerification ?? 0;
   } catch { ids.forEach(id => document.getElementById(id).textContent = 'err'); }
 }
 
@@ -650,12 +672,7 @@ function setKpis(list){
 }
 
 function setTodayKpis(list){
-  const now = new Date();
-  const todayStr = now.toISOString().slice(0,10);
-  const todayOrders = list.filter(o => (o.createdAtUtc||'').slice(0,10) === todayStr);
-  document.getElementById('kpiOrdersToday').textContent = todayOrders.length;
-  const todayRevenue = todayOrders.reduce((sum, o) => sum + (o.totalAmount || 0), 0);
-  document.getElementById('kpiRevenueToday').textContent = fmtMoney(todayRevenue);
+  // Today KPIs now loaded from server-side analytics summary
 }
 
 // ── Handoffs ──
@@ -821,6 +838,19 @@ async function load(auto=false) {
             <div class="dg-label">Observaciones / Instrucciones Especiales</div>
             <div class="dg-value" style="background:#fff8e1; padding:6px 10px; border-radius:4px; ${hasObs ? '' : 'color:#aaa;'}">${hasObs ? esc(o.specialInstructions) : 'Sin observaciones'}</div>
           </div>
+          ${o.paymentProofMediaId ? `
+          <div style="grid-column: 1 / -1;">
+            <div class="dg-label" style="color:#e65100;">Comprobante de Pago</div>
+            <div class="dg-value" style="background:#fff3e0; padding:10px 12px; border-radius:4px;">
+              <b>Media ID:</b> <code>${esc(o.paymentProofMediaId)}</code><br/>
+              <span class="small muted">Enviado: ${o.paymentProofSubmittedAtUtc ? new Date(o.paymentProofSubmittedAtUtc).toLocaleString('es-VE') : '-'}</span><br/>
+              ${o.paymentVerifiedAtUtc
+                ? '<span style="color:#2e7d32;"><b>VERIFICADO</b> ' + new Date(o.paymentVerifiedAtUtc).toLocaleString('es-VE') + ' por ' + esc(o.paymentVerifiedBy) + '</span>'
+                : `<button onclick="event.stopPropagation();verifyPayment('${esc(o.id)}')" style="margin-top:6px;background:#2e7d32;color:#fff;border-color:#2e7d32;">Verificar Pago</button>
+                   <button onclick="event.stopPropagation();rejectPayment('${esc(o.id)}')" style="margin-top:6px;margin-left:4px;background:#c62828;color:#fff;border-color:#c62828;">Rechazar</button>`
+              }
+            </div>
+          </div>` : ''}
           ${handoff ? `
           <div style="grid-column: 1 / -1;">
             <div class="dg-label" style="color:#c62828;">Estado de Handoff Humano</div>
@@ -853,6 +883,24 @@ async function updateStatus(btn) {
     });
     if (!res.ok) { const t = await res.text(); alert('Error: ' + t); return; }
   } finally { btn.disabled = false; }
+  await load();
+}
+
+async function verifyPayment(orderId){
+  if (!confirm('Verificar el pago de este pedido?')) return;
+  const res = await fetch('/api/orders/' + orderId + '/verify-payment', {
+    method: 'PATCH', headers: adminHeaders()
+  });
+  if (!res.ok) { alert('Error verificando pago'); return; }
+  await load();
+}
+
+async function rejectPayment(orderId){
+  if (!confirm('Rechazar el comprobante de pago?')) return;
+  const res = await fetch('/api/orders/' + orderId + '/reject-payment', {
+    method: 'PATCH', headers: adminHeaders()
+  });
+  if (!res.ok) { alert('Error rechazando pago'); return; }
   await load();
 }
 

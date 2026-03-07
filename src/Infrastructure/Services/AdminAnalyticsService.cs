@@ -34,16 +34,51 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         }
 
         var orderRows = await orderQ
-            .Select(o => new { o.CheckoutCompleted, o.TotalAmount })
+            .Select(o => new { o.CheckoutCompleted, o.TotalAmount, o.CreatedAtUtc, o.PaymentProofMediaId, o.PaymentVerifiedAtUtc })
             .ToListAsync(ct);
 
-        var totalCustomers = await customerQ.CountAsync(ct);
+        var customers = await customerQ
+            .Select(c => new { c.OrdersCount })
+            .ToListAsync(ct);
+
+        var totalCustomers = customers.Count;
 
         var totalOrders = orderRows.Count;
         var completedOrders = orderRows.Count(o => o.CheckoutCompleted);
         var revenueRows = orderRows.Where(o => o.CheckoutCompleted).ToList();
         var totalRevenue = revenueRows.Sum(o => o.TotalAmount ?? 0m);
         var avgTicket = completedOrders == 0 ? 0m : Math.Round(totalRevenue / completedOrders, 2);
+
+        // Enhanced: today & this week
+        var todayStart = DateTime.UtcNow.Date;
+        var weekStart = DateTime.UtcNow.AddDays(-7);
+        var todayOrders = revenueRows.Where(o => o.CreatedAtUtc >= todayStart).ToList();
+        var weekOrders = revenueRows.Where(o => o.CreatedAtUtc >= weekStart).ToList();
+
+        // Top selling item
+        string? topItem = null;
+        if (businessId.HasValue)
+        {
+            var itemRows = await _db.OrderItems.AsNoTracking()
+                .Where(oi => oi.Order != null && oi.Order.BusinessId == businessId.Value)
+                .Select(oi => new { oi.Name, oi.Quantity })
+                .ToListAsync(ct);
+
+            topItem = itemRows
+                .Where(x => !string.IsNullOrWhiteSpace(x.Name) && x.Quantity > 0)
+                .GroupBy(x => x.Name!.Trim().ToLowerInvariant())
+                .OrderByDescending(g => g.Sum(x => x.Quantity))
+                .Select(g => g.Key)
+                .FirstOrDefault();
+        }
+
+        // Returning customers
+        var returningCount = customers.Count(c => c.OrdersCount > 1);
+        var returningPct = totalCustomers == 0 ? 0m : Math.Round((decimal)returningCount / totalCustomers * 100, 1);
+
+        // Payments pending verification
+        var paymentsPending = orderRows.Count(o =>
+            !string.IsNullOrWhiteSpace(o.PaymentProofMediaId) && o.PaymentVerifiedAtUtc == null);
 
         return new AnalyticsSummaryDto
         {
@@ -53,7 +88,13 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             TotalRevenue = totalRevenue,
             TotalCustomers = totalCustomers,
             UniqueCustomers = totalCustomers,
-            AverageTicket = avgTicket
+            AverageTicket = avgTicket,
+            OrdersToday = todayOrders.Count,
+            RevenueToday = todayOrders.Sum(o => o.TotalAmount ?? 0m),
+            OrdersThisWeek = weekOrders.Count,
+            ReturningCustomersPct = returningPct,
+            TopSellingItem = topItem,
+            PaymentsPendingVerification = paymentsPending
         };
     }
 
