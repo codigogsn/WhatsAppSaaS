@@ -246,6 +246,18 @@
           <label>Tel. Notificaciones</label>
           <input id="newBizNotifPhone" placeholder="Ej: +584141234567" />
         </div>
+        <div>
+          <label>Tipo de Restaurante</label>
+          <select id="newBizType">
+            <option value="">-- Sin plantilla --</option>
+            <option value="burger">Hamburguesas</option>
+            <option value="pizza">Pizzeria</option>
+            <option value="sushi">Sushi</option>
+            <option value="arepa">Arepera</option>
+            <option value="cafe">Cafeteria</option>
+          </select>
+          <small class="muted" id="newBizTypeDesc"></small>
+        </div>
       </div>
       <div class="biz-actions" style="margin-top:16px;">
         <button class="primary" onclick="submitCreateBiz()">Crear Negocio</button>
@@ -623,10 +635,17 @@ function openCreateBiz(){
   document.getElementById('createBizModal').classList.add('open');
   document.getElementById('createBizMsg').textContent = '';
   // Clear form
-  ['newBizName','newBizPhone','newBizToken','newBizGreeting','newBizAddress','newBizSchedule','newBizPmBank','newBizPmId','newBizPmPhone'].forEach(id => {
+  ['newBizName','newBizPhone','newBizToken','newBizGreeting','newBizAddress','newBizSchedule','newBizPmBank','newBizPmId','newBizPmPhone','newBizNotifPhone'].forEach(id => {
     document.getElementById(id).value = '';
   });
+  document.getElementById('newBizType').value = '';
+  document.getElementById('newBizTypeDesc').textContent = '';
 }
+// Template type descriptions
+document.getElementById('newBizType')?.addEventListener('change', function(){
+  const descs = {burger:'Menu con hamburguesas, papas y bebidas',pizza:'Pizzas, pastas y bebidas',sushi:'Rolls, nigiri y bebidas',arepa:'Arepas, empanadas y jugos',cafe:'Cafes, postres y snacks'};
+  document.getElementById('newBizTypeDesc').textContent = descs[this.value] || 'Categorias genericas (Combos, Bebidas, Extras)';
+});
 
 function closeCreateBiz(){
   document.getElementById('createBizModal').classList.remove('open');
@@ -649,6 +668,7 @@ async function submitCreateBiz(){
     paymentMobileId: document.getElementById('newBizPmId').value.trim() || null,
     paymentMobilePhone: document.getElementById('newBizPmPhone').value.trim() || null,
     notificationPhone: document.getElementById('newBizNotifPhone').value.trim() || null,
+    restaurantType: document.getElementById('newBizType').value || null,
   };
 
   document.getElementById('createBizMsg').innerHTML = '<span class="muted">Creando...</span>';

@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -74,6 +75,7 @@ public class AdminBusinessesController : ControllerBase
                 b.PaymentMobileId,
                 b.PaymentMobilePhone,
                 b.NotificationPhone,
+                b.RestaurantType,
                 b.CreatedAtUtc
             })
             .ToListAsync(ct);
@@ -102,6 +104,7 @@ public class AdminBusinessesController : ControllerBase
             biz.PaymentMobileId,
             biz.PaymentMobilePhone,
             biz.NotificationPhone,
+            biz.RestaurantType,
             biz.CreatedAtUtc
         });
     }
@@ -119,6 +122,14 @@ public class AdminBusinessesController : ControllerBase
         public string? PaymentMobileId { get; set; }
         public string? PaymentMobilePhone { get; set; }
         public string? NotificationPhone { get; set; }
+        public string? RestaurantType { get; set; }
+    }
+
+    // GET /api/admin/businesses/templates
+    [HttpGet("templates")]
+    public IActionResult ListTemplates()
+    {
+        return Ok(RestaurantTemplates.ListSummaries());
     }
 
     // POST /api/admin/businesses
@@ -155,22 +166,69 @@ public class AdminBusinessesController : ControllerBase
             PaymentMobileId = req.PaymentMobileId?.Trim(),
             PaymentMobilePhone = req.PaymentMobilePhone?.Trim(),
             NotificationPhone = req.NotificationPhone?.Trim(),
+            RestaurantType = req.RestaurantType?.Trim().ToLowerInvariant(),
             IsActive = true
         };
 
         _db.Businesses.Add(biz);
 
-        // Seed default menu categories
-        var defaultCategories = new[] { "Combos", "Bebidas", "Extras" };
-        for (var i = 0; i < defaultCategories.Length; i++)
+        // Seed menu from template (if provided) or use generic defaults
+        var template = RestaurantTemplates.Get(req.RestaurantType);
+        var categoryNames = new List<string>();
+
+        if (template is not null)
         {
-            _db.MenuCategories.Add(new MenuCategory
+            for (var i = 0; i < template.DefaultCategories.Count; i++)
             {
-                BusinessId = biz.Id,
-                Name = defaultCategories[i],
-                SortOrder = i,
-                IsActive = true
-            });
+                var tc = template.DefaultCategories[i];
+                var cat = new MenuCategory
+                {
+                    BusinessId = biz.Id,
+                    Name = tc.Name,
+                    SortOrder = i,
+                    IsActive = true
+                };
+                _db.MenuCategories.Add(cat);
+                categoryNames.Add(tc.Name);
+
+                for (var j = 0; j < tc.Items.Count; j++)
+                {
+                    var ti = tc.Items[j];
+                    var item = new MenuItem
+                    {
+                        CategoryId = cat.Id,
+                        Name = ti.Name,
+                        Price = ti.Price,
+                        IsAvailable = true,
+                        SortOrder = j
+                    };
+                    _db.MenuItems.Add(item);
+
+                    foreach (var alias in ti.Aliases)
+                    {
+                        _db.MenuItemAliases.Add(new MenuItemAlias
+                        {
+                            MenuItemId = item.Id,
+                            Alias = alias
+                        });
+                    }
+                }
+            }
+        }
+        else
+        {
+            var defaultCats = new[] { "Combos", "Bebidas", "Extras" };
+            for (var i = 0; i < defaultCats.Length; i++)
+            {
+                _db.MenuCategories.Add(new MenuCategory
+                {
+                    BusinessId = biz.Id,
+                    Name = defaultCats[i],
+                    SortOrder = i,
+                    IsActive = true
+                });
+                categoryNames.Add(defaultCats[i]);
+            }
         }
 
         await _db.SaveChangesAsync(ct);
@@ -185,8 +243,10 @@ public class AdminBusinessesController : ControllerBase
             biz.Greeting,
             biz.Schedule,
             biz.Address,
+            biz.RestaurantType,
             biz.CreatedAtUtc,
-            DefaultCategories = defaultCategories
+            DefaultCategories = categoryNames,
+            TemplateName = template?.Name
         });
     }
 

@@ -153,6 +153,9 @@ public class AppDbContext : DbContext
             b.Property(x => x.PaymentMobileId);
             b.Property(x => x.PaymentMobilePhone);
 
+            // Restaurant type template
+            b.Property(x => x.RestaurantType).HasMaxLength(50);
+
             // Notification
             b.Property(x => x.NotificationPhone).HasMaxLength(50);
 

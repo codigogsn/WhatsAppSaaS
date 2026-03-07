@@ -469,6 +469,7 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "Address" text""",
         """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "LogoUrl" text""",
         """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "NotificationPhone" character varying(50)""",
+        """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "RestaurantType" character varying(50)""",
     ];
     foreach (var sql in businessColumns)
     {
@@ -548,6 +549,7 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         "20260307184701_AddBusinessNotificationPhone",
         "20260307191229_AddPaymentProofFields",
         "20260307193423_AddBusinessUsers",
+        "20260307220000_AddRestaurantType",
     ];
     foreach (var mid in allMigrations)
     {

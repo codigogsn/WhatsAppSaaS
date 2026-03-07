@@ -30,6 +30,9 @@ public class Business
     // WhatsApp number to receive staff notifications (E.164 format, e.g. "+584141234567")
     public string? NotificationPhone { get; set; }
 
+    // Restaurant vertical template type (burger, pizza, sushi, arepa, cafe)
+    public string? RestaurantType { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
