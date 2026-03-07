@@ -121,6 +121,7 @@
       </div>
       <button class="primary" onclick="openCreateBiz()">+ Nuevo Negocio</button>
       <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
+      <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
       <span id="selectedBizStatus" class="small"></span>
     </div>
   </div>
@@ -250,6 +251,77 @@
         <button class="primary" onclick="submitCreateBiz()">Crear Negocio</button>
         <button onclick="closeCreateBiz()">Cancelar</button>
         <span id="createBizMsg" class="small"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- JWT Login Bar -->
+  <div id="loginBar" class="filters" style="display:none; margin-bottom:12px; border-left:3px solid #1a73e8;">
+    <div class="row" style="gap:10px;">
+      <span style="font-weight:600; font-size:13px;">Login Staff:</span>
+      <input id="loginEmail" placeholder="Email" style="width:180px;" />
+      <input id="loginPassword" type="password" placeholder="Password" style="width:140px;" />
+      <button class="primary" onclick="doLogin()">Entrar</button>
+      <span id="loginUser" class="small ok" style="font-weight:600;"></span>
+      <button id="btnLogout" onclick="doLogout()" style="display:none;">Salir</button>
+      <span id="loginMsg" class="small danger"></span>
+    </div>
+  </div>
+
+  <!-- Users Management Panel -->
+  <div id="usersPanel" class="biz-panel" style="display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h3>Usuarios del Negocio</h3>
+      <div class="row" style="gap:8px;">
+        <button class="primary" onclick="openCreateUser()">+ Nuevo Usuario</button>
+        <button onclick="toggleUsersPanel()" style="border:none; background:none; font-size:18px; cursor:pointer; color:#888;">&times;</button>
+      </div>
+    </div>
+    <table style="margin-top:0;">
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Email</th>
+          <th>Rol</th>
+          <th>Estado</th>
+          <th>Creado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="usersTbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Create User Modal -->
+  <div id="createUserModal" class="modal-overlay" onclick="if(event.target===this)closeCreateUser()">
+    <div class="modal">
+      <h3>Nuevo Usuario</h3>
+      <div class="form-grid">
+        <div>
+          <label>Nombre *</label>
+          <input id="newUserName" placeholder="Nombre completo" />
+        </div>
+        <div>
+          <label>Email *</label>
+          <input id="newUserEmail" type="email" placeholder="correo@ejemplo.com" />
+        </div>
+        <div>
+          <label>Password *</label>
+          <input id="newUserPassword" type="password" placeholder="Min 6 caracteres" />
+        </div>
+        <div>
+          <label>Rol</label>
+          <select id="newUserRole">
+            <option value="Operator">Operador</option>
+            <option value="Manager">Gerente</option>
+            <option value="Owner">Propietario</option>
+          </select>
+        </div>
+      </div>
+      <div class="biz-actions" style="margin-top:16px;">
+        <button class="primary" onclick="submitCreateUser()">Crear Usuario</button>
+        <button onclick="closeCreateUser()">Cancelar</button>
+        <span id="createUserMsg" class="small"></span>
       </div>
     </div>
   </div>
@@ -928,9 +1000,199 @@ async function downloadCustomersCsv(){
   document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
 }
 
+// ── JWT Auth ──
+function getJwt(){ return localStorage.getItem('JWT_TOKEN') || ''; }
+function getJwtUser(){ try { return JSON.parse(localStorage.getItem('JWT_USER') || 'null'); } catch { return null; } }
+
+function jwtHeaders(){
+  const h = {};
+  const jwt = getJwt();
+  if (jwt) h['Authorization'] = 'Bearer ' + jwt;
+  const key = getAdminKey();
+  if (key) h['X-Admin-Key'] = key;
+  return h;
+}
+
+async function doLogin(){
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if (!email || !password) { document.getElementById('loginMsg').textContent = 'Completa email y password'; return; }
+  document.getElementById('loginMsg').textContent = '';
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('loginMsg').textContent = err.error || 'Error de login';
+      return;
+    }
+    const data = await res.json();
+    localStorage.setItem('JWT_TOKEN', data.token);
+    localStorage.setItem('JWT_USER', JSON.stringify(data.user));
+    // Auto-select business
+    if (data.user.businessId) {
+      localStorage.setItem('BUSINESS_ID', data.user.businessId);
+    }
+    updateLoginUI();
+    await loadBusinesses();
+    load();
+  } catch(e) {
+    document.getElementById('loginMsg').textContent = e.message;
+  }
+}
+
+function doLogout(){
+  localStorage.removeItem('JWT_TOKEN');
+  localStorage.removeItem('JWT_USER');
+  updateLoginUI();
+}
+
+function updateLoginUI(){
+  const user = getJwtUser();
+  const loginBar = document.getElementById('loginBar');
+  loginBar.style.display = '';
+  if (user) {
+    document.getElementById('loginUser').textContent = user.name + ' (' + user.role + ') - ' + (user.businessName || '');
+    document.getElementById('btnLogout').style.display = '';
+    document.getElementById('loginEmail').style.display = 'none';
+    document.getElementById('loginPassword').style.display = 'none';
+    document.querySelector('#loginBar .primary').style.display = 'none';
+    document.getElementById('loginMsg').textContent = '';
+  } else {
+    document.getElementById('loginUser').textContent = '';
+    document.getElementById('btnLogout').style.display = 'none';
+    document.getElementById('loginEmail').style.display = '';
+    document.getElementById('loginPassword').style.display = '';
+    document.querySelector('#loginBar .primary').style.display = '';
+  }
+  updateUsersButton();
+}
+
+function updateUsersButton(){
+  const user = getJwtUser();
+  const btn = document.getElementById('btnUsersAdmin');
+  // Show users button if JWT user is Owner or Manager, or if global admin key
+  if (user && (user.role === 'Owner' || user.role === 'Manager')) {
+    btn.style.display = '';
+  } else {
+    btn.style.display = 'none';
+    document.getElementById('usersPanel').style.display = 'none';
+  }
+}
+
+// ── Users Panel ──
+async function toggleUsersPanel(){
+  const panel = document.getElementById('usersPanel');
+  if (panel.style.display === 'none') {
+    panel.style.display = '';
+    await loadUsers();
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+async function loadUsers(){
+  const tbody = document.getElementById('usersTbody');
+  tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
+  try {
+    const res = await fetch('/api/admin/users', { headers: jwtHeaders() });
+    if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" class="danger">Error cargando usuarios</td></tr>'; return; }
+    const users = await res.json();
+    if (users.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No hay usuarios</td></tr>'; return; }
+    tbody.innerHTML = '';
+    for (const u of users) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${esc(u.name)}</td>
+        <td>${esc(u.email)}</td>
+        <td><span class="pill pill-${u.role === 'Owner' ? 'Completed' : u.role === 'Manager' ? 'Preparing' : 'Pending'}">${esc(u.role)}</span></td>
+        <td>${u.isActive ? '<span class="pill pill-active">Activo</span>' : '<span class="pill pill-inactive">Inactivo</span>'}</td>
+        <td class="small muted">${fmtDate(u.createdAtUtc)}</td>
+        <td>
+          <select data-uid="${esc(u.id)}" class="user-role-sel">
+            <option value="Operator" ${u.role==='Operator'?'selected':''}>Operador</option>
+            <option value="Manager" ${u.role==='Manager'?'selected':''}>Gerente</option>
+            <option value="Owner" ${u.role==='Owner'?'selected':''}>Propietario</option>
+          </select>
+          <button onclick="updateUserRole(this)" class="small">Rol</button>
+          <button onclick="toggleUserActive('${esc(u.id)}', ${!u.isActive})" class="small ${u.isActive ? 'warn' : 'success'}">${u.isActive ? 'Desact.' : 'Activar'}</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    }
+  } catch(e) {
+    tbody.innerHTML = '<tr><td colspan="6" class="danger">' + esc(e.message) + '</td></tr>';
+  }
+}
+
+async function updateUserRole(btn){
+  const sel = btn.parentElement.querySelector('.user-role-sel');
+  const uid = sel.getAttribute('data-uid');
+  const role = sel.value;
+  try {
+    const res = await fetch('/api/admin/users/' + uid, {
+      method: 'PATCH',
+      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role })
+    });
+    if (!res.ok) { alert('Error actualizando rol'); return; }
+    await loadUsers();
+  } catch(e) { alert(e.message); }
+}
+
+async function toggleUserActive(uid, newActive){
+  try {
+    const res = await fetch('/api/admin/users/' + uid, {
+      method: 'PATCH',
+      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isActive: newActive })
+    });
+    if (!res.ok) { alert('Error cambiando estado'); return; }
+    await loadUsers();
+  } catch(e) { alert(e.message); }
+}
+
+function openCreateUser(){
+  document.getElementById('createUserModal').classList.add('open');
+  document.getElementById('createUserMsg').textContent = '';
+  ['newUserName','newUserEmail','newUserPassword'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('newUserRole').value = 'Operator';
+}
+function closeCreateUser(){ document.getElementById('createUserModal').classList.remove('open'); }
+
+async function submitCreateUser(){
+  const name = document.getElementById('newUserName').value.trim();
+  const email = document.getElementById('newUserEmail').value.trim();
+  const password = document.getElementById('newUserPassword').value;
+  const role = document.getElementById('newUserRole').value;
+  if (!name || !email || !password) { document.getElementById('createUserMsg').innerHTML = '<span class="danger">Todos los campos son requeridos</span>'; return; }
+  if (password.length < 6) { document.getElementById('createUserMsg').innerHTML = '<span class="danger">Password min 6 caracteres</span>'; return; }
+  document.getElementById('createUserMsg').innerHTML = '<span class="muted">Creando...</span>';
+  try {
+    const res = await fetch('/api/admin/users', {
+      method: 'POST',
+      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, password, role })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('createUserMsg').innerHTML = '<span class="danger">' + esc(err.error || 'Error') + '</span>';
+      return;
+    }
+    document.getElementById('createUserMsg').innerHTML = '<span class="ok">Usuario creado</span>';
+    setTimeout(() => { closeCreateUser(); loadUsers(); }, 1500);
+  } catch(e) {
+    document.getElementById('createUserMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
+  }
+}
+
 // Init
 document.getElementById('baseUrl').textContent = location.origin;
 document.getElementById('adminKey').value = getAdminKey();
+updateLoginUI();
 
 // Set default date filter to today
 const today = new Date().toISOString().slice(0,10);

@@ -1,9 +1,11 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.RateLimiting;
 using FluentValidation;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.RateLimiting;
@@ -11,8 +13,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using WhatsAppSaaS.Api.Extensions;
+using WhatsAppSaaS.Api.Services;
 using WhatsAppSaaS.Application.Validators;
 using WhatsAppSaaS.Infrastructure.Extensions;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -93,6 +97,41 @@ try
     builder.Services.AddInfrastructure(builder.Configuration);
     builder.Services.AddHealthChecks();
     builder.Services.AddHostedService<WhatsAppSaaS.Api.Services.ConversationCleanupService>();
+
+    // ────────────────────────────────────────
+    // JWT Authentication
+    // ────────────────────────────────────────
+    var jwtSecret = builder.Configuration["Jwt:Secret"]
+                    ?? Environment.GetEnvironmentVariable("JWT_SECRET")
+                    ?? "";
+    if (!string.IsNullOrWhiteSpace(jwtSecret))
+    {
+        var jwtService = new JwtService(builder.Configuration);
+        builder.Services.AddSingleton(jwtService);
+
+        builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer(o =>
+            {
+                o.TokenValidationParameters = new TokenValidationParameters
+                {
+                    ValidateIssuer = true,
+                    ValidateAudience = true,
+                    ValidateLifetime = true,
+                    ValidateIssuerSigningKey = true,
+                    ValidIssuer = jwtService.Issuer,
+                    ValidAudience = jwtService.Issuer,
+                    IssuerSigningKey = jwtService.GetSigningKey()
+                };
+            });
+    }
+    else
+    {
+        // Fallback: register JwtService that will fail at login time, not at startup
+        builder.Services.AddSingleton<JwtService>();
+        builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+            .AddJwtBearer();
+    }
+    builder.Services.AddAuthorization();
 
     // ────────────────────────────────────────
     // Rate limiting
@@ -192,6 +231,9 @@ try
 
     app.UseDefaultFiles();
     app.UseStaticFiles();
+
+    app.UseAuthentication();
+    app.UseAuthorization();
 
     app.MapControllers();
     app.MapHealthChecks("/health");
@@ -454,6 +496,10 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_MenuItems_CategoryId" ON "MenuItems" ("CategoryId")""");
     ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_MenuItemAliases_MenuItemId" ON "MenuItemAliases" ("MenuItemId")""");
 
+    // ── BusinessUsers table ──
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "BusinessUsers" ("Id" uuid NOT NULL PRIMARY KEY, "BusinessId" uuid NOT NULL REFERENCES "Businesses"("Id") ON DELETE CASCADE, "Name" text NOT NULL, "Email" text NOT NULL, "PasswordHash" text NOT NULL, "Role" text NOT NULL DEFAULT 'Operator', "IsActive" boolean NOT NULL DEFAULT true, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
+    ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_BusinessUsers_BusinessId_Email" ON "BusinessUsers" ("BusinessId", "Email")""");
+
     // ── Boolean column repair ──
     string[] boolRepairs =
     [
@@ -501,6 +547,7 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         "20260307182204_AddCustomerLastDeliveryAddress",
         "20260307184701_AddBusinessNotificationPhone",
         "20260307191229_AddPaymentProofFields",
+        "20260307193423_AddBusinessUsers",
     ];
     foreach (var mid in allMigrations)
     {

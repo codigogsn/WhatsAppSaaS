@@ -17,6 +17,7 @@ public class AppDbContext : DbContext
     public DbSet<MenuCategory> MenuCategories => Set<MenuCategory>();
     public DbSet<MenuItem> MenuItems => Set<MenuItem>();
     public DbSet<MenuItemAlias> MenuItemAliases => Set<MenuItemAlias>();
+    public DbSet<BusinessUser> BusinessUsers => Set<BusinessUser>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -211,6 +212,25 @@ public class AppDbContext : DbContext
             b.Property(x => x.Alias).IsRequired().HasMaxLength(200);
 
             b.HasIndex(x => x.MenuItemId);
+        });
+
+        modelBuilder.Entity<BusinessUser>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.BusinessId);
+            b.Property(x => x.Name).IsRequired().HasMaxLength(200);
+            b.Property(x => x.Email).IsRequired().HasMaxLength(320);
+            b.Property(x => x.PasswordHash).IsRequired();
+            b.Property(x => x.Role).IsRequired().HasMaxLength(50);
+            b.Property(x => x.IsActive).IsRequired();
+            b.Property(x => x.CreatedAtUtc).IsRequired();
+
+            b.HasOne(x => x.Business)
+                .WithMany()
+                .HasForeignKey(x => x.BusinessId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasIndex(x => new { x.BusinessId, x.Email }).IsUnique();
         });
 
         modelBuilder.Entity<ConversationState>(b =>
