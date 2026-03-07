@@ -21,6 +21,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly IOrderRepository _orderRepository;
     private readonly IConversationStateStore _stateStore;
     private readonly IMenuRepository? _menuRepository;
+    private readonly INotificationService? _notificationService;
     private readonly ILogger<WebhookProcessor> _logger;
     private readonly PaymentMobileOptions _paymentMobile;
 
@@ -31,13 +32,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
         IConversationStateStore stateStore,
         ILogger<WebhookProcessor> logger,
         PaymentMobileOptions? paymentMobile = null,
-        IMenuRepository? menuRepository = null)
+        IMenuRepository? menuRepository = null,
+        INotificationService? notificationService = null)
     {
         _aiParser = aiParser;
         _whatsAppClient = whatsAppClient;
         _orderRepository = orderRepository;
         _stateStore = stateStore;
         _menuRepository = menuRepository;
+        _notificationService = notificationService;
         _logger = logger;
         _paymentMobile = paymentMobile ?? new PaymentMobileOptions();
     }
@@ -158,6 +161,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                        // Notify staff
+                        if (_notificationService is not null)
+                            await _notificationService.NotifyHumanHandoffAsync(businessContext, message.From, cancellationToken);
+
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
@@ -176,6 +183,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            // Notify staff on first follow-up only (count == 2)
+                            if (_notificationService is not null && state.HumanHandoffNotifiedCount == 2)
+                                await _notificationService.NotifyCustomerWaitingAsync(businessContext, message.From, cancellationToken);
                         }
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
@@ -215,7 +226,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // A) Confirmar
                     if (IsConfirmCommand(t))
                     {
-                        var confirmReply = await FinalizeOrderIfPossibleAsync(state, message.From, phoneNumberId, businessContext.BusinessId, cancellationToken);
+                        var confirmReply = await FinalizeOrderIfPossibleAsync(state, message.From, phoneNumberId, businessContext, cancellationToken);
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -696,9 +707,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
         ConversationFields state,
         string from,
         string phoneNumberId,
-        Guid businessId,
+        BusinessContext businessContext,
         CancellationToken ct)
     {
+        var businessId = businessContext.BusinessId;
+
         if (state.Items.Count == 0)
             return Msg.EmptyOrder;
 
@@ -751,6 +764,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
         order.RecalculateTotal();
 
         await _orderRepository.AddOrderAsync(order, ct);
+
+        // Staff notification: order confirmed
+        if (_notificationService is not null)
+        {
+            var itemsSummary = string.Join(", ", state.Items.Select(i => $"{i.Quantity} {i.Name}"));
+            var totalText = order.TotalAmount.HasValue ? $"${order.TotalAmount:0.00}" : "N/A";
+            await _notificationService.NotifyOrderConfirmedAsync(
+                businessContext, state.CustomerName ?? "?", itemsSummary, totalText, ct);
+        }
 
         var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
 

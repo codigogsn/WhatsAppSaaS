@@ -64,6 +64,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
         services.AddScoped<IBotService, BotService>();
+        services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IWebhookProcessor, WebhookProcessor>();
 
         return services;

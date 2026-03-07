@@ -146,6 +146,9 @@ public class AppDbContext : DbContext
             b.Property(x => x.PaymentMobileId);
             b.Property(x => x.PaymentMobilePhone);
 
+            // Notification
+            b.Property(x => x.NotificationPhone).HasMaxLength(50);
+
             b.Property(x => x.IsActive)
                 .IsRequired();
 

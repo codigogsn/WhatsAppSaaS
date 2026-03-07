@@ -257,6 +257,30 @@ internal static class Msg
         => $"\ud83c\udfe1 Tu ultima direccion fue:\n_{address}_\n\n"
          + "\u00bfDeseas usar esta misma direccion? Responde *SI* o envia una nueva.";
 
+    // ── Staff notifications ──
+
+    internal static string NotifyNewOrder(string customerName, string customerPhone, string total)
+        => "\ud83d\udd14 *Nuevo pedido recibido*\n\n"
+         + $"Cliente: {customerName}\n"
+         + $"Tel\u00e9fono: {customerPhone}\n"
+         + $"Total: {total}\n\n"
+         + "Ver en dashboard para detalles.";
+
+    internal static string NotifyOrderConfirmed(string customerName, string itemsSummary, string total)
+        => "\u2705 *Pedido confirmado*\n\n"
+         + $"Cliente: {customerName}\n"
+         + $"Items: {itemsSummary}\n"
+         + $"Total: {total}";
+
+    internal static string NotifyHumanHandoff(string customerPhone)
+        => "\u26a0\ufe0f *Cliente solicita atenci\u00f3n humana*\n\n"
+         + $"Cliente: {customerPhone}\n\n"
+         + "Ver conversaci\u00f3n en dashboard.";
+
+    internal static string NotifyCustomerWaiting(string customerPhone)
+        => "\u23f3 *Cliente esperando respuesta humana*\n\n"
+         + $"Cliente: {customerPhone}";
+
     // ── Payment text for receipt ──
 
     internal static string PaymentMethodText(string? method)

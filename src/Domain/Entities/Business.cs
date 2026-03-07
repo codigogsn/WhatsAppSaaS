@@ -27,6 +27,9 @@ public class Business
     public string? PaymentMobileId { get; set; }
     public string? PaymentMobilePhone { get; set; }
 
+    // WhatsApp number to receive staff notifications (E.164 format, e.g. "+584141234567")
+    public string? NotificationPhone { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

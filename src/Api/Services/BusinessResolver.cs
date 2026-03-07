@@ -82,7 +82,7 @@ public class BusinessResolver : IBusinessResolver
 
         return new BusinessContext(biz.Id, biz.PhoneNumberId, biz.AccessToken, biz.Name,
             biz.Greeting, biz.Schedule, biz.Address, biz.LogoUrl,
-            biz.PaymentMobileBank, biz.PaymentMobileId, biz.PaymentMobilePhone);
+            biz.PaymentMobileBank, biz.PaymentMobileId, biz.PaymentMobilePhone, biz.NotificationPhone);
     }
 
     private async Task<BusinessContext?> FindByPhoneNumberIdAsync(string id, CancellationToken ct)
@@ -97,7 +97,7 @@ public class BusinessResolver : IBusinessResolver
         cmd.CommandText = """
             SELECT "Id", "PhoneNumberId", "AccessToken", "Name",
                    "PaymentMobileBank", "PaymentMobileId", "PaymentMobilePhone",
-                   "Greeting", "Schedule", "Address", "LogoUrl"
+                   "Greeting", "Schedule", "Address", "LogoUrl", "NotificationPhone"
             FROM "Businesses"
             WHERE "PhoneNumberId" = @pid AND "IsActive" = true
             LIMIT 1
@@ -129,9 +129,10 @@ public class BusinessResolver : IBusinessResolver
         var schedule = reader.IsDBNull(8) ? null : reader.GetString(8);
         var address = reader.IsDBNull(9) ? null : reader.GetString(9);
         var logoUrl = reader.IsDBNull(10) ? null : reader.GetString(10);
+        var notificationPhone = reader.IsDBNull(11) ? null : reader.GetString(11);
 
         return new BusinessContext(bizId, bizPhone, bizToken, bizName,
-            greeting, schedule, address, logoUrl, pmBank, pmId, pmPhone);
+            greeting, schedule, address, logoUrl, pmBank, pmId, pmPhone, notificationPhone);
     }
 
     public static string? EnvResolve(params string[] keys)

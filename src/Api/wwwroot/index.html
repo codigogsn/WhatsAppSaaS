@@ -182,6 +182,15 @@
       </div>
     </div>
 
+    <div class="biz-section">
+      <h4>Notificaciones al Staff</h4>
+      <div>
+        <label>Numero WhatsApp para notificaciones</label>
+        <input id="bizNotifPhone" placeholder="Ej: +584141234567 (formato E.164)" />
+        <small class="muted">Recibira alertas de pedidos nuevos y solicitudes de atencion humana</small>
+      </div>
+    </div>
+
     <div class="biz-actions">
       <button class="success" onclick="saveBizProfile()">Guardar Cambios</button>
       <button id="btnToggleActive" onclick="toggleBizActive()">Desactivar</button>
@@ -231,6 +240,10 @@
         <div>
           <label>Tel. Pago Movil</label>
           <input id="newBizPmPhone" placeholder="Ej: 0414-1234567" />
+        </div>
+        <div>
+          <label>Tel. Notificaciones</label>
+          <input id="newBizNotifPhone" placeholder="Ej: +584141234567" />
         </div>
       </div>
       <div class="biz-actions" style="margin-top:16px;">
@@ -443,6 +456,7 @@ async function loadBizProfile(bizId){
     document.getElementById('bizPmBank').value = b.paymentMobileBank || '';
     document.getElementById('bizPmId').value = b.paymentMobileId || '';
     document.getElementById('bizPmPhone').value = b.paymentMobilePhone || '';
+    document.getElementById('bizNotifPhone').value = b.notificationPhone || '';
     document.getElementById('bizSaveMsg').textContent = '';
 
     // Show admin key hint
@@ -475,6 +489,7 @@ async function saveBizProfile(){
     paymentMobileBank: document.getElementById('bizPmBank').value.trim() || null,
     paymentMobileId: document.getElementById('bizPmId').value.trim() || null,
     paymentMobilePhone: document.getElementById('bizPmPhone').value.trim() || null,
+    notificationPhone: document.getElementById('bizNotifPhone').value.trim() || null,
   };
   try {
     const res = await fetch('/api/admin/businesses/' + bid, {
@@ -545,6 +560,7 @@ async function submitCreateBiz(){
     paymentMobileBank: document.getElementById('newBizPmBank').value.trim() || null,
     paymentMobileId: document.getElementById('newBizPmId').value.trim() || null,
     paymentMobilePhone: document.getElementById('newBizPmPhone').value.trim() || null,
+    notificationPhone: document.getElementById('newBizNotifPhone').value.trim() || null,
   };
 
   document.getElementById('createBizMsg').innerHTML = '<span class="muted">Creando...</span>';

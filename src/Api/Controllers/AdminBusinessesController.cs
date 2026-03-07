@@ -73,6 +73,7 @@ public class AdminBusinessesController : ControllerBase
                 b.PaymentMobileBank,
                 b.PaymentMobileId,
                 b.PaymentMobilePhone,
+                b.NotificationPhone,
                 b.CreatedAtUtc
             })
             .ToListAsync(ct);
@@ -100,6 +101,7 @@ public class AdminBusinessesController : ControllerBase
             biz.PaymentMobileBank,
             biz.PaymentMobileId,
             biz.PaymentMobilePhone,
+            biz.NotificationPhone,
             biz.CreatedAtUtc
         });
     }
@@ -116,6 +118,7 @@ public class AdminBusinessesController : ControllerBase
         public string? PaymentMobileBank { get; set; }
         public string? PaymentMobileId { get; set; }
         public string? PaymentMobilePhone { get; set; }
+        public string? NotificationPhone { get; set; }
     }
 
     // POST /api/admin/businesses
@@ -151,6 +154,7 @@ public class AdminBusinessesController : ControllerBase
             PaymentMobileBank = req.PaymentMobileBank?.Trim(),
             PaymentMobileId = req.PaymentMobileId?.Trim(),
             PaymentMobilePhone = req.PaymentMobilePhone?.Trim(),
+            NotificationPhone = req.NotificationPhone?.Trim(),
             IsActive = true
         };
 
@@ -196,6 +200,7 @@ public class AdminBusinessesController : ControllerBase
         public string? PaymentMobileBank { get; set; }
         public string? PaymentMobileId { get; set; }
         public string? PaymentMobilePhone { get; set; }
+        public string? NotificationPhone { get; set; }
     }
 
     // PUT /api/admin/businesses/{id}
@@ -213,6 +218,7 @@ public class AdminBusinessesController : ControllerBase
         biz.PaymentMobileBank = req.PaymentMobileBank?.Trim();
         biz.PaymentMobileId = req.PaymentMobileId?.Trim();
         biz.PaymentMobilePhone = req.PaymentMobilePhone?.Trim();
+        biz.NotificationPhone = req.NotificationPhone?.Trim();
 
         await _db.SaveChangesAsync(ct);
 
@@ -226,7 +232,8 @@ public class AdminBusinessesController : ControllerBase
             biz.LogoUrl,
             biz.PaymentMobileBank,
             biz.PaymentMobileId,
-            biz.PaymentMobilePhone
+            biz.PaymentMobilePhone,
+            biz.NotificationPhone
         });
     }
 
