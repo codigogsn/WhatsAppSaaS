@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,12 +20,14 @@ public sealed class OrdersController : ControllerBase
     private readonly AppDbContext _context;
     private readonly IWhatsAppClient _whatsAppClient;
     private readonly ILogger<OrdersController> _logger;
+    private readonly IConfiguration _config;
 
-    public OrdersController(AppDbContext context, IWhatsAppClient whatsAppClient, ILogger<OrdersController> logger)
+    public OrdersController(AppDbContext context, IWhatsAppClient whatsAppClient, ILogger<OrdersController> logger, IConfiguration config)
     {
         _context = context;
         _whatsAppClient = whatsAppClient;
         _logger = logger;
+        _config = config;
     }
 
     // GET /api/orders?take=50&status=Pending&businessId=xxx
@@ -349,6 +353,61 @@ public sealed class OrdersController : ControllerBase
         }
 
         return Ok(new { success = true, id = order.Id, paymentRejected = true });
+    }
+
+    // GET /api/orders/{id}/payment-proof
+    [HttpGet("{id:guid}/payment-proof")]
+    public async Task<IActionResult> GetPaymentProof(Guid id, CancellationToken ct)
+    {
+        if (!IsAdmin())
+            return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
+
+        var order = await _context.Orders.AsNoTracking()
+            .Where(o => o.Id == id)
+            .Select(o => new { o.PaymentProofMediaId, o.BusinessId })
+            .SingleOrDefaultAsync(ct);
+
+        if (order is null)
+            return NotFound(new { error = "Order not found" });
+
+        if (string.IsNullOrWhiteSpace(order.PaymentProofMediaId))
+            return NotFound(new { error = "No payment proof on this order" });
+
+        // Tenant isolation: resolve business access token
+        string? bizToken = null;
+        if (order.BusinessId.HasValue)
+        {
+            var biz = await _context.Businesses.AsNoTracking()
+                .Where(b => b.Id == order.BusinessId.Value && b.IsActive)
+                .Select(b => new { b.AccessToken })
+                .FirstOrDefaultAsync(ct);
+            bizToken = biz?.AccessToken;
+        }
+
+        var result = await _whatsAppClient.GetMediaAsync(order.PaymentProofMediaId, bizToken, ct);
+        if (result is null)
+            return StatusCode(502, new { error = "Could not retrieve media from WhatsApp. The proof may have expired." });
+
+        // Only allow safe content types
+        var allowedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "image/jpeg", "image/png", "image/webp",
+            "application/pdf", "image/gif"
+        };
+        var contentType = allowedTypes.Contains(result.ContentType) ? result.ContentType : "application/octet-stream";
+
+        Response.Headers["Cache-Control"] = "private, max-age=300";
+        return File(result.Data, contentType);
+    }
+
+    private bool IsAdmin()
+    {
+        var adminKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
+        if (string.IsNullOrWhiteSpace(adminKey)) return false;
+        if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey)) return false;
+        return CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(headerKey.ToString()),
+            Encoding.UTF8.GetBytes(adminKey));
     }
 
     private static (bool shouldNotify, string message) MapStatusToMessage(string status)

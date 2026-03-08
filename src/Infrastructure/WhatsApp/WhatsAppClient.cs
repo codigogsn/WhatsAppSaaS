@@ -112,4 +112,70 @@ public sealed class WhatsAppClient : IWhatsAppClient
             return false;
         }
     }
+
+    public async Task<MediaDownloadResult?> GetMediaAsync(string mediaId, string? accessToken = null, CancellationToken cancellationToken = default)
+    {
+        // Resolve token
+        var token = accessToken;
+        if (string.IsNullOrWhiteSpace(token))
+            token = Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN")
+                    ?? Environment.GetEnvironmentVariable("META_ACCESS_TOKEN");
+        if (string.IsNullOrWhiteSpace(token))
+            token = _options.AccessToken;
+        if (string.IsNullOrWhiteSpace(token) || token == "your-access-token-here")
+        {
+            _logger.LogWarning("GetMediaAsync skipped: no valid AccessToken configured.");
+            return null;
+        }
+
+        try
+        {
+            // Step 1: Get media URL from Graph API
+            var metaUrl = $"https://graph.facebook.com/{_options.ApiVersion}/{mediaId}";
+            using var metaReq = new HttpRequestMessage(HttpMethod.Get, metaUrl);
+            metaReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+            using var metaRes = await _httpClient.SendAsync(metaReq, cancellationToken);
+            if (!metaRes.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("GetMediaAsync: metadata request failed for {MediaId}, status {Status}",
+                    mediaId, (int)metaRes.StatusCode);
+                return null;
+            }
+
+            var metaJson = await metaRes.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
+            if (!metaJson.TryGetProperty("url", out var urlProp))
+            {
+                _logger.LogWarning("GetMediaAsync: no 'url' in metadata for {MediaId}", mediaId);
+                return null;
+            }
+            var downloadUrl = urlProp.GetString();
+            if (string.IsNullOrWhiteSpace(downloadUrl)) return null;
+
+            // Step 2: Download binary from the media URL
+            using var dlReq = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
+            dlReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+            using var dlRes = await _httpClient.SendAsync(dlReq, cancellationToken);
+            if (!dlRes.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("GetMediaAsync: download failed for {MediaId}, status {Status}",
+                    mediaId, (int)dlRes.StatusCode);
+                return null;
+            }
+
+            var contentType = dlRes.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
+            var data = await dlRes.Content.ReadAsByteArrayAsync(cancellationToken);
+
+            _logger.LogInformation("GetMediaAsync: downloaded {Bytes} bytes for {MediaId}, type {ContentType}",
+                data.Length, mediaId, contentType);
+
+            return new MediaDownloadResult(data, contentType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GetMediaAsync failed for {MediaId}", mediaId);
+            return null;
+        }
+    }
 }

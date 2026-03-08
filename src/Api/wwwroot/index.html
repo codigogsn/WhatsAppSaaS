@@ -84,6 +84,17 @@
     .modal .form-grid input, .modal .form-grid textarea { width: 100%; }
     .modal .form-grid .full { grid-column: 1 / -1; }
 
+    /* Proof preview modal */
+    .proof-modal { max-width:720px; }
+    .proof-modal img { max-width:100%; max-height:70vh; border-radius:6px; display:block; margin:0 auto; }
+    .proof-modal .proof-error { background:#fff3e0; color:#e65100; padding:16px; border-radius:6px; text-align:center; }
+    .proof-modal .proof-loading { text-align:center; padding:40px; color:#888; }
+    .proof-badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:11px; font-weight:600; }
+    .proof-badge-img { background:#e3f2fd; color:#1565c0; }
+    .proof-badge-doc { background:#fce4ec; color:#c62828; }
+    .proof-badge-pending { background:#fff3e0; color:#e65100; }
+    .proof-badge-verified { background:#e8f5e9; color:#2e7d32; }
+
     /* Business selector enhanced */
     .biz-selector-area { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .biz-selector-area select { min-width: 240px; font-weight: 600; font-size: 14px; padding: 8px 10px; border: 2px solid #1a73e8; border-radius: 6px; background: #fff; }
@@ -950,14 +961,25 @@ async function load(auto=false) {
           </div>
           ${o.paymentProofMediaId ? `
           <div style="grid-column: 1 / -1;">
-            <div class="dg-label" style="color:#e65100;">Comprobante de Pago</div>
+            <div class="dg-label" style="color:#e65100;">Comprobante de Pago
+              <span class="proof-badge ${o.paymentVerifiedAtUtc ? 'proof-badge-verified' : 'proof-badge-pending'}" style="margin-left:6px;">
+                ${o.paymentVerifiedAtUtc ? 'VERIFICADO' : 'PENDIENTE'}
+              </span>
+            </div>
             <div class="dg-value" style="background:#fff3e0; padding:10px 12px; border-radius:4px;">
-              <b>Media ID:</b> <code>${esc(o.paymentProofMediaId)}</code><br/>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                <button onclick="event.stopPropagation();showProofPreview('${esc(o.id)}')" style="background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:600;">
+                  Ver Comprobante
+                </button>
+                <a href="#" onclick="event.stopPropagation();event.preventDefault();openProofNewTab('${esc(o.id)}')" style="font-size:12px;color:#1a73e8;">Abrir en pestana nueva</a>
+              </div>
               <span class="small muted">Enviado: ${o.paymentProofSubmittedAtUtc ? new Date(o.paymentProofSubmittedAtUtc).toLocaleString('es-VE') : '-'}</span><br/>
               ${o.paymentVerifiedAtUtc
                 ? '<span style="color:#2e7d32;"><b>VERIFICADO</b> ' + new Date(o.paymentVerifiedAtUtc).toLocaleString('es-VE') + ' por ' + esc(o.paymentVerifiedBy) + '</span>'
-                : `<button onclick="event.stopPropagation();verifyPayment('${esc(o.id)}')" style="margin-top:6px;background:#2e7d32;color:#fff;border-color:#2e7d32;">Verificar Pago</button>
-                   <button onclick="event.stopPropagation();rejectPayment('${esc(o.id)}')" style="margin-top:6px;margin-left:4px;background:#c62828;color:#fff;border-color:#c62828;">Rechazar</button>`
+                : `<div style="margin-top:6px;">
+                     <button onclick="event.stopPropagation();verifyPayment('${esc(o.id)}')" style="background:#2e7d32;color:#fff;border-color:#2e7d32;">Verificar Pago</button>
+                     <button onclick="event.stopPropagation();rejectPayment('${esc(o.id)}')" style="margin-left:4px;background:#c62828;color:#fff;border-color:#c62828;">Rechazar</button>
+                   </div>`
               }
             </div>
           </div>` : ''}
@@ -1012,6 +1034,84 @@ async function rejectPayment(orderId){
   });
   if (!res.ok) { alert('Error rechazando pago'); return; }
   await load();
+}
+
+let _proofOrderId = null;
+
+async function showProofPreview(orderId){
+  _proofOrderId = orderId;
+  const overlay = document.getElementById('proofOverlay');
+  const content = document.getElementById('proofContent');
+  const actions = document.getElementById('proofActions');
+  content.innerHTML = '<div class="proof-loading">Cargando comprobante...</div>';
+  actions.style.display = 'none';
+  overlay.classList.add('open');
+
+  try {
+    const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: adminHeaders() });
+    if (!res.ok) {
+      const errText = res.status === 502
+        ? 'No se pudo obtener el comprobante de WhatsApp. El archivo puede haber expirado (los medios de WhatsApp expiran despues de 30 dias).'
+        : res.status === 401 ? 'No autorizado. Configura tu Admin Key.'
+        : res.status === 404 ? 'No hay comprobante de pago asociado a este pedido.'
+        : 'Error obteniendo comprobante: ' + res.status;
+      content.innerHTML = '<div class="proof-error">' + esc(errText) + '</div>';
+      return;
+    }
+
+    const ct = res.headers.get('content-type') || '';
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+
+    if (ct.startsWith('image/')) {
+      content.innerHTML = '<img src="' + url + '" alt="Comprobante de pago" />';
+    } else if (ct === 'application/pdf') {
+      content.innerHTML = '<div style="text-align:center;padding:20px;">'
+        + '<p>Documento PDF recibido</p>'
+        + '<a href="' + url + '" target="_blank" style="display:inline-block;padding:10px 20px;background:#1a73e8;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;">Abrir PDF</a>'
+        + '</div>';
+    } else {
+      content.innerHTML = '<div style="text-align:center;padding:20px;">'
+        + '<p>Archivo recibido (' + esc(ct) + ')</p>'
+        + '<a href="' + url + '" download style="display:inline-block;padding:10px 20px;background:#1a73e8;color:#fff;border-radius:6px;text-decoration:none;font-weight:600;">Descargar</a>'
+        + '</div>';
+    }
+
+    // Show verify/reject actions in modal
+    actions.style.display = 'flex';
+    actions.innerHTML = '<button onclick="verifyFromModal()" style="background:#2e7d32;color:#fff;border-color:#2e7d32;font-weight:600;">Verificar Pago</button>'
+      + '<button onclick="rejectFromModal()" style="background:#c62828;color:#fff;border-color:#c62828;">Rechazar</button>';
+
+  } catch(e) {
+    content.innerHTML = '<div class="proof-error">Error de red al obtener el comprobante.</div>';
+  }
+}
+
+function closeProofModal(){
+  document.getElementById('proofOverlay').classList.remove('open');
+  _proofOrderId = null;
+}
+
+async function verifyFromModal(){
+  if (!_proofOrderId || !confirm('Verificar el pago de este pedido?')) return;
+  await verifyPayment(_proofOrderId);
+  closeProofModal();
+}
+
+async function rejectFromModal(){
+  if (!_proofOrderId || !confirm('Rechazar el comprobante de pago?')) return;
+  await rejectPayment(_proofOrderId);
+  closeProofModal();
+}
+
+async function openProofNewTab(orderId){
+  try {
+    const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: adminHeaders() });
+    if (!res.ok) { alert('Error obteniendo comprobante: ' + res.status); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank');
+  } catch(e) { alert('Error de red al obtener el comprobante.'); }
 }
 
 async function downloadOrdersCsv(){
@@ -1239,5 +1339,18 @@ document.getElementById('dateFrom').value = today;
 // Load businesses then orders
 loadBusinesses().then(() => load());
 </script>
+<!-- Payment Proof Preview Modal -->
+<div class="modal-overlay" id="proofOverlay" onclick="closeProofModal()">
+  <div class="modal proof-modal" onclick="event.stopPropagation()">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3 style="margin:0;">Comprobante de Pago</h3>
+      <button onclick="closeProofModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>
+    </div>
+    <div id="proofContent">
+      <div class="proof-loading">Cargando comprobante...</div>
+    </div>
+    <div id="proofActions" style="display:none;margin-top:12px;display:flex;gap:8px;justify-content:flex-end;"></div>
+  </div>
+</div>
 </body>
 </html>
