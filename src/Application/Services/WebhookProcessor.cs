@@ -247,63 +247,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // A1) Suggestion acceptance/decline
-                    if (state.UpsellSent && !string.IsNullOrWhiteSpace(state.LastSuggestedItem))
-                    {
-                        if (IsSuggestionAcceptance(t))
-                        {
-                            // Add suggested item to cart
-                            AddOrIncreaseItem(state, state.LastSuggestedItem, 1);
-                            if (state.AddonSuggestionSent)
-                                state.UpsellAcceptedCount++;
-                            if (state.ComboSuggestionSent)
-                                state.ComboAcceptedCount++;
-
-                            var acceptReply = Msg.SuggestionAccepted(state.LastSuggestedItem);
-                            state.LastSuggestedItem = null;
-
-                            // Continue to next flow step
-                            acceptReply += "\n\n" + BuildOrderReplyFromState(state);
-
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = acceptReply,
-                                PhoneNumberId = phoneNumberId,
-                                AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-
-                        if (IsSuggestionDecline(t))
-                        {
-                            state.SuggestionDeclined = true;
-                            if (state.AddonSuggestionSent)
-                                state.UpsellDeclinedCount++;
-                            if (state.ComboSuggestionSent)
-                                state.ComboDeclinedCount++;
-                            state.LastSuggestedItem = null;
-
-                            var declineReply = Msg.SuggestionDeclined;
-
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = declineReply,
-                                PhoneNumberId = phoneNumberId,
-                                AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-
-                        // If user didn't explicitly accept/decline, clear suggestion and let normal flow handle
-                        state.LastSuggestedItem = null;
-                    }
-
                     // A) Confirmar
                     if (IsConfirmCommand(t))
                     {
@@ -541,10 +484,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
 
-                        // Smart suggestions after adding items
-                        if (orderMod.Type == ModificationType.Add && state.Items.Count > 0)
-                            await TrySendSmartSuggestionAsync(state, message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
-
                         state.LastActivityUtc = DateTime.UtcNow;
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -678,9 +617,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
 
-                        // Smart suggestions: upsell + combo (one per step, after order reply)
-                        await TrySendSmartSuggestionAsync(state, message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
-
                         state.LastActivityUtc = DateTime.UtcNow;
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -709,10 +645,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         PhoneNumberId = phoneNumberId,
                         AccessToken = businessContext.AccessToken
                     }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                    // Smart suggestions after AI parse adds items
-                    if (effectiveIntent == RestaurantIntent.OrderCreate && state.Items.Count > 0)
-                        await TrySendSmartSuggestionAsync(state, message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
 
                     state.LastActivityUtc = DateTime.UtcNow;
                     await _stateStore.SaveAsync(conversationId, state, cancellationToken);

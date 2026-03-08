@@ -2549,9 +2549,9 @@ public class WebhookProcessorTests
         upsellMsg.Should().BeNull();
     }
 
-    // 3. Suggestion suppressed after user declines
+    // 3. Upsell is disabled — "no gracias" with pending suggestion just continues flow
     [Fact]
-    public async Task SmartSuggestion_SuppressedAfterDecline()
+    public async Task SmartSuggestion_Disabled_DeclineGoesToNormalFlow()
     {
         var sentMessages = new List<OutgoingMessage>();
         _whatsAppClientMock
@@ -2568,24 +2568,16 @@ public class WebhookProcessorTests
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        // Decline the suggestion
+        // "no gracias" should NOT be intercepted by A1 handler (removed)
+        // Instead it flows through normal handlers
         await _sut.ProcessAsync(
             CreateTextMessagePayload("5511999999999", "no gracias"),
             _testBusiness);
 
-        state.SuggestionDeclined.Should().BeTrue();
-        state.UpsellDeclinedCount.Should().Be(0); // AddonSuggestionSent was false
-        state.LastSuggestedItem.Should().BeNull();
-
-        // Now add another item — should NOT trigger new suggestion
-        sentMessages.Clear();
-        await _sut.ProcessAsync(
-            CreateTextMessagePayload("5511999999999", "agrega 1 papas"),
-            _testBusiness);
-
-        var newSuggestion = sentMessages.FirstOrDefault(m =>
+        // No upsell suggestion message should appear
+        var upsellMsg = sentMessages.FirstOrDefault(m =>
             m.Body.Contains("agrego") && m.Body.Contains("$"));
-        newSuggestion.Should().BeNull();
+        upsellMsg.Should().BeNull();
     }
 
     // 4. Combo suggestion when cart is close to combo
@@ -2677,9 +2669,9 @@ public class WebhookProcessorTests
         state.Items.Should().HaveCount(2);
     }
 
-    // 8. Suggestion acceptance adds item to cart
+    // 8. Upsell disabled — "si dale" with pending suggestion does NOT add item
     [Fact]
-    public async Task SuggestionAcceptance_AddsItemToCart()
+    public async Task SuggestionAcceptance_Disabled_DoesNotAddItem()
     {
         var sentMessages = new List<OutgoingMessage>();
         _whatsAppClientMock
@@ -2697,15 +2689,17 @@ public class WebhookProcessorTests
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
+        // "si dale" should NOT be intercepted by A1 handler (removed)
         await _sut.ProcessAsync(
             CreateTextMessagePayload("5511999999999", "si dale"),
             _testBusiness);
 
-        state.Items.Should().ContainSingle(i => i.Name == "Coca Cola" && i.Quantity == 1);
-        state.UpsellAcceptedCount.Should().Be(1);
+        // Coca Cola should NOT have been auto-added by upsell acceptance
+        state.Items.Should().NotContain(i => i.Name == "Coca Cola");
 
-        var acceptMsg = sentMessages.FirstOrDefault(m => m.Body.Contains("Coca Cola") && m.Body.Contains("agregue"));
-        acceptMsg.Should().NotBeNull();
+        // No upsell acceptance message
+        var acceptMsg = sentMessages.FirstOrDefault(m => m.Body.Contains("agregue"));
+        acceptMsg.Should().BeNull();
     }
 
     // 9. Decline detection helper tests
