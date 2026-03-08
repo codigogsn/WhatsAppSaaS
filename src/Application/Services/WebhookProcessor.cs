@@ -541,6 +541,37 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 break;
                             }
 
+                            case ModificationType.AddModifier:
+                            {
+                                // Find target item(s) to apply modifier
+                                var targets = !string.IsNullOrEmpty(orderMod.TargetItemName)
+                                    ? state.Items.Where(x => x.Name.Equals(orderMod.TargetItemName, StringComparison.OrdinalIgnoreCase)).ToList()
+                                    : state.Items; // No target specified (correction intent) — apply to all items
+
+                                if (targets.Count > 0)
+                                {
+                                    // Look up modifier price from catalog
+                                    var modEntry = (ActiveCatalog ?? MenuCatalog).FirstOrDefault(e =>
+                                        e.Canonical.Equals(NormalizeMenuItemName(orderMod.ModifierText) ?? "", StringComparison.OrdinalIgnoreCase));
+                                    var modPrice = modEntry?.Price ?? 0m;
+
+                                    foreach (var target in targets)
+                                    {
+                                        target.Modifiers = string.IsNullOrWhiteSpace(target.Modifiers)
+                                            ? orderMod.ModifierText
+                                            : target.Modifiers + ", " + orderMod.ModifierText;
+                                        target.UnitPrice += modPrice;
+                                    }
+
+                                    modReply = $"✅ Listo, agregué *{orderMod.ModifierText}* a tu pedido. " + Msg.ConfirmPrompt;
+                                }
+                                else
+                                {
+                                    modReply = "No encontré el producto para agregar esa modificación. " + Msg.ConfirmPrompt;
+                                }
+                                break;
+                            }
+
                             default:
                                 modReply = Msg.ConfirmPrompt;
                                 break;
@@ -1089,13 +1120,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Exact matches
         if (s is "hola" or "buenas" or "buenos dias" or "buen dia"
             or "buenas tardes" or "buenas noches" or "hey" or "epa"
-            or "saludos" or "que tal" or "como estas")
+            or "epale" or "saludos" or "que tal" or "como estas"
+            or "que hubo" or "habla" or "hablame")
             return true;
 
-        // Starts-with (e.g. "hola buenas", "que tal como estas")
+        // Starts-with (e.g. "hola buenas", "epa bro", "que tal como estas")
         if (s.StartsWith("hola ") || s.StartsWith("que tal")
             || s.StartsWith("como estas") || s.StartsWith("buenas ")
-            || s.StartsWith("buenos ") || s.StartsWith("saludos "))
+            || s.StartsWith("buenos ") || s.StartsWith("saludos ")
+            || s.StartsWith("epa ") || s.StartsWith("epale ")
+            || s.StartsWith("que hubo") || s.StartsWith("habla "))
             return true;
 
         return false;
@@ -1504,7 +1538,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Order modification parser (typo-tolerant)
     // ──────────────────────────────────────────
 
-    internal enum ModificationType { Add, Remove, Replace, Swap }
+    internal enum ModificationType { Add, Remove, Replace, Swap, AddModifier }
 
     internal sealed class OrderModification
     {
@@ -1512,6 +1546,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         public int Quantity { get; set; }
         public string ItemName { get; set; } = "";
         public string SwapTargetName { get; set; } = "";
+        public string ModifierText { get; set; } = "";  // For AddModifier type
+        public string TargetItemName { get; set; } = ""; // Target item for modifier
     }
 
     internal static bool TryParseOrderModification(string rawText, out OrderModification mod)
@@ -1521,19 +1557,25 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Pattern 1: verb + qty + item [+ trailing noise]
         // agrega/agregame/agregar/suma/sumale/pon/ponme 3 hamburguesas mas porfavor
+        // Also supports word numbers: "agrega una coca", "agrega dos papas"
         var m = Regex.Match(t,
-            @"^(agrega|agregame|agregar|suma|sumale|sumame|pon|ponme|a[nñ]ade|a[nñ]ademe)\s+(\d+)\s+(.+)$",
+            @"^(agrega|agregame|agregar|suma|sumale|sumame|pon|ponme|ponle|a[nñ]ade|a[nñ]ademe)\s+(\d+|un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(.+)$",
             RegexOptions.IgnoreCase);
-        if (m.Success && int.TryParse(m.Groups[2].Value, out var addQty) && addQty > 0)
+        if (m.Success)
         {
-            var rawItem = StripTrailingNoise(m.Groups[3].Value);
-            var resolved = NormalizeMenuItemName(rawItem);
-            if (resolved != null)
+            var qtyStr = m.Groups[2].Value;
+            var addQty = int.TryParse(qtyStr, out var dq) ? dq : ParseWordNumber(qtyStr);
+            if (addQty > 0)
             {
-                mod.Type = ModificationType.Add;
-                mod.Quantity = addQty;
-                mod.ItemName = resolved;
-                return true;
+                var rawItem = StripTrailingNoise(m.Groups[3].Value);
+                var resolved = NormalizeMenuItemName(rawItem);
+                if (resolved != null)
+                {
+                    mod.Type = ModificationType.Add;
+                    mod.Quantity = addQty;
+                    mod.ItemName = resolved;
+                    return true;
+                }
             }
         }
 
@@ -1609,6 +1651,43 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 mod.Quantity = 0;
                 return true;
             }
+        }
+
+        // Pattern 6: modifier application — "extra queso en las hamburguesas" / "ponle extra queso a las hamburguesas"
+        // Also: "agrega extra queso a las hamburguesas"
+        m = Regex.Match(t,
+            @"^(?:(?:agrega|agregale|ponle|a[nñ]adele)\s+)?(extra\s+\w+|sin\s+\w+)\s+(?:en|a)\s+(?:(?:las?|los?|el)\s+)?(?:(\d+)\s+)?(.+)$",
+            RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var modifierText = m.Groups[1].Value.Trim();
+            var targetQtyStr = m.Groups[2].Value;
+            var targetRaw = StripTrailingNoise(m.Groups[3].Value);
+            var resolvedTarget = NormalizeMenuItemName(targetRaw);
+            if (resolvedTarget != null)
+            {
+                mod.Type = ModificationType.AddModifier;
+                mod.ModifierText = modifierText;
+                mod.TargetItemName = resolvedTarget;
+                mod.Quantity = int.TryParse(targetQtyStr, out var tq) && tq > 0 ? tq : 0;
+                return true;
+            }
+        }
+
+        // Pattern 7: correction intent — "falto/falta/te falto/no agregaste/no pusiste el extra de queso"
+        m = Regex.Match(t,
+            @"^(?:te\s+)?(?:falto|falta|no\s+(?:agregaste|pusiste|a[nñ]adiste|incluiste))\s+(?:(?:el|la|los|las)\s+)?(extra\s+(?:de\s+)?\w+|sin\s+\w+)$",
+            RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var modifierText = m.Groups[1].Value.Trim();
+            // Normalize "extra de queso" → "extra queso"
+            modifierText = Regex.Replace(modifierText, @"^(extra)\s+de\s+", "$1 ", RegexOptions.IgnoreCase);
+            mod.Type = ModificationType.AddModifier;
+            mod.ModifierText = modifierText;
+            mod.TargetItemName = ""; // Will be inferred from existing items
+            mod.Quantity = 0;
+            return true;
         }
 
         return false;
@@ -2207,6 +2286,21 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return string.Join("\n", lines);
     }
 
+    private static int ParseWordNumber(string word) => word.ToLowerInvariant() switch
+    {
+        "un" or "una" or "uno" => 1,
+        "dos" => 2,
+        "tres" => 3,
+        "cuatro" => 4,
+        "cinco" => 5,
+        "seis" => 6,
+        "siete" => 7,
+        "ocho" => 8,
+        "nueve" => 9,
+        "diez" => 10,
+        _ => 0
+    };
+
     private static string WordToDigit(string word) => word.ToLowerInvariant() switch
     {
         "un" or "una" or "uno" => "1",
@@ -2231,7 +2325,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var text = rawText.Trim();
 
         // Noise words to strip (greetings + filler) — preserve newlines for segment splitting
-        var noisePattern = @"\b(hola|buenas?|buenos?\s+d[ií]as?|buenas\s+tardes|buenas\s+noches|hey|epa|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|me\s+das?|dame|necesito|pedimos|para\s+comer|mand[ae]\s*me)\b";
+        var noisePattern = @"\b(hola|buenas?|buenos?\s+d[ií]as?|buenas\s+tardes|buenas\s+noches|hey|epa|epale|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|me\s+das?|dame|necesito|pedimos|para\s+comer|mand[ae]\s*me|bro|pana|mano|vale|loco|hermano)\b";
         var cleaned = Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase);
         // Collapse spaces on each line but preserve newlines
         cleaned = string.Join("\n", cleaned.Split('\n').Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim()));
