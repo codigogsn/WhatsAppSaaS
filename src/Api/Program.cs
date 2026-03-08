@@ -98,6 +98,11 @@ try
     builder.Services.AddHealthChecks();
     builder.Services.AddHostedService<WhatsAppSaaS.Api.Services.ConversationCleanupService>();
 
+    // Async webhook processing queue
+    builder.Services.AddSingleton<WhatsAppSaaS.Application.Interfaces.IMessageQueue,
+        WhatsAppSaaS.Infrastructure.Messaging.InMemoryMessageQueue>();
+    builder.Services.AddHostedService<WhatsAppSaaS.Api.Workers.WebhookProcessingWorker>();
+
     // ────────────────────────────────────────
     // JWT Authentication
     // ────────────────────────────────────────

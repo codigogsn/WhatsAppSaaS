@@ -458,9 +458,15 @@ public class WebhookIdempotencyTests : IDisposable
         var response1 = await _client.PostAsync("/webhook", content1);
         response1.StatusCode.Should().Be(HttpStatusCode.OK);
 
+        // Wait for background worker to process first message
+        await Task.Delay(3000);
+
         var content2 = new StringContent(payload, Encoding.UTF8, "application/json");
         var response2 = await _client.PostAsync("/webhook", content2);
         response2.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Wait for background worker to process second message
+        await Task.Delay(3000);
 
         using var scope = _services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

@@ -18,7 +18,7 @@ namespace Api.Controllers;
 public class WebhookController : ControllerBase
 {
     private readonly IBusinessResolver _businessResolver;
-    private readonly IWebhookProcessor _processor;
+    private readonly IMessageQueue _messageQueue;
     private readonly ISignatureValidator _signatureValidator;
     private readonly WhatsAppOptions _whatsAppOptions;
 
@@ -31,12 +31,12 @@ public class WebhookController : ControllerBase
 
     public WebhookController(
         IBusinessResolver businessResolver,
-        IWebhookProcessor processor,
+        IMessageQueue messageQueue,
         ISignatureValidator signatureValidator,
         IOptions<WhatsAppOptions> whatsAppOptions)
     {
         _businessResolver = businessResolver;
-        _processor = processor;
+        _messageQueue = messageQueue;
         _signatureValidator = signatureValidator;
         _whatsAppOptions = whatsAppOptions.Value;
     }
@@ -165,10 +165,10 @@ public class WebhookController : ControllerBase
             return Ok();
         }
 
-        Log.Information("WEBHOOK PROCESSING: businessId={BusinessId} phoneNumberId={PhoneNumberId} entries={EntryCount}",
+        Log.Information("WEBHOOK ENQUEUING: businessId={BusinessId} phoneNumberId={PhoneNumberId} entries={EntryCount}",
             businessContext.BusinessId, phoneNumberId, payload.Entry?.Count ?? 0);
 
-        await _processor.ProcessAsync(payload, businessContext, ct);
+        await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), ct);
         return Ok();
     }
 }
