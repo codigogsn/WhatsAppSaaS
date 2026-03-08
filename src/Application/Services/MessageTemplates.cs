@@ -19,8 +19,12 @@ internal static class Msg
 
     internal static string MenuPrompt
         => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?\n\n"
-         + "_Ejemplo: 2 hamburguesas cl\u00e1sicas, 1 papa mediana, 2 Coca Cola, delivery_\n"
-         + "_O: 1 hamburguesa doble sin cebolla, 1 perro caliente con extra queso_";
+         + "_Ejemplo:_\n"
+         + "_2 hamburguesas cl\u00e1sicas_\n"
+         + "_1 papa mediana_\n"
+         + "_2 Coca Cola_\n"
+         + "_delivery_\n\n"
+         + "_Escribe un producto por l\u00ednea_";
 
     // ── Menu ──
 
@@ -103,13 +107,23 @@ internal static class Msg
 
     internal static string WhatToOrder
         => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?\n\n"
-         + "_Ejemplo: 2 hamburguesas cl\u00e1sicas, 1 papa mediana, 2 Coca Cola, delivery_";
+         + "_Ejemplo:_\n"
+         + "_2 hamburguesas cl\u00e1sicas_\n"
+         + "_1 papa mediana_\n"
+         + "_2 Coca Cola_\n"
+         + "_delivery_";
 
     internal static string PickupOrDelivery
         => "\u00bfC\u00f3mo lo quieres?\n\n\ud83d\ude97 *delivery* \u2014 te lo llevamos\n\ud83c\udfe0 *pick up* \u2014 lo recoges en tienda";
 
     internal static string ObservationPrompt
-        => "\u270d\ufe0f Si tu pedido tiene una *observaci\u00f3n especial*, escr\u00edbela ahora.\nEjemplo: _sin cebolla, extra queso, sin hielo_\n\nSi no tienes, responde *NO*.";
+        => "\u270d\ufe0f Si tu pedido tiene una *observaci\u00f3n especial*, escr\u00edbela ahora.\n\n"
+         + "_Ejemplo:_\n"
+         + "_hamburguesa doble: extra queso_\n"
+         + "_hamburguesa bacon: extra carne_\n"
+         + "_2 hamburguesas bbq: extra huevo_\n\n"
+         + "_Escribe una observaci\u00f3n por l\u00ednea, siguiendo el orden de tu pedido._\n\n"
+         + "Si no tienes, responde *NO*.";
 
     internal static string ObservationDetected(string obs)
         => $"\u270d\ufe0f *Observaci\u00f3n detectada:* _{obs}_\n\n\u00bfDeseas agregar otra? Si no, responde *NO*.";
@@ -406,8 +420,11 @@ internal static class Msg
 
     internal static string GentleRedirect
         => "\ud83e\udd14 No estoy seguro de lo que deseas.\n\n"
-         + "\u00bfQu\u00e9 deseas ordenar?\n"
-         + "_Ejemplo: 2 hamburguesas cl\u00e1sicas, 1 papa mediana, delivery_";
+         + "\u00bfQu\u00e9 deseas ordenar?\n\n"
+         + "_Ejemplo:_\n"
+         + "_2 hamburguesas cl\u00e1sicas_\n"
+         + "_1 papa mediana_\n"
+         + "_delivery_";
 
     internal static string GentleRedirectWithOrder(IReadOnlyList<ConversationItemEntry> items)
     {
