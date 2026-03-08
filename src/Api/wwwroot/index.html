@@ -117,6 +117,16 @@
     .proof-badge-pending { background:#fff3e0; color:#e65100; }
     .proof-badge-verified { background:#e8f5e9; color:#2e7d32; }
 
+    /* New order toast */
+    .new-order-toast {
+      position: fixed; bottom: 24px; right: 24px; z-index: 200;
+      background: #2e7d32; color: #fff; padding: 12px 20px; border-radius: 8px;
+      font-size: 14px; font-weight: 600; box-shadow: 0 4px 16px rgba(0,0,0,.2);
+      transform: translateY(80px); opacity: 0; transition: transform .3s, opacity .3s;
+      pointer-events: none;
+    }
+    .new-order-toast.show { transform: translateY(0); opacity: 1; }
+
     /* Business selector enhanced */
     .biz-selector-area { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .biz-selector-area select { min-width: 240px; font-weight: 600; font-size: 14px; padding: 8px 10px; border: 2px solid #1a73e8; border-radius: 6px; background: #fff; }
@@ -494,6 +504,60 @@
 let timer = null;
 let handoffPhones = {};
 let businessList = []; // cached for admin panel
+const knownOrders = new Set();
+let initialLoadDone = false;
+
+// ── New order notification ──
+function playNewOrderSound() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // Two-tone chime: short ascending beeps
+    [520, 660].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      gain.gain.value = 0.3;
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.15);
+      osc.stop(ctx.currentTime + i * 0.15 + 0.12);
+    });
+  } catch(e) { /* audio not available */ }
+}
+
+function showNewOrderToast(count) {
+  const el = document.getElementById('newOrderToast');
+  el.textContent = count === 1 ? '\ud83d\udfe2 Nuevo pedido recibido' : `\ud83d\udfe2 ${count} nuevos pedidos recibidos`;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+function checkNewOrders(data) {
+  const currentIds = new Set(data.map(o => o.id));
+
+  if (!initialLoadDone) {
+    // First load: seed known orders, no sound
+    currentIds.forEach(id => knownOrders.add(id));
+    initialLoadDone = true;
+    return;
+  }
+
+  let newCount = 0;
+  for (const o of data) {
+    if (!knownOrders.has(o.id) && o.status === 'Pending') {
+      newCount++;
+    }
+  }
+
+  // Add all current IDs to known set (including non-Pending)
+  currentIds.forEach(id => knownOrders.add(id));
+
+  if (newCount > 0) {
+    playNewOrderSound();
+    showNewOrderToast(newCount);
+  }
+}
 
 function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 
@@ -893,6 +957,7 @@ async function load(auto=false) {
   if (dateTo) { const to = dateTo + 'T23:59:59'; data = data.filter(o => (o.createdAtUtc||'') <= to); }
   if (isHandoffFilter) { data = data.filter(o => getHandoff(o) !== null); }
 
+  checkNewOrders(data);
   setKpis(data);
   setTodayKpis(data);
 
@@ -1454,5 +1519,6 @@ loadBusinesses().then(() => load());
     <div id="proofActions" style="display:none;margin-top:12px;display:flex;gap:8px;justify-content:flex-end;"></div>
   </div>
 </div>
+<div id="newOrderToast" class="new-order-toast"></div>
 </body>
 </html>
