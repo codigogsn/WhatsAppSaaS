@@ -30,7 +30,7 @@ public static class RestaurantTemplates
         {
             Id = "burger",
             Name = "Hamburguesas",
-            Description = "Restaurante de hamburguesas, papas y bebidas",
+            Description = "Restaurante de hamburguesas, perros calientes, papas y bebidas",
             DefaultCategories =
             [
                 new TemplateCategory
@@ -38,20 +38,33 @@ public static class RestaurantTemplates
                     Name = "Hamburguesas",
                     Items =
                     [
-                        new TemplateItem { Name = "Hamburguesa Clasica", Price = 5.00m, Aliases = ["clasica", "hamburguesa", "burger"] },
-                        new TemplateItem { Name = "Hamburguesa Doble", Price = 7.00m, Aliases = ["doble", "double"] },
-                        new TemplateItem { Name = "Hamburguesa con Queso", Price = 5.50m, Aliases = ["con queso", "cheeseburger"] },
-                        new TemplateItem { Name = "Hamburguesa BBQ", Price = 6.50m, Aliases = ["bbq"] },
+                        new TemplateItem { Name = "Hamburguesa Clasica", Price = 6.50m, Aliases = ["clasica", "hamburguesa", "burger", "burguer", "hamburguesa clasica"] },
+                        new TemplateItem { Name = "Hamburguesa Doble", Price = 8.50m, Aliases = ["doble", "double", "hamburguesa doble"] },
+                        new TemplateItem { Name = "Hamburguesa Bacon", Price = 9.00m, Aliases = ["bacon", "hamburguesa bacon", "hamburguesa con bacon", "con tocineta"] },
+                        new TemplateItem { Name = "Hamburguesa Especial", Price = 10.50m, Aliases = ["especial", "hamburguesa especial", "la especial"] },
+                        new TemplateItem { Name = "Hamburguesa BBQ", Price = 9.50m, Aliases = ["bbq", "hamburguesa bbq", "barbacoa"] },
                     ]
                 },
                 new TemplateCategory
                 {
-                    Name = "Acompanamientos",
+                    Name = "Perros Calientes",
                     Items =
                     [
-                        new TemplateItem { Name = "Papas Fritas", Price = 2.50m, Aliases = ["papas", "fries", "papitas"] },
-                        new TemplateItem { Name = "Aros de Cebolla", Price = 3.00m, Aliases = ["aros", "onion rings"] },
-                        new TemplateItem { Name = "Nuggets", Price = 3.50m, Aliases = ["nuggets", "nugget"] },
+                        new TemplateItem { Name = "Perro Clasico", Price = 4.50m, Aliases = ["perro", "perro caliente", "hot dog", "hotdog", "perro clasico"] },
+                        new TemplateItem { Name = "Perro Especial", Price = 6.00m, Aliases = ["perro especial"] },
+                        new TemplateItem { Name = "Perro con Queso", Price = 5.50m, Aliases = ["perro con queso", "perro queso"] },
+                    ]
+                },
+                new TemplateCategory
+                {
+                    Name = "Papas",
+                    Items =
+                    [
+                        new TemplateItem { Name = "Papas Pequenas", Price = 2.50m, Aliases = ["papas pequenas", "papas pequena", "papitas", "papas chicas"] },
+                        new TemplateItem { Name = "Papas Medianas", Price = 3.50m, Aliases = ["papas medianas", "papas mediana", "papas"] },
+                        new TemplateItem { Name = "Papas Grandes", Price = 4.50m, Aliases = ["papas grandes", "papas grande"] },
+                        new TemplateItem { Name = "Papas con Queso", Price = 5.50m, Aliases = ["papas con queso", "papas queso"] },
+                        new TemplateItem { Name = "Papas Mixtas", Price = 6.50m, Aliases = ["papas mixtas", "papas mixta", "mixtas"] },
                     ]
                 },
                 new TemplateCategory
@@ -59,10 +72,12 @@ public static class RestaurantTemplates
                     Name = "Bebidas",
                     Items =
                     [
-                        new TemplateItem { Name = "Coca Cola", Price = 1.50m, Aliases = ["coca", "cola", "coca cola"] },
-                        new TemplateItem { Name = "Pepsi", Price = 1.50m, Aliases = ["pepsi"] },
-                        new TemplateItem { Name = "Agua", Price = 1.00m, Aliases = ["agua", "water"] },
-                        new TemplateItem { Name = "Milkshake", Price = 3.00m, Aliases = ["milkshake", "malteada", "batido"] },
+                        new TemplateItem { Name = "Coca Cola 355ml", Price = 1.50m, Aliases = ["coca", "coca cola", "cocacola", "refresco", "coca cola 355", "coca pequena"] },
+                        new TemplateItem { Name = "Coca Cola 1L", Price = 2.50m, Aliases = ["coca grande", "coca cola grande", "coca litro", "coca cola 1l"] },
+                        new TemplateItem { Name = "Pepsi 355ml", Price = 1.50m, Aliases = ["pepsi", "pepsi 355"] },
+                        new TemplateItem { Name = "Te Frio", Price = 1.75m, Aliases = ["te frio", "te", "te helado", "iced tea"] },
+                        new TemplateItem { Name = "Agua", Price = 1.00m, Aliases = ["agua", "water", "botella de agua"] },
+                        new TemplateItem { Name = "Malta", Price = 1.50m, Aliases = ["malta", "maltita", "maltin"] },
                     ]
                 },
                 new TemplateCategory
@@ -70,16 +85,43 @@ public static class RestaurantTemplates
                     Name = "Combos",
                     Items =
                     [
-                        new TemplateItem { Name = "Combo Clasico", Price = 7.50m, Aliases = ["combo clasico", "combo 1"] },
-                        new TemplateItem { Name = "Combo Doble", Price = 10.00m, Aliases = ["combo doble", "combo 2"] },
+                        new TemplateItem { Name = "Combo Clasico", Price = 8.50m, Aliases = ["combo clasico", "combo 1", "combo"] },
+                        new TemplateItem { Name = "Combo Doble", Price = 10.50m, Aliases = ["combo doble", "combo 2"] },
+                        new TemplateItem { Name = "Combo Bacon", Price = 11.00m, Aliases = ["combo bacon", "combo 3"] },
+                        new TemplateItem { Name = "Combo Perro", Price = 6.50m, Aliases = ["combo perro", "combo hot dog"] },
+                    ]
+                },
+                new TemplateCategory
+                {
+                    Name = "Extras",
+                    Items =
+                    [
+                        new TemplateItem { Name = "Extra Queso", Price = 1.00m, Aliases = ["extra queso", "queso extra", "mas queso"] },
+                        new TemplateItem { Name = "Extra Tocineta", Price = 1.50m, Aliases = ["extra tocineta", "tocineta extra", "extra bacon", "mas tocineta"] },
+                        new TemplateItem { Name = "Extra Carne", Price = 2.50m, Aliases = ["extra carne", "carne extra", "doble carne", "mas carne"] },
+                        new TemplateItem { Name = "Extra Huevo", Price = 1.00m, Aliases = ["extra huevo", "huevo extra", "con huevo", "mas huevo"] },
+                    ]
+                },
+                new TemplateCategory
+                {
+                    Name = "Salsas",
+                    Items =
+                    [
+                        new TemplateItem { Name = "Salsa Ajo", Price = 0.50m, Aliases = ["salsa ajo", "salsa de ajo", "ajo"] },
+                        new TemplateItem { Name = "Salsa Tartara", Price = 0.50m, Aliases = ["salsa tartara", "tartara"] },
+                        new TemplateItem { Name = "Salsa Picante", Price = 0.50m, Aliases = ["salsa picante", "picante"] },
+                        new TemplateItem { Name = "Salsa Rosada", Price = 0.50m, Aliases = ["salsa rosada", "rosada", "salsa rosa"] },
                     ]
                 }
             ],
             SuggestedUpsells = new()
             {
-                ["hamburguesas"] = ["bebidas", "acompanamientos"],
-                ["bebidas"] = ["hamburguesas", "acompanamientos"],
-                ["acompanamientos"] = ["bebidas"],
+                ["hamburguesas"] = ["bebidas", "papas"],
+                ["perros calientes"] = ["bebidas", "papas"],
+                ["bebidas"] = ["hamburguesas", "papas"],
+                ["papas"] = ["bebidas"],
+                ["extras"] = ["bebidas"],
+                ["salsas"] = ["bebidas"],
             }
         },
 

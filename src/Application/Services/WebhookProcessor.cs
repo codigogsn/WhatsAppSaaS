@@ -1257,9 +1257,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Generic upsell pairing rules (fallback when no restaurant template)
     private static readonly Dictionary<string, string[]> UpsellPairings = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["comida"] = ["bebida", "acompanamiento"],
-        ["bebida"] = ["comida", "acompanamiento"],
-        ["acompanamiento"] = ["bebida"],
+        ["hamburguesas"] = ["bebidas", "papas"],
+        ["perros calientes"] = ["bebidas", "papas"],
+        ["bebidas"] = ["hamburguesas", "papas"],
+        ["papas"] = ["bebidas"],
+        ["extras"] = ["bebidas"],
+        ["salsas"] = ["bebidas"],
     };
 
     /// <summary>
@@ -1356,13 +1359,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 var mainCats = template.DefaultCategories
                     .Where(c => !c.Name.Equals("Combos", StringComparison.OrdinalIgnoreCase)
                              && !c.Name.Equals("Bebidas", StringComparison.OrdinalIgnoreCase)
-                             && !c.Name.Equals("Bebidas Frias", StringComparison.OrdinalIgnoreCase))
+                             && !c.Name.Equals("Bebidas Frias", StringComparison.OrdinalIgnoreCase)
+                             && !c.Name.Equals("Papas", StringComparison.OrdinalIgnoreCase)
+                             && !c.Name.Equals("Extras", StringComparison.OrdinalIgnoreCase)
+                             && !c.Name.Equals("Salsas", StringComparison.OrdinalIgnoreCase)
+                             && !c.Name.Equals("Acompanamientos", StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 var drinkCats = template.DefaultCategories
                     .Where(c => c.Name.Contains("Bebida", StringComparison.OrdinalIgnoreCase))
                     .ToList();
                 var sideCats = template.DefaultCategories
                     .Where(c => c.Name.Equals("Acompanamientos", StringComparison.OrdinalIgnoreCase)
+                             || c.Name.Equals("Papas", StringComparison.OrdinalIgnoreCase)
                              || c.Name.Equals("Extras", StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
@@ -1550,43 +1558,100 @@ public sealed class WebhookProcessor : IWebhookProcessor
     [ThreadStatic]
     internal static MenuEntry[]? ActiveCatalog;
 
-    // Catalog: future menu system will load from DB. For now, demo items.
+    // Catalog: future menu system will load from DB. For now, realistic burger-restaurant demo.
     internal static readonly MenuEntry[] MenuCatalog =
     {
-        new() { Canonical = "Hamburguesa", Aliases = new[] { "hamburguesa", "hamburguesas", "hamburgesa", "hamburgesas",
+        // ── Hamburguesas ──
+        new() { Canonical = "Hamburguesa Clasica", Aliases = new[] { "hamburguesa", "hamburguesas", "hamburgesa", "hamburgesas",
             "hamburguea", "hamburgueas", "hamburgues", "hamburguez", "hamburgue",
-            "hamburga", "hamburgs", "hambur", "burger", "burgers", "hamburguesita", "hamburguesitas",
-            "hamburgueaas", "hamburgueaa", "hambuguesa", "hambuguesas", "hamburgusa", "hamburgusas" },
-            Category = "comida" },
+            "hamburga", "hamburgs", "hambur", "burger", "burgers", "burguer", "burguers",
+            "hamburguesita", "hamburguesitas", "hamburgueaas", "hamburgueaa",
+            "hambuguesa", "hambuguesas", "hamburgusa", "hamburgusas",
+            "clasica", "hamburguesa clasica" },
+            Category = "hamburguesas", Price = 6.50m },
+        new() { Canonical = "Hamburguesa Doble", Aliases = new[] { "doble", "hamburguesa doble", "double", "hamb doble" },
+            Category = "hamburguesas", Price = 8.50m },
+        new() { Canonical = "Hamburguesa Bacon", Aliases = new[] { "bacon", "hamburguesa bacon", "hamburguesa con bacon",
+            "con tocineta", "hamb bacon" },
+            Category = "hamburguesas", Price = 9.00m },
+        new() { Canonical = "Hamburguesa Especial", Aliases = new[] { "especial", "hamburguesa especial", "la especial",
+            "hamb especial" },
+            Category = "hamburguesas", Price = 10.50m },
+        new() { Canonical = "Hamburguesa BBQ", Aliases = new[] { "bbq", "hamburguesa bbq", "barbacoa", "hamb bbq" },
+            Category = "hamburguesas", Price = 9.50m },
+
+        // ── Perros Calientes ──
+        new() { Canonical = "Perro Clasico", Aliases = new[] { "perro", "perros", "perro caliente", "perros calientes",
+            "hot dog", "hotdog", "hotdogs", "hot dogs", "perro clasico" },
+            Category = "perros calientes", Price = 4.50m },
+        new() { Canonical = "Perro Especial", Aliases = new[] { "perro especial" },
+            Category = "perros calientes", Price = 6.00m },
+        new() { Canonical = "Perro con Queso", Aliases = new[] { "perro con queso", "perro queso" },
+            Category = "perros calientes", Price = 5.50m },
+
+        // ── Papas (Medianas first — "papas" defaults to medium) ──
+        new() { Canonical = "Papas Medianas", Aliases = new[] { "papas", "papa", "papaas", "papaz", "papss",
+            "papas medianas", "papas mediana",
+            "papas fritas", "fritas", "french fries", "fries", "papitas fritas" },
+            Category = "papas", Price = 3.50m },
+        new() { Canonical = "Papas Pequenas", Aliases = new[] { "papas pequenas", "papas pequena", "papitas", "papita",
+            "papas chicas" },
+            Category = "papas", Price = 2.50m },
+        new() { Canonical = "Papas Grandes", Aliases = new[] { "papas grandes", "papas grande" },
+            Category = "papas", Price = 4.50m },
+        new() { Canonical = "Papas con Queso", Aliases = new[] { "papas con queso", "papas queso" },
+            Category = "papas", Price = 5.50m },
+        new() { Canonical = "Papas Mixtas", Aliases = new[] { "papas mixtas", "papas mixta", "mixtas" },
+            Category = "papas", Price = 6.50m },
+
+        // ── Bebidas ──
         new() { Canonical = "Coca Cola", Aliases = new[] { "coca cola", "cocacola", "cocacolas", "coca", "cocas",
             "coca-cola", "coca colas", "refresco", "refrescos", "gaseosa", "gaseosas", "soda",
-            "coka", "cokas", "coka cola" },
-            Category = "bebida" },
-        new() { Canonical = "Papas", Aliases = new[] { "papas", "papa", "papaas", "papitas", "papita", "papaz",
-            "papas fritas", "fritas", "french fries", "fries", "papss", "papitas fritas" },
-            Category = "acompanamiento" },
-        new() { Canonical = "Pizza", Aliases = new[] { "pizza", "pizzas", "piza", "pizas", "pizzita", "pizzitas" },
-            Category = "comida" },
-        new() { Canonical = "Sushi Roll", Aliases = new[] { "sushi roll", "sushi", "sushis", "roll", "rolls",
-            "sushi rolls", "maki", "makis" },
-            Category = "comida" },
-        new() { Canonical = "Combo", Aliases = new[] { "combo", "combos", "combo familiar", "promo", "promocion" },
-            Category = "combo", IsCombo = true },
-        new() { Canonical = "Hot Dog", Aliases = new[] { "hot dog", "hotdog", "hotdogs", "hot dogs", "perro caliente",
-            "perros calientes", "perro", "perros" },
-            Category = "comida" },
-        new() { Canonical = "Tequeños", Aliases = new[] { "tequenos", "tequeño", "tequeños", "tequeno",
-            "tequenitos", "tequeñitos" },
-            Category = "comida" },
-        new() { Canonical = "Empanada", Aliases = new[] { "empanada", "empanadas", "empanadita", "empanaditas" },
-            Category = "comida" },
-        new() { Canonical = "Jugo", Aliases = new[] { "jugo", "jugos", "juguito", "juguitos", "juice" },
-            Category = "bebida" },
+            "coka", "cokas", "coka cola", "coca cola 355", "coca pequena" },
+            Category = "bebidas", Price = 1.50m },
+        new() { Canonical = "Coca Cola 1L", Aliases = new[] { "coca grande", "coca cola grande", "coca litro",
+            "coca cola 1l" },
+            Category = "bebidas", Price = 2.50m },
+        new() { Canonical = "Pepsi", Aliases = new[] { "pepsi", "pepsis", "pepsi 355" },
+            Category = "bebidas", Price = 1.50m },
+        new() { Canonical = "Te Frio", Aliases = new[] { "te frio", "te", "te helado", "iced tea", "te fri" },
+            Category = "bebidas", Price = 1.75m },
         new() { Canonical = "Agua", Aliases = new[] { "agua", "aguas", "aguita", "botella de agua", "water" },
-            Category = "bebida" },
-        new() { Canonical = "Cerveza", Aliases = new[] { "cerveza", "cervezas", "birra", "birras", "beer", "beers",
-            "chela", "chelas" },
-            Category = "bebida" },
+            Category = "bebidas", Price = 1.00m },
+        new() { Canonical = "Malta", Aliases = new[] { "malta", "maltas", "maltita", "maltin" },
+            Category = "bebidas", Price = 1.50m },
+
+        // ── Combos ──
+        new() { Canonical = "Combo Clasico", Aliases = new[] { "combo", "combos", "combo clasico", "combo 1",
+            "promo", "promocion" },
+            Category = "combos", IsCombo = true, Price = 8.50m },
+        new() { Canonical = "Combo Doble", Aliases = new[] { "combo doble", "combo 2" },
+            Category = "combos", IsCombo = true, Price = 10.50m },
+        new() { Canonical = "Combo Bacon", Aliases = new[] { "combo bacon", "combo 3" },
+            Category = "combos", IsCombo = true, Price = 11.00m },
+        new() { Canonical = "Combo Perro", Aliases = new[] { "combo perro", "combo hot dog", "combo perro caliente" },
+            Category = "combos", IsCombo = true, Price = 6.50m },
+
+        // ── Extras ──
+        new() { Canonical = "Extra Queso", Aliases = new[] { "extra queso", "queso extra", "mas queso" },
+            Category = "extras", Price = 1.00m },
+        new() { Canonical = "Extra Tocineta", Aliases = new[] { "extra tocineta", "tocineta extra",
+            "extra bacon", "mas tocineta" },
+            Category = "extras", Price = 1.50m },
+        new() { Canonical = "Extra Carne", Aliases = new[] { "extra carne", "carne extra", "doble carne", "mas carne" },
+            Category = "extras", Price = 2.50m },
+        new() { Canonical = "Extra Huevo", Aliases = new[] { "extra huevo", "huevo extra", "con huevo", "mas huevo" },
+            Category = "extras", Price = 1.00m },
+
+        // ── Salsas ──
+        new() { Canonical = "Salsa Ajo", Aliases = new[] { "salsa ajo", "salsa de ajo" },
+            Category = "salsas", Price = 0.50m },
+        new() { Canonical = "Salsa Tartara", Aliases = new[] { "salsa tartara", "tartara" },
+            Category = "salsas", Price = 0.50m },
+        new() { Canonical = "Salsa Picante", Aliases = new[] { "salsa picante", "picante" },
+            Category = "salsas", Price = 0.50m },
+        new() { Canonical = "Salsa Rosada", Aliases = new[] { "salsa rosada", "rosada", "salsa rosa" },
+            Category = "salsas", Price = 0.50m },
     };
 
     private async Task<MenuEntry[]> LoadBusinessMenuAsync(Guid businessId, CancellationToken ct)
@@ -1624,34 +1689,37 @@ public sealed class WebhookProcessor : IWebhookProcessor
         t = StripAccents(t);
         var tNoS = t.EndsWith("s") ? t[..^1] : t;
 
+        // Pass 1: exact matches (canonical, aliases) — no ambiguity
         foreach (var entry in catalog)
         {
-            // Check canonical name itself
             var canonLower = StripAccents(entry.Canonical.ToLowerInvariant());
             if (t == canonLower || tNoS == canonLower)
                 return entry.Canonical;
 
-            // Check canonical without trailing 's'
             var canonNoS = canonLower.EndsWith("s") ? canonLower[..^1] : canonLower;
             if (t == canonNoS || tNoS == canonNoS)
                 return entry.Canonical;
 
-            // Check aliases
             foreach (var alias in entry.Aliases)
             {
                 var a = StripAccents(alias);
                 if (t == a || tNoS == a)
                     return entry.Canonical;
             }
+        }
 
-            // Prefix match (at least 5 chars)
-            if (t.Length >= 5 && (canonLower.StartsWith(t) || canonLower.StartsWith(tNoS)))
-                return entry.Canonical;
-
-            // Levenshtein distance for close typos
-            // Allow distance 2 for short words, distance 3 for words >= 8 chars
-            if (t.Length >= 5)
+        // Pass 2: fuzzy matches (prefix, Levenshtein) — only if no exact match
+        if (t.Length >= 5)
+        {
+            foreach (var entry in catalog)
             {
+                var canonLower = StripAccents(entry.Canonical.ToLowerInvariant());
+
+                // Prefix match
+                if (canonLower.StartsWith(t) || canonLower.StartsWith(tNoS))
+                    return entry.Canonical;
+
+                // Levenshtein distance for close typos
                 var maxDist = t.Length >= 8 ? 3 : 2;
 
                 if (canonLower.Length >= 4 && LevenshteinDistance(t, canonLower) <= maxDist)
@@ -2172,7 +2240,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Check for modifier phrases
         var modMatch = Regex.Match(t,
-            @"\s+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|mitad\s+.+|bien\s+(?:cocid|asad|hech).+|al\s+punto|termino\s+\w+|doble\s+\w+)$",
+            @"\s+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|mitad\s+.+|bien\s+(?:cocid|asad|hech).+|al\s+punto|termino\s+\w+|doble\s+\w+)$",
             RegexOptions.IgnoreCase);
         if (modMatch.Success)
         {

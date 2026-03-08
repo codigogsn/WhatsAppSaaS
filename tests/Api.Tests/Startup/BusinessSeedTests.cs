@@ -9,6 +9,7 @@ using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace WhatsAppSaaS.Api.Tests.Startup;
 
+[Collection("EnvVarTests")]
 public class BusinessSeedTests : IDisposable
 {
     private readonly SqliteConnection _connection;

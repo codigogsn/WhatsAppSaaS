@@ -77,22 +77,25 @@ public class AutoOnboardingTests : IDisposable
         root.GetProperty("templateName").GetString().Should().Be("Hamburguesas");
 
         var cats = root.GetProperty("defaultCategories");
-        cats.GetArrayLength().Should().Be(4);
+        cats.GetArrayLength().Should().Be(7);
         var catNames = Enumerable.Range(0, cats.GetArrayLength())
             .Select(i => cats[i].GetString()).ToList();
         catNames.Should().Contain("Hamburguesas");
+        catNames.Should().Contain("Perros Calientes");
+        catNames.Should().Contain("Papas");
         catNames.Should().Contain("Bebidas");
         catNames.Should().Contain("Combos");
-        catNames.Should().Contain("Acompanamientos");
+        catNames.Should().Contain("Extras");
+        catNames.Should().Contain("Salsas");
 
         // Verify items actually in DB
         using var scope = _webApp.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var bizId = Guid.Parse(root.GetProperty("id").GetString()!);
         var dbCats = await db.MenuCategories.Where(c => c.BusinessId == bizId).ToListAsync();
-        dbCats.Should().HaveCount(4);
+        dbCats.Should().HaveCount(7);
         var dbItems = await db.MenuItems.Where(i => i.Category!.BusinessId == bizId).ToListAsync();
-        dbItems.Count.Should().BeGreaterThan(10); // burger template has 13 items
+        dbItems.Count.Should().BeGreaterThan(25); // burger template has 31 items
     }
 
     // 2. Business creation without RestaurantType seeds generic categories
@@ -200,11 +203,11 @@ public class AutoOnboardingTests : IDisposable
 
         var body = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
         var root = body.RootElement;
-        root.GetProperty("totalItems").GetInt32().Should().Be(13);
+        root.GetProperty("totalItems").GetInt32().Should().Be(31);
         root.GetProperty("name").GetString().Should().Be("Hamburguesas");
 
         var cats = root.GetProperty("categories");
-        cats.GetArrayLength().Should().Be(4);
+        cats.GetArrayLength().Should().Be(7);
     }
 
     [Fact]
@@ -216,7 +219,7 @@ public class AutoOnboardingTests : IDisposable
 
     // 5. Seed categories match template
     [Theory]
-    [InlineData("burger", new[] { "Hamburguesas", "Acompanamientos", "Bebidas", "Combos" })]
+    [InlineData("burger", new[] { "Hamburguesas", "Perros Calientes", "Papas", "Bebidas", "Combos", "Extras", "Salsas" })]
     [InlineData("pizza", new[] { "Pizzas", "Pastas", "Bebidas", "Extras" })]
     [InlineData("sushi", new[] { "Rolls", "Nigiri", "Bebidas", "Extras" })]
     [InlineData("arepa", new[] { "Arepas", "Empanadas", "Bebidas", "Extras" })]

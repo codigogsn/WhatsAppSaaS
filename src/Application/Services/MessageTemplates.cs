@@ -23,7 +23,45 @@ internal static class Msg
     // ── Menu ──
 
     internal static string DemoMenu
-        => "\ud83d\udccb *MEN\u00da (DEMO)*\n\n1. Hamburguesa\n2. Coca Cola\n3. Papas\n\n_Pr\u00f3ximamente: men\u00fa completo del restaurante._";
+        => "\ud83d\udccb *MEN\u00da (DEMO)*\n\n"
+         + "*Hamburguesas*\n"
+         + "  \u2022 Hamburguesa Clasica  $6.50\n"
+         + "  \u2022 Hamburguesa Doble  $8.50\n"
+         + "  \u2022 Hamburguesa Bacon  $9.00\n"
+         + "  \u2022 Hamburguesa Especial  $10.50\n"
+         + "  \u2022 Hamburguesa BBQ  $9.50\n\n"
+         + "*Perros Calientes*\n"
+         + "  \u2022 Perro Clasico  $4.50\n"
+         + "  \u2022 Perro Especial  $6.00\n"
+         + "  \u2022 Perro con Queso  $5.50\n\n"
+         + "*Papas*\n"
+         + "  \u2022 Papas Pequenas  $2.50\n"
+         + "  \u2022 Papas Medianas  $3.50\n"
+         + "  \u2022 Papas Grandes  $4.50\n"
+         + "  \u2022 Papas con Queso  $5.50\n"
+         + "  \u2022 Papas Mixtas  $6.50\n\n"
+         + "*Bebidas*\n"
+         + "  \u2022 Coca Cola  $1.50\n"
+         + "  \u2022 Coca Cola 1L  $2.50\n"
+         + "  \u2022 Pepsi  $1.50\n"
+         + "  \u2022 Te Frio  $1.75\n"
+         + "  \u2022 Agua  $1.00\n"
+         + "  \u2022 Malta  $1.50\n\n"
+         + "*Combos*\n"
+         + "  \u2022 Combo Clasico  $8.50\n"
+         + "  \u2022 Combo Doble  $10.50\n"
+         + "  \u2022 Combo Bacon  $11.00\n"
+         + "  \u2022 Combo Perro  $6.50\n\n"
+         + "*Extras*\n"
+         + "  \u2022 Extra Queso  $1.00\n"
+         + "  \u2022 Extra Tocineta  $1.50\n"
+         + "  \u2022 Extra Carne  $2.50\n"
+         + "  \u2022 Extra Huevo  $1.00\n\n"
+         + "*Salsas*\n"
+         + "  \u2022 Salsa Ajo  $0.50\n"
+         + "  \u2022 Salsa Tartara  $0.50\n"
+         + "  \u2022 Salsa Picante  $0.50\n"
+         + "  \u2022 Salsa Rosada  $0.50";
 
     internal static string BuildMenu(IReadOnlyList<WebhookProcessor.MenuEntry> catalog)
     {

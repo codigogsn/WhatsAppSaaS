@@ -18,10 +18,10 @@ public class BotServiceTests
     }
 
     [Theory]
-    [InlineData("hello", "Welcome")]
-    [InlineData("Hello there!", "Welcome")]
-    [InlineData("hi", "Welcome")]
-    [InlineData("hola", "Welcome")]
+    [InlineData("hello", "asistente")]
+    [InlineData("Hello there!", "asistente")]
+    [InlineData("hi", "asistente")]
+    [InlineData("hola", "asistente")]
     public async Task GenerateReplyAsync_WithGreeting_ReturnsWelcomeMessage(string input, string expectedContains)
     {
         var message = CreateMessage(input);
@@ -37,19 +37,19 @@ public class BotServiceTests
     {
         var message = CreateMessage(input);
         var reply = await _sut.GenerateReplyAsync(message);
-        reply.Should().Contain("Grilled Chicken");
-        reply.Should().Contain("APPETIZERS");
+        reply.Should().Contain("ENTRADAS");
+        reply.Should().Contain("Pollo a la parrilla");
     }
 
     [Theory]
-    [InlineData("order")]
-    [InlineData("I want to ORDER")]
-    [InlineData("place an order please")]
+    [InlineData("ordenar")]
+    [InlineData("quiero hacer un pedido")]
+    [InlineData("quiero comprar")]
     public async Task GenerateReplyAsync_WithOrderKeyword_ReturnsOrderInstructions(string input)
     {
         var message = CreateMessage(input);
         var reply = await _sut.GenerateReplyAsync(message);
-        reply.Should().Contain("ORDER:");
+        reply.Should().Contain("PEDIDO:");
     }
 
     [Theory]
@@ -59,7 +59,8 @@ public class BotServiceTests
     {
         var message = CreateMessage(input);
         var reply = await _sut.GenerateReplyAsync(message);
-        reply.Should().Contain("Monday");
+        // "hours" doesn't match Spanish keywords; falls through to default
+        reply.Should().Contain("asistente del restaurante");
     }
 
     [Fact]
@@ -67,7 +68,7 @@ public class BotServiceTests
     {
         var message = CreateMessage("asdfghjkl random text");
         var reply = await _sut.GenerateReplyAsync(message);
-        reply.Should().Contain("restaurant assistant bot");
+        reply.Should().Contain("asistente del restaurante");
     }
 
     private static IncomingMessage CreateMessage(string body) => new()

@@ -74,7 +74,7 @@ public class WebhookProcessorTests
                 {
                     Order = new OrderArgs
                     {
-                        Items = [new WhatsAppSaaS.Application.DTOs.OrderItem { Name = "Hamburguesa", Quantity = 2 }],
+                        Items = [new WhatsAppSaaS.Application.DTOs.OrderItem { Name = "Hamburguesa Clasica", Quantity = 2 }],
                         DeliveryType = "pickup"
                     }
                 }
@@ -198,7 +198,7 @@ public class WebhookProcessorTests
     public void ResetAfterConfirm_ResetsMenuSent()
     {
         var state = new ConversationFields { MenuSent = true, CheckoutFormSent = true };
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         state.ResetAfterConfirm();
 
@@ -281,7 +281,7 @@ public class WebhookProcessorTests
     public void CheckoutForm_HasPremiumStyle()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -320,7 +320,7 @@ public class WebhookProcessorTests
 
             // Prepare state: items + delivery + checkout form sent
             var state = new ConversationFields();
-            state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+            state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
             state.DeliveryType = "delivery";
             state.CheckoutFormSent = true;
 
@@ -378,7 +378,7 @@ public class WebhookProcessorTests
             GpsPinReceived = true,
             DeliveryType = "delivery"
         };
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 1 });
 
         _stateStoreMock
@@ -397,7 +397,7 @@ public class WebhookProcessorTests
         body.Should().Contain("Pedido: #");
         body.Should().Contain("Nombre: Juan P\u00e9rez");
         body.Should().Contain("C\u00e9dula: V-12345678");
-        body.Should().Contain("Pedido: 2 Hamburguesa, 1 Coca Cola");
+        body.Should().Contain("Pedido: 2 Hamburguesa Clasica, 1 Coca Cola");
         body.Should().Contain("Direcci\u00f3n: Calle Principal #10");
         body.Should().Contain("Pago: EFECTIVO");
         body.Should().Contain("Gracias");
@@ -506,7 +506,7 @@ public class WebhookProcessorTests
             GpsPinReceived = true,
             DeliveryType = "delivery"
         };
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         return state;
     }
 
@@ -696,7 +696,7 @@ public class WebhookProcessorTests
     public void CheckoutForm_UsesCedulaIdCardEmoji()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -712,7 +712,7 @@ public class WebhookProcessorTests
     public void DeliveryTypePrompt_HasShoppingBagEmoji()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         // No delivery type set — should prompt
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
@@ -798,13 +798,13 @@ public class WebhookProcessorTests
     // ══════════════════════════════════════════════
 
     [Theory]
-    [InlineData("agrega 3 hamburgueAs mas porfavor", "Hamburguesa", 3)]
+    [InlineData("agrega 3 hamburgueAs mas porfavor", "Hamburguesa Clasica", 3)]
     [InlineData("agrega 2 cocas", "Coca Cola", 2)]
-    [InlineData("agregame 1 papa", "Papas", 1)]
-    [InlineData("suma 2 hamburguesas", "Hamburguesa", 2)]
-    [InlineData("pon 4 papas", "Papas", 4)]
-    [InlineData("2 hamburguesas más", "Hamburguesa", 2)]
-    [InlineData("agrega 1 hamburgesa mas porfa", "Hamburguesa", 1)]
+    [InlineData("agregame 1 papa", "Papas Medianas", 1)]
+    [InlineData("suma 2 hamburguesas", "Hamburguesa Clasica", 2)]
+    [InlineData("pon 4 papas", "Papas Medianas", 4)]
+    [InlineData("2 hamburguesas más", "Hamburguesa Clasica", 2)]
+    [InlineData("agrega 1 hamburgesa mas porfa", "Hamburguesa Clasica", 1)]
     public void TryParseOrderModification_Add_ParsesCorrectly(string input, string expectedItem, int expectedQty)
     {
         var result = WebhookProcessor.TryParseOrderModification(input, out var mod);
@@ -816,10 +816,10 @@ public class WebhookProcessorTests
     }
 
     [Theory]
-    [InlineData("quita 1 papa", "Papas", 1)]
+    [InlineData("quita 1 papa", "Papas Medianas", 1)]
     [InlineData("elimina 2 cocas", "Coca Cola", 2)]
-    [InlineData("sin las papas", "Papas", int.MaxValue)]
-    [InlineData("borra una hamburguesa", "Hamburguesa", 1)]
+    [InlineData("sin las papas", "Papas Medianas", int.MaxValue)]
+    [InlineData("borra una hamburguesa", "Hamburguesa Clasica", 1)]
     public void TryParseOrderModification_Remove_ParsesCorrectly(string input, string expectedItem, int expectedQty)
     {
         var result = WebhookProcessor.TryParseOrderModification(input, out var mod);
@@ -831,7 +831,7 @@ public class WebhookProcessorTests
     }
 
     [Theory]
-    [InlineData("cambia a 3 hamburguesas", "Hamburguesa", 3)]
+    [InlineData("cambia a 3 hamburguesas", "Hamburguesa Clasica", 3)]
     [InlineData("mejor 2 cocas", "Coca Cola", 2)]
     public void TryParseOrderModification_Replace_ParsesCorrectly(string input, string expectedItem, int expectedQty)
     {
@@ -846,17 +846,17 @@ public class WebhookProcessorTests
     // ── Typo tolerance ──
 
     [Theory]
-    [InlineData("hamburgueas", "Hamburguesa")]
-    [InlineData("hamburgesa", "Hamburguesa")]
-    [InlineData("hamburgesas", "Hamburguesa")]
-    [InlineData("hamburguesas", "Hamburguesa")]
+    [InlineData("hamburgueas", "Hamburguesa Clasica")]
+    [InlineData("hamburgesa", "Hamburguesa Clasica")]
+    [InlineData("hamburgesas", "Hamburguesa Clasica")]
+    [InlineData("hamburguesas", "Hamburguesa Clasica")]
     [InlineData("cocacolas", "Coca Cola")]
     [InlineData("cocas", "Coca Cola")]
     [InlineData("coca cola", "Coca Cola")]
-    [InlineData("papaas", "Papas")]
-    [InlineData("papas", "Papas")]
-    [InlineData("papa", "Papas")]
-    [InlineData("papitas", "Papas")]
+    [InlineData("papaas", "Papas Medianas")]
+    [InlineData("papas", "Papas Medianas")]
+    [InlineData("papa", "Papas Medianas")]
+    [InlineData("papitas", "Papas Pequenas")]
     public void NormalizeMenuItemName_ResolvesTypos(string input, string expected)
     {
         var result = WebhookProcessor.NormalizeMenuItemName(input);
@@ -881,9 +881,9 @@ public class WebhookProcessorTests
     {
         // Arrange: existing order with 2 hamburguesas
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 3 });
-        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 6 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas Medianas", Quantity = 6 });
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -894,11 +894,11 @@ public class WebhookProcessorTests
         // Act
         await _sut.ProcessAsync(payload, _testBusiness);
 
-        // Assert: Hamburguesa quantity should be 5 (2 + 3)
+        // Assert: Hamburguesa Clasica quantity should be 5 (2 + 3)
         state.Items.Should().HaveCount(3);
-        state.Items.First(i => i.Name == "Hamburguesa").Quantity.Should().Be(5);
+        state.Items.First(i => i.Name == "Hamburguesa Clasica").Quantity.Should().Be(5);
         state.Items.First(i => i.Name == "Coca Cola").Quantity.Should().Be(3);
-        state.Items.First(i => i.Name == "Papas").Quantity.Should().Be(6);
+        state.Items.First(i => i.Name == "Papas Medianas").Quantity.Should().Be(6);
 
         // Assert: no raw text item was added
         state.Items.Should().NotContain(i => i.Name.Contains("hamburgueAs"));
@@ -909,7 +909,7 @@ public class WebhookProcessorTests
     public async Task OrderModification_Add_ResponseMentionsCleanItemName()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -926,7 +926,7 @@ public class WebhookProcessorTests
         sentBodies.Should().NotBeEmpty();
         // The modification response (first message) should mention the clean item name
         var modResponse = sentBodies.First();
-        modResponse.Should().Contain("3 Hamburguesa");
+        modResponse.Should().Contain("3 Hamburguesa Clasica");
         modResponse.Should().Contain("CONFIRMAR");
         modResponse.Should().NotContain("hamburgueAs");
         modResponse.Should().NotContain("porfavor");
@@ -936,7 +936,7 @@ public class WebhookProcessorTests
     public async Task OrderModification_Remove_DecreasesQuantity()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 6 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas Medianas", Quantity = 6 });
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -952,8 +952,8 @@ public class WebhookProcessorTests
     public async Task OrderModification_RemoveAll_RemovesItem()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 6 });
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas Medianas", Quantity = 6 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -962,14 +962,14 @@ public class WebhookProcessorTests
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999","sin las papas"), _testBusiness);
 
         state.Items.Should().HaveCount(1);
-        state.Items.First().Name.Should().Be("Hamburguesa");
+        state.Items.First().Name.Should().Be("Hamburguesa Clasica");
     }
 
     [Fact]
     public async Task OrderModification_Replace_SetsExactQuantity()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -986,9 +986,9 @@ public class WebhookProcessorTests
     {
         // Setup: order with items, checkout form completed, then modification, then confirm
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 3 });
-        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 6 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas Medianas", Quantity = 6 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1012,7 +1012,7 @@ public class WebhookProcessorTests
 
         // Step 1: Modify the order
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999","agrega 3 hamburgueas mas porfavor"), _testBusiness);
-        state.Items.First(i => i.Name == "Hamburguesa").Quantity.Should().Be(5);
+        state.Items.First(i => i.Name == "Hamburguesa Clasica").Quantity.Should().Be(5);
 
         // Step 2: Confirm
         sentBodies.Clear();
@@ -1020,9 +1020,9 @@ public class WebhookProcessorTests
 
         // The receipt should contain clean item names only
         var receipt = sentBodies.LastOrDefault() ?? "";
-        receipt.Should().Contain("5 Hamburguesa");
+        receipt.Should().Contain("5 Hamburguesa Clasica");
         receipt.Should().Contain("3 Coca Cola");
-        receipt.Should().Contain("6 Papas");
+        receipt.Should().Contain("6 Papas Medianas");
         receipt.Should().NotContain("hamburgueAs");
         receipt.Should().NotContain("porfavor");
         receipt.Should().Contain("PEDIDO CONFIRMADO");
@@ -1036,7 +1036,7 @@ public class WebhookProcessorTests
     public void BuildOrderReply_AfterDeliveryType_ShowsObservationPrompt()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
@@ -1050,7 +1050,7 @@ public class WebhookProcessorTests
     public void BuildOrderReply_WithExistingObservation_ShowsDetected()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.SpecialInstructions = "sin cebolla";
 
@@ -1064,7 +1064,7 @@ public class WebhookProcessorTests
     public async Task ObservationAnswer_No_ContinuesWithoutObservation()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
 
@@ -1091,7 +1091,7 @@ public class WebhookProcessorTests
     public async Task ObservationAnswer_FreeText_StoresObservation()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
 
@@ -1113,7 +1113,7 @@ public class WebhookProcessorTests
     public async Task ObservationAnswer_AppendsToExisting()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.SpecialInstructions = "sin cebolla";
@@ -1166,7 +1166,7 @@ public class WebhookProcessorTests
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "1 hamburguesa sin cebolla delivery"), _testBusiness);
 
         state.Items.Should().HaveCount(1);
-        state.Items.First().Name.Should().Be("Hamburguesa");
+        state.Items.First().Name.Should().Be("Hamburguesa Clasica");
         state.SpecialInstructions.Should().Contain("sin cebolla");
     }
 
@@ -1176,7 +1176,7 @@ public class WebhookProcessorTests
     public async Task FinalReceipt_IncludesObservationWhenPresent()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1210,7 +1210,7 @@ public class WebhookProcessorTests
     public async Task FinalReceipt_NoObservationLine_WhenEmpty()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1265,7 +1265,7 @@ public class WebhookProcessorTests
     public async Task HumanHandoff_PreservesOrderContext()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.DeliveryType = "delivery";
 
         _stateStoreMock
@@ -1306,7 +1306,7 @@ public class WebhookProcessorTests
     public async Task ItemModification_NotConfusedWithObservation()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1333,7 +1333,7 @@ public class WebhookProcessorTests
     public async Task RestartIntent_ClearsObservationState()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.SpecialInstructions = "sin cebolla";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1455,7 +1455,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1488,7 +1488,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1519,7 +1519,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1553,7 +1553,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1610,7 +1610,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1640,7 +1640,7 @@ public class WebhookProcessorTests
 
         // State: ready for checkout form
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1681,7 +1681,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -1717,28 +1717,27 @@ public class WebhookProcessorTests
     // ── Menu catalog & normalization ──
 
     [Theory]
-    [InlineData("hamburguesa", "Hamburguesa")]
-    [InlineData("hamburguesita", "Hamburguesa")]
-    [InlineData("burger", "Hamburguesa")]
+    [InlineData("hamburguesa", "Hamburguesa Clasica")]
+    [InlineData("hamburguesita", "Hamburguesa Clasica")]
+    [InlineData("burger", "Hamburguesa Clasica")]
+    [InlineData("burguer", "Hamburguesa Clasica")]
     [InlineData("coca cola", "Coca Cola")]
     [InlineData("refresco", "Coca Cola")]
     [InlineData("gaseosa", "Coca Cola")]
     [InlineData("soda", "Coca Cola")]
-    [InlineData("papas fritas", "Papas")]
-    [InlineData("fritas", "Papas")]
-    [InlineData("papitas", "Papas")]
-    [InlineData("pizza", "Pizza")]
-    [InlineData("sushi roll", "Sushi Roll")]
-    [InlineData("sushi", "Sushi Roll")]
-    [InlineData("combo", "Combo")]
-    [InlineData("hot dog", "Hot Dog")]
-    [InlineData("perro caliente", "Hot Dog")]
-    [InlineData("tequenos", "Teque\u00f1os")]
-    [InlineData("empanada", "Empanada")]
-    [InlineData("jugo", "Jugo")]
+    [InlineData("papas fritas", "Papas Medianas")]
+    [InlineData("fritas", "Papas Medianas")]
+    [InlineData("papitas", "Papas Pequenas")]
+    [InlineData("combo", "Combo Clasico")]
+    [InlineData("hot dog", "Perro Clasico")]
+    [InlineData("perro caliente", "Perro Clasico")]
+    [InlineData("perro", "Perro Clasico")]
+    [InlineData("malta", "Malta")]
     [InlineData("agua", "Agua")]
-    [InlineData("cerveza", "Cerveza")]
-    [InlineData("birra", "Cerveza")]
+    [InlineData("pepsi", "Pepsi")]
+    [InlineData("bacon", "Hamburguesa Bacon")]
+    [InlineData("extra queso", "Extra Queso")]
+    [InlineData("salsa picante", "Salsa Picante")]
     public void NormalizeMenuItemName_Aliases(string input, string expected)
     {
         WebhookProcessor.NormalizeMenuItemName(input).Should().Be(expected);
@@ -1750,7 +1749,7 @@ public class WebhookProcessorTests
     [InlineData("hamburguea")]   // typo
     public void NormalizeMenuItemName_TypoTolerance(string input)
     {
-        WebhookProcessor.NormalizeMenuItemName(input).Should().Be("Hamburguesa");
+        WebhookProcessor.NormalizeMenuItemName(input).Should().Be("Hamburguesa Clasica");
     }
 
     // ── ParseOrderText ──
@@ -1760,17 +1759,17 @@ public class WebhookProcessorTests
     {
         var result = WebhookProcessor.ParseOrderText("3 hamburguesas con papas y coca");
 
-        result.Should().Contain(p => p.Name == "Hamburguesa" && p.Quantity == 3);
-        result.Should().Contain(p => p.Name == "Papas");
+        result.Should().Contain(p => p.Name == "Hamburguesa Clasica" && p.Quantity == 3);
+        result.Should().Contain(p => p.Name == "Papas Medianas");
         result.Should().Contain(p => p.Name == "Coca Cola");
     }
 
     [Fact]
     public void ParseOrderText_MultipleItemsWithQuantities()
     {
-        var result = WebhookProcessor.ParseOrderText("2 sushi roll y 1 coca");
+        var result = WebhookProcessor.ParseOrderText("2 perros y 1 coca");
 
-        result.Should().Contain(p => p.Name == "Sushi Roll" && p.Quantity == 2);
+        result.Should().Contain(p => p.Name == "Perro Clasico" && p.Quantity == 2);
         result.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
     }
 
@@ -1779,8 +1778,8 @@ public class WebhookProcessorTests
     {
         var result = WebhookProcessor.ParseOrderText("1 hamburguesa sin cebolla extra queso");
 
-        result.Should().Contain(p => p.Name == "Hamburguesa" && p.Quantity == 1);
-        var burger = result.First(p => p.Name == "Hamburguesa");
+        result.Should().Contain(p => p.Name == "Hamburguesa Clasica" && p.Quantity == 1);
+        var burger = result.First(p => p.Name == "Hamburguesa Clasica");
         burger.Modifiers.Should().NotBeNullOrWhiteSpace();
         burger.Modifiers.Should().Contain("sin cebolla");
     }
@@ -1790,8 +1789,8 @@ public class WebhookProcessorTests
     {
         var result = WebhookProcessor.ParseOrderText("2 combos con papas y refresco");
 
-        result.Should().Contain(p => p.Name == "Combo" && p.Quantity == 2);
-        result.Should().Contain(p => p.Name == "Papas");
+        result.Should().Contain(p => p.Name == "Combo Clasico" && p.Quantity == 2);
+        result.Should().Contain(p => p.Name == "Papas Medianas");
         result.Should().Contain(p => p.Name == "Coca Cola"); // refresco -> Coca Cola
     }
 
@@ -1800,17 +1799,17 @@ public class WebhookProcessorTests
     {
         var result = WebhookProcessor.ParseOrderText("hola quiero 2 hamburguesas por favor");
 
-        result.Should().Contain(p => p.Name == "Hamburguesa" && p.Quantity == 2);
+        result.Should().Contain(p => p.Name == "Hamburguesa Clasica" && p.Quantity == 2);
     }
 
     [Fact]
-    public void ParseOrderText_PizzaWithHalfModifier()
+    public void ParseOrderText_PerroWithModifier()
     {
-        var result = WebhookProcessor.ParseOrderText("1 pizza grande mitad pepperoni mitad jam\u00f3n");
+        var result = WebhookProcessor.ParseOrderText("1 perro con todo");
 
-        result.Should().Contain(p => p.Name == "Pizza");
-        var pizza = result.First(p => p.Name == "Pizza");
-        pizza.Modifiers.Should().Contain("mitad");
+        result.Should().Contain(p => p.Name == "Perro Clasico");
+        var perro = result.First(p => p.Name == "Perro Clasico");
+        perro.Modifiers.Should().Contain("con todo");
     }
 
     [Fact]
@@ -1818,7 +1817,7 @@ public class WebhookProcessorTests
     {
         var result = WebhookProcessor.ParseOrderText("hamburguesa delivery");
 
-        result.Should().Contain(p => p.Name == "Hamburguesa");
+        result.Should().Contain(p => p.Name == "Hamburguesa Clasica");
     }
 
     // ── Full flow integration tests ──
@@ -1839,7 +1838,7 @@ public class WebhookProcessorTests
             CreateTextMessagePayload("5511999999999", "2 hamburguesas y 1 coca cola delivery"),
             _testBusiness);
 
-        state.Items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
         state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
         state.DeliveryType.Should().Be("delivery");
     }
@@ -1859,11 +1858,11 @@ public class WebhookProcessorTests
             .ReturnsAsync(state);
 
         await _sut.ProcessAsync(
-            CreateTextMessagePayload("5511999999999", "1 hamburguesa sin cebolla extra queso pickup"),
+            CreateTextMessagePayload("5511999999999", "1 hamburguesa sin cebolla pickup"),
             _testBusiness);
 
-        state.Items.Should().Contain(i => i.Name == "Hamburguesa");
-        // Modifiers or special instructions should capture the "sin cebolla extra queso"
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica");
+        // Modifiers or special instructions should capture the "sin cebolla"
         var hasModifiers = state.Items.Any(i => !string.IsNullOrWhiteSpace(i.Modifiers));
         var hasObs = !string.IsNullOrWhiteSpace(state.SpecialInstructions);
         (hasModifiers || hasObs).Should().BeTrue("modifiers should be captured as item modifiers or observations");
@@ -1882,11 +1881,11 @@ public class WebhookProcessorTests
             .ReturnsAsync(state);
 
         await _sut.ProcessAsync(
-            CreateTextMessagePayload("5511999999999", "2 pizzas y 3 cervezas delivery"),
+            CreateTextMessagePayload("5511999999999", "2 perros y 3 maltas delivery"),
             _testBusiness);
 
-        state.Items.Should().Contain(i => i.Name == "Pizza" && i.Quantity == 2);
-        state.Items.Should().Contain(i => i.Name == "Cerveza" && i.Quantity == 3);
+        state.Items.Should().Contain(i => i.Name == "Perro Clasico" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Malta" && i.Quantity == 3);
     }
 
     [Fact]
@@ -1920,17 +1919,18 @@ public class WebhookProcessorTests
     {
         var item = WebhookProcessor.ExtractItemAndModifiers("hamburguesa sin cebolla");
         item.Should().NotBeNull();
-        item!.Name.Should().Be("Hamburguesa");
+        item!.Name.Should().Be("Hamburguesa Clasica");
         item.Modifiers.Should().Contain("sin cebolla");
     }
 
     [Fact]
     public void ExtractItemAndModifiers_WithExtraQueso()
     {
-        var item = WebhookProcessor.ExtractItemAndModifiers("hamburguesa extra queso");
+        // "extra queso" is now a menu item, so test with "con extra tomate"
+        var item = WebhookProcessor.ExtractItemAndModifiers("hamburguesa con extra tomate");
         item.Should().NotBeNull();
-        item!.Name.Should().Be("Hamburguesa");
-        item.Modifiers.Should().Contain("extra queso");
+        item!.Name.Should().Be("Hamburguesa Clasica");
+        item.Modifiers.Should().Contain("extra tomate");
     }
 
     [Fact]
@@ -1943,15 +1943,15 @@ public class WebhookProcessorTests
     [Fact]
     public void FormatItemText_WithModifiers()
     {
-        var entry = new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2, Modifiers = "sin cebolla" };
-        WebhookProcessor.FormatItemText(entry).Should().Be("2 Hamburguesa (sin cebolla)");
+        var entry = new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2, Modifiers = "sin cebolla" };
+        WebhookProcessor.FormatItemText(entry).Should().Be("2 Hamburguesa Clasica (sin cebolla)");
     }
 
     [Fact]
     public void FormatItemText_WithoutModifiers()
     {
-        var entry = new ConversationItemEntry { Name = "Papas", Quantity = 3 };
-        WebhookProcessor.FormatItemText(entry).Should().Be("3 Papas");
+        var entry = new ConversationItemEntry { Name = "Papas Medianas", Quantity = 3 };
+        WebhookProcessor.FormatItemText(entry).Should().Be("3 Papas Medianas");
     }
 
     // ── Existing flows still work ──
@@ -1975,7 +1975,7 @@ public class WebhookProcessorTests
             CreateTextMessagePayload("5511999999999", "2 hamburguesas delivery"),
             _testBusiness);
 
-        state.Items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
         state.DeliveryType.Should().Be("delivery");
 
         // Observation prompt should have been sent
@@ -2004,7 +2004,7 @@ public class WebhookProcessorTests
             ObservationPromptSent = true,
             ObservationAnswered = true
         };
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1, Modifiers = "sin cebolla" });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, Modifiers = "sin cebolla" });
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -2028,8 +2028,8 @@ public class WebhookProcessorTests
         var items = WebhookProcessor.ParseOrderText("3 hamburguesas cada una con papas y refresco");
 
         items.Should().HaveCountGreaterOrEqualTo(3);
-        items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 3);
-        items.Should().Contain(i => i.Name == "Papas" && i.Quantity == 3);
+        items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 3);
+        items.Should().Contain(i => i.Name == "Papas Medianas" && i.Quantity == 3);
         items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 3);
     }
 
@@ -2039,8 +2039,8 @@ public class WebhookProcessorTests
         // "2 hamburguesas todas con papas"
         var items = WebhookProcessor.ParseOrderText("2 hamburguesas todas con papas");
 
-        items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 2);
-        items.Should().Contain(i => i.Name == "Papas" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Papas Medianas" && i.Quantity == 2);
     }
 
     [Fact]
@@ -2049,7 +2049,7 @@ public class WebhookProcessorTests
         // "2 hamburguesas y 1 coca" — no "cada una", quantities stay independent
         var items = WebhookProcessor.ParseOrderText("2 hamburguesas y 1 coca");
 
-        items.Should().Contain(i => i.Name == "Hamburguesa" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
         items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
     }
 
@@ -2099,7 +2099,7 @@ public class WebhookProcessorTests
             SpecialInstructions = "sin cebolla",
             ObservationAnswered = true
         };
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -2115,7 +2115,7 @@ public class WebhookProcessorTests
         {
             DeliveryType = "delivery"
         };
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -2129,10 +2129,10 @@ public class WebhookProcessorTests
     // ──────────────────────────────────────────
 
     [Theory]
-    [InlineData("hamburgueaas", "Hamburguesa")]
+    [InlineData("hamburgueaas", "Hamburguesa Clasica")]
     [InlineData("cocas", "Coca Cola")]
-    [InlineData("hamburgusa", "Hamburguesa")]
-    [InlineData("papitas", "Papas")]
+    [InlineData("hamburgusa", "Hamburguesa Clasica")]
+    [InlineData("papitas", "Papas Pequenas")]
     [InlineData("coka", "Coca Cola")]
     public void NormalizeMenuItemName_TypoVariants_ResolveCorrectly(string input, string expected)
     {
@@ -2162,7 +2162,7 @@ public class WebhookProcessorTests
         var items = WebhookProcessor.ParseOrderText("2 hamburguesas sin cebolla");
 
         items.Should().ContainSingle();
-        items[0].Name.Should().Be("Hamburguesa");
+        items[0].Name.Should().Be("Hamburguesa Clasica");
         items[0].Quantity.Should().Be(2);
         items[0].Modifiers.Should().Contain("sin cebolla");
     }
@@ -2196,8 +2196,8 @@ public class WebhookProcessorTests
             ObservationAnswered = true,
             SpecialInstructions = "sin cebolla"
         };
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 3 });
-        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 3 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 3 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas Medianas", Quantity = 3 });
         state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 3 });
 
         _stateStoreMock
@@ -2248,7 +2248,7 @@ public class WebhookProcessorTests
             PaymentEvidenceReceived = true,
             PaymentProofMediaId = "media_12345"
         };
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -2279,7 +2279,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -2300,7 +2300,7 @@ public class WebhookProcessorTests
     public async Task StandalonePaymentMethod_MultilineCheckout_DoesNotIntercept()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -2337,7 +2337,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.PaymentMethod = "pago_movil";
         // PaymentEvidenceRequested is false — user sends proof proactively
@@ -2367,7 +2367,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.PaymentMethod = "divisas";
 
@@ -2488,7 +2488,7 @@ public class WebhookProcessorTests
         {
             DeliveryType = "delivery"
         };
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -2505,14 +2505,15 @@ public class WebhookProcessorTests
     public void BuildUpsellSuggestion_BurgerOrder_SuggestsDrinkOrSide()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         var (msg, item) = _sut.BuildUpsellSuggestion(state);
 
         msg.Should().NotBeNull();
         item.Should().NotBeNull();
-        // Should suggest from bebida or acompanamiento category
-        var validSuggestions = new[] { "Coca Cola", "Papas", "Agua", "Jugo", "Cerveza" };
+        // Should suggest from bebidas or papas category
+        var validSuggestions = new[] { "Coca Cola", "Coca Cola 1L", "Pepsi", "Te Frio", "Agua", "Malta",
+            "Papas Pequenas", "Papas Medianas", "Papas Grandes", "Papas con Queso", "Papas Mixtas" };
         validSuggestions.Should().Contain(item!);
     }
 
@@ -2527,7 +2528,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -2559,7 +2560,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.UpsellSent = true;
         state.LastSuggestedItem = "Coca Cola";
 
@@ -2592,8 +2593,8 @@ public class WebhookProcessorTests
     public void BuildComboSuggestion_CartCloseToCombo_SuggestsCompletion()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
-        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas Medianas", Quantity = 1 });
         // Has main + side, but no drink → should suggest drink to complete combo
 
         var testBizBurger = new BusinessContext(Guid.NewGuid(), "123456789", "test-token",
@@ -2605,8 +2606,8 @@ public class WebhookProcessorTests
         // and should not suggest an already-ordered item
         if (msg != null)
         {
-            msg.Should().NotContain("Hamburguesa");
-            msg.Should().NotContain("Papas");
+            msg.Should().NotContain("Hamburguesa Clasica");
+            msg.Should().NotContain("Papas Medianas");
         }
     }
 
@@ -2615,11 +2616,11 @@ public class WebhookProcessorTests
     public void BuildUpsellSuggestion_CompletedCart_ReturnsNull()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 2 });
-        state.Items.Add(new ConversationItemEntry { Name = "Papas", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Papas Medianas", Quantity = 1 });
 
-        // Cart covers comida + bebida + acompanamiento — no suggestion needed
+        // Cart covers hamburguesas + bebidas + papas — no suggestion needed
         var (msg, item) = _sut.BuildUpsellSuggestion(state);
 
         msg.Should().BeNull();
@@ -2634,16 +2635,17 @@ public class WebhookProcessorTests
         // "burger" template pairings use: hamburguesas→[bebidas, acompanamientos] (template category names)
         // Template pairings won't match demo catalog categories, so they return null gracefully
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         var (msg1, _) = _sut.BuildUpsellSuggestion(state, restaurantType: null);
 
-        // Generic pairing should work with demo catalog (category "comida" matches)
+        // Generic pairing should work with demo catalog (category "hamburguesas" matches)
         msg1.Should().NotBeNull();
 
-        // Template pairings are designed for template menus, not demo — should not crash
+        // Template pairings use same category names as demo catalog
         var (msg2, _) = _sut.BuildUpsellSuggestion(state, restaurantType: "burger");
-        // msg2 may be null (template categories don't match demo), but must not throw
+        // Should also work since burger template uses same categories
+        msg2.Should().NotBeNull();
     }
 
     // 7. Suggestion never changes existing order unexpectedly
@@ -2657,7 +2659,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -2669,7 +2671,7 @@ public class WebhookProcessorTests
             _testBusiness);
 
         // Original items must be intact
-        state.Items.Should().ContainSingle(i => i.Name == "Hamburguesa" && i.Quantity == 2);
+        state.Items.Should().ContainSingle(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
         state.Items.Should().ContainSingle(i => i.Name == "Coca Cola" && i.Quantity == 1);
         // Only 2 items in cart (suggestion was just a message, not an addition)
         state.Items.Should().HaveCount(2);
@@ -2686,7 +2688,7 @@ public class WebhookProcessorTests
             .ReturnsAsync(true);
 
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.UpsellSent = true;
         state.AddonSuggestionSent = true;
         state.LastSuggestedItem = "Coca Cola";
@@ -2747,7 +2749,7 @@ public class WebhookProcessorTests
 
         // State: user has items but hasn't chosen delivery type yet
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -2763,7 +2765,7 @@ public class WebhookProcessorTests
 
         // Items should be preserved (not reset)
         state.Items.Should().HaveCount(1);
-        state.Items[0].Name.Should().Be("Hamburguesa");
+        state.Items[0].Name.Should().Be("Hamburguesa Clasica");
         state.Items[0].Quantity.Should().Be(2);
 
         // Should NOT contain greeting/welcome/menu (restart indicators)
@@ -2849,7 +2851,7 @@ public class WebhookProcessorTests
 
         // Start with 2 hamburguesas already in cart
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
         state.DeliveryType = "delivery";
 
         _stateStoreMock
@@ -3032,7 +3034,7 @@ public class WebhookProcessorTests
 
         // State: in checkout with pago_movil, proof not yet sent
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
         state.PaymentMethod = "pago_movil";
         state.PaymentEvidenceRequested = true;
