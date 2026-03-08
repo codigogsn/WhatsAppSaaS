@@ -2938,4 +2938,127 @@ public class WebhookProcessorTests
         state.ObservationAnswered.Should().BeTrue();
         state.CheckoutFormSent.Should().BeTrue("checkout form should be sent after observation");
     }
+
+    // ── Payment proof post-confirm regression tests ──
+
+    [Fact]
+    public async Task ProofAfterConfirm_PagoMovil_CapturedAndPersistedToOrder()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // State: order just confirmed, awaiting post-confirm proof
+        var orderId = Guid.NewGuid();
+        var state = new ConversationFields
+        {
+            LastOrderId = orderId,
+            AwaitingPostConfirmProof = true
+        };
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        _orderRepositoryMock
+            .Setup(x => x.AttachPaymentProofAsync(orderId, "proof_media_789", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // User sends proof image after order confirmation
+        var imagePayload = CreateImageMessagePayload("5511999999999", "proof_media_789");
+        await _sut.ProcessAsync(imagePayload, _testBusiness);
+
+        // Proof should be captured in state
+        state.PaymentEvidenceReceived.Should().BeTrue();
+        state.PaymentProofMediaId.Should().Be("proof_media_789");
+        state.AwaitingPostConfirmProof.Should().BeFalse("flag should be cleared after proof received");
+
+        // Order should have been updated via repository
+        _orderRepositoryMock.Verify(
+            x => x.AttachPaymentProofAsync(orderId, "proof_media_789", It.IsAny<CancellationToken>()),
+            Times.Once);
+
+        // Bot should respond with confirmation
+        var proofMsg = sentMessages.FirstOrDefault(m => m.Body.Contains("Comprobante recibido"));
+        proofMsg.Should().NotBeNull("bot must respond when proof is received");
+    }
+
+    [Fact]
+    public async Task ProofAfterConfirm_Document_AlsoCaptured()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var orderId = Guid.NewGuid();
+        var state = new ConversationFields
+        {
+            LastOrderId = orderId,
+            AwaitingPostConfirmProof = true
+        };
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        _orderRepositoryMock
+            .Setup(x => x.AttachPaymentProofAsync(orderId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        // Send document (PDF receipt)
+        var docPayload = CreateDocumentMessagePayload("5511999999999", "doc_proof_001");
+        await _sut.ProcessAsync(docPayload, _testBusiness);
+
+        state.PaymentEvidenceReceived.Should().BeTrue();
+        state.PaymentProofMediaId.Should().Be("doc_proof_001");
+
+        _orderRepositoryMock.Verify(
+            x => x.AttachPaymentProofAsync(orderId, "doc_proof_001", It.IsAny<CancellationToken>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public async Task ProofBeforeConfirm_StillWorksAsBeforeAndOrderIncludesProof()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // State: in checkout with pago_movil, proof not yet sent
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1 });
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "pago_movil";
+        state.PaymentEvidenceRequested = true;
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Send proof BEFORE confirming
+        var imagePayload = CreateImageMessagePayload("5511999999999", "pre_confirm_proof");
+        await _sut.ProcessAsync(imagePayload, _testBusiness);
+
+        state.PaymentEvidenceReceived.Should().BeTrue();
+        state.PaymentProofMediaId.Should().Be("pre_confirm_proof");
+
+        // AttachPaymentProofAsync should NOT be called (no LastOrderId yet)
+        _orderRepositoryMock.Verify(
+            x => x.AttachPaymentProofAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "pre-confirm proof should not call AttachPaymentProofAsync");
+    }
+
+    [Fact]
+    public void PaymentProofReceivedMessage_MatchesExpectedText()
+    {
+        Msg.PaymentProofReceived.Should().Contain("Comprobante recibido");
+        Msg.PaymentProofReceived.Should().Contain("pendiente de verificaci");
+    }
 }

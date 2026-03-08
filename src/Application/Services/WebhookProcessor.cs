@@ -123,12 +123,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                     // 2) Media: payment evidence
                     //    Accept proof image when: explicitly requested, OR payment method
-                    //    is pago_movil/divisas and we have items (even if not formally requested)
+                    //    is pago_movil/divisas and we have items (even if not formally requested),
+                    //    OR order was confirmed but proof is still pending (post-confirm capture)
                     if (message.Type != "text")
                     {
                         var shouldCaptureProof = !state.PaymentEvidenceReceived
                             && (state.PaymentEvidenceRequested
-                                || (state.Items.Count > 0 && state.PaymentMethod is "pago_movil" or "divisas"));
+                                || (state.Items.Count > 0 && state.PaymentMethod is "pago_movil" or "divisas")
+                                || state.AwaitingPostConfirmProof);
 
                         if (shouldCaptureProof && message.Type is "image" or "document")
                         {
@@ -137,7 +139,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             // Capture media ID from image or document message
                             var mediaId = message.Image?.Id ?? message.Document?.Id;
                             if (!string.IsNullOrWhiteSpace(mediaId))
+                            {
                                 state.PaymentProofMediaId = mediaId;
+
+                                // Post-confirm: update the already-persisted order
+                                if (state.AwaitingPostConfirmProof && state.LastOrderId.HasValue)
+                                {
+                                    await _orderRepository.AttachPaymentProofAsync(
+                                        state.LastOrderId.Value, mediaId, cancellationToken);
+                                }
+                            }
+
+                            state.AwaitingPostConfirmProof = false;
 
                             await SendAsync(new OutgoingMessage
                             {
@@ -959,6 +972,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
             var totalText = order.TotalAmount.HasValue ? $"${order.TotalAmount:0.00}" : "N/A";
             await _notificationService.NotifyOrderConfirmedAsync(
                 businessContext, state.CustomerName ?? "?", itemsSummary, totalText, ct);
+        }
+
+        // Track order for post-confirm proof capture (pago_movil/divisas without proof)
+        state.LastOrderId = order.Id;
+        if (order.PaymentMethod is "pago_movil" or "divisas"
+            && string.IsNullOrWhiteSpace(order.PaymentProofMediaId))
+        {
+            state.AwaitingPostConfirmProof = true;
         }
 
         var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();

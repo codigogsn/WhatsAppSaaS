@@ -112,7 +112,7 @@ internal static class Msg
         => "\u2705 Ubicaci\u00f3n recibida. Escribe *CONFIRMAR* para finalizar.";
 
     internal static string PaymentProofReceived
-        => "\u2705 Comprobante recibido. Verificaremos el pago y te confirmamos.";
+        => "\u2705 Comprobante recibido. Tu pago qued\u00f3 pendiente de verificaci\u00f3n.";
 
     internal static string PagoMovilDetails(string bank, string id, string phone)
         => $"\ud83d\udcb3 *DATOS PARA PAGO M\u00d3VIL*\n\n"

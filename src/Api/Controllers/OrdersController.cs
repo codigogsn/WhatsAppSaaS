@@ -70,6 +70,9 @@ public sealed class OrdersController : ControllerBase
                 o.PaymentProofSubmittedAtUtc,
                 o.PaymentVerifiedAtUtc,
                 o.PaymentVerifiedBy,
+                PaymentProofExists = o.PaymentProofMediaId != null,
+                PaymentVerificationStatus = o.PaymentProofMediaId == null ? "none"
+                    : o.PaymentVerifiedAtUtc != null ? "verified" : "pending",
                 Items = o.Items.Select(i => new { i.Id, i.Name, i.Quantity, i.UnitPrice, i.LineTotal })
             })
             .ToListAsync();
@@ -108,6 +111,9 @@ public sealed class OrdersController : ControllerBase
                 x.PaymentProofSubmittedAtUtc,
                 x.PaymentVerifiedAtUtc,
                 x.PaymentVerifiedBy,
+                PaymentProofExists = x.PaymentProofMediaId != null,
+                PaymentVerificationStatus = x.PaymentProofMediaId == null ? "none"
+                    : x.PaymentVerifiedAtUtc != null ? "verified" : "pending",
                 Items = x.Items.Select(i => new { i.Id, i.Name, i.Quantity })
             })
             .SingleOrDefaultAsync();

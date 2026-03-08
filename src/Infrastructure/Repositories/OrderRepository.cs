@@ -92,6 +92,17 @@ public sealed class OrderRepository : IOrderRepository
             .FirstOrDefaultAsync(c => c.BusinessId == businessId && c.PhoneE164 == phoneE164, ct);
     }
 
+    public async Task<bool> AttachPaymentProofAsync(Guid orderId, string mediaId, CancellationToken ct = default)
+    {
+        var order = await _db.Orders.FindAsync(new object[] { orderId }, ct);
+        if (order is null) return false;
+
+        order.PaymentProofMediaId = mediaId;
+        order.PaymentProofSubmittedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+        return true;
+    }
+
     // =========================
     // Helpers
     // =========================

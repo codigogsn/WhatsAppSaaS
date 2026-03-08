@@ -7,5 +7,6 @@ public interface IOrderRepository
     Task AddOrderAsync(Order order, CancellationToken ct = default);
     Task<Order?> GetLastCompletedOrderAsync(string fromPhone, Guid businessId, CancellationToken ct = default);
     Task<Customer?> GetCustomerByPhoneAsync(string fromPhone, Guid businessId, CancellationToken ct = default);
+    Task<bool> AttachPaymentProofAsync(Guid orderId, string mediaId, CancellationToken ct = default);
 }
 

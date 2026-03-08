@@ -26,6 +26,10 @@ public sealed class ConversationFields
     public bool PaymentEvidenceReceived { get; set; }
     public string? PaymentProofMediaId { get; set; }
 
+    // Post-confirm proof capture: tracks the last confirmed order that still needs proof
+    public Guid? LastOrderId { get; set; }
+    public bool AwaitingPostConfirmProof { get; set; }
+
     public string? SpecialInstructions { get; set; }
     public bool ObservationPromptSent { get; set; }
     public bool ObservationAnswered { get; set; }
@@ -65,6 +69,8 @@ public sealed class ConversationFields
         PaymentEvidenceRequested = false;
         PaymentEvidenceReceived = false;
         PaymentProofMediaId = null;
+        // Note: LastOrderId and AwaitingPostConfirmProof are NOT reset here —
+        // they allow post-confirm proof capture for pago_movil/divisas orders.
         SpecialInstructions = null;
         ObservationPromptSent = false;
         ObservationAnswered = false;
