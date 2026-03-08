@@ -31,6 +31,7 @@ public sealed class ConversationFields
     public bool AwaitingPostConfirmProof { get; set; }
 
     public string? SpecialInstructions { get; set; }
+    public bool OrderConfirmed { get; set; }
     public bool ObservationPromptSent { get; set; }
     public bool ObservationAnswered { get; set; }
     public bool HumanHandoffRequested { get; set; }
@@ -72,6 +73,7 @@ public sealed class ConversationFields
         // Note: LastOrderId and AwaitingPostConfirmProof are NOT reset here —
         // they allow post-confirm proof capture for pago_movil/divisas orders.
         SpecialInstructions = null;
+        OrderConfirmed = false;
         ObservationPromptSent = false;
         ObservationAnswered = false;
         HumanHandoffRequested = false;

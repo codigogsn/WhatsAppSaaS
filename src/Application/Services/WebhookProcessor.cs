@@ -230,10 +230,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 : state.SpecialInstructions + "; " + rawText.Trim();
                         }
 
-                        // Now continue to checkout form
-                        state.CheckoutFormSent = true;
-
-                        var obsReply = Msg.CheckoutForm;
+                        // Now continue to order confirmation gate
+                        var obsReply = BuildOrderReplyFromState(state);
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -247,9 +245,63 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // A-edit) EDITAR — re-show order for modifications
+                    if (IsEditCommand(t) && state.Items.Count > 0)
+                    {
+                        state.ObservationPromptSent = false;
+                        state.ObservationAnswered = false;
+                        state.OrderConfirmed = false;
+                        state.CheckoutFormSent = false;
+
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = Msg.OrderSummaryWithTotal(state.Items) + "\n\n" + Msg.WhatToOrder,
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        state.LastActivityUtc = DateTime.UtcNow;
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
+                    // A-cancel) CANCELAR — reset everything
+                    if (IsCancelCommand(t) && state.Items.Count > 0)
+                    {
+                        state.ResetAfterConfirm();
+                        state.MenuSent = true;
+
+                        await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+
+                        state.LastActivityUtc = DateTime.UtcNow;
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
                     // A) Confirmar
                     if (IsConfirmCommand(t))
                     {
+                        // Pre-checkout confirmation gate: set OrderConfirmed and show checkout form
+                        if (state.Items.Count > 0 && !state.OrderConfirmed && !state.CheckoutFormSent
+                            && state.ObservationAnswered && !string.IsNullOrWhiteSpace(state.DeliveryType))
+                        {
+                            state.OrderConfirmed = true;
+                            var gateReply = BuildOrderReplyFromState(state);
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = gateReply,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        // Finalize the order (existing behavior)
                         var confirmReply = await FinalizeOrderIfPossibleAsync(state, message.From, phoneNumberId, businessContext, cancellationToken);
 
                         await SendAsync(new OutgoingMessage
@@ -471,6 +523,24 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 break;
                             }
 
+                            case ModificationType.Swap:
+                            {
+                                var existingSwap = state.Items.FirstOrDefault(
+                                    x => x.Name.Equals(orderMod.ItemName, StringComparison.OrdinalIgnoreCase));
+                                if (existingSwap != null)
+                                {
+                                    var swapQty = existingSwap.Quantity;
+                                    state.Items.Remove(existingSwap);
+                                    AddOrIncreaseItem(state, orderMod.SwapTargetName, swapQty);
+                                    modReply = Msg.ItemSwapped(orderMod.ItemName, orderMod.SwapTargetName);
+                                }
+                                else
+                                {
+                                    modReply = Msg.ItemNotFound(orderMod.ItemName);
+                                }
+                                break;
+                            }
+
                             default:
                                 modReply = Msg.ConfirmPrompt;
                                 break;
@@ -582,6 +652,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
+                    // E-stall) Ambiguous stall detection — redirect gently instead of AI parse
+                    if (IsAmbiguousStall(t))
+                    {
+                        var stallReply = state.Items.Count > 0
+                            ? Msg.GentleRedirectWithOrder(state.Items)
+                            : Msg.GentleRedirect;
+
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = stallReply,
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        state.LastActivityUtc = DateTime.UtcNow;
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
@@ -814,11 +904,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return Msg.ObservationPrompt;
         }
 
+        // Confirmation gate: show summary + ask CONFIRMAR/EDITAR/CANCELAR before checkout
+        if (!state.OrderConfirmed)
+        {
+            return Msg.OrderSummaryWithTotal(state.Items) + "\n\n" + Msg.ConfirmOrderPrompt;
+        }
+
         if (!state.CheckoutFormSent)
         {
             state.CheckoutFormSent = true;
-            // Show order summary with prices, then checkout form
-            return Msg.OrderSummaryWithTotal(state.Items) + "\n\n" + Msg.CheckoutForm;
+            return Msg.CheckoutForm;
         }
 
         return Msg.CheckoutDataReceived;
@@ -1038,6 +1133,27 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     private static bool IsConfirmCommand(string t)
         => t == "confirmar" || t == "confirmado" || t == "listo";
+
+    internal static bool IsEditCommand(string t)
+        => t is "editar" or "modificar" or "cambiar pedido" or "cambiar mi pedido";
+
+    internal static bool IsCancelCommand(string t)
+        => t is "cancelar" or "cancelar pedido" or "borrar todo" or "empezar de cero";
+
+    internal static bool IsAmbiguousStall(string t)
+    {
+        var s = StripAccents(t);
+        if (s is "mmm" or "mmmm" or "hmm" or "hmmm" or "eh" or "ehh"
+            or "espera" or "esperame" or "momento" or "un momento"
+            or "ya" or "ya ya" or "bueno"
+            or "no se" or "nose" or "dejame ver"
+            or "dejame pensar" or "que me recomiendas"
+            or "a ver" or "cual es buena" or "que hay"
+            or "que tienen" or "que me ofreces")
+            return true;
+
+        return false;
+    }
 
     internal static bool IsHumanHandoffRequest(string t)
     {
@@ -1388,13 +1504,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Order modification parser (typo-tolerant)
     // ──────────────────────────────────────────
 
-    internal enum ModificationType { Add, Remove, Replace }
+    internal enum ModificationType { Add, Remove, Replace, Swap }
 
     internal sealed class OrderModification
     {
         public ModificationType Type { get; set; }
         public int Quantity { get; set; }
         public string ItemName { get; set; } = "";
+        public string SwapTargetName { get; set; } = "";
     }
 
     internal static bool TryParseOrderModification(string rawText, out OrderModification mod)
@@ -1470,6 +1587,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 mod.Type = ModificationType.Replace;
                 mod.Quantity = repQty;
                 mod.ItemName = resolved;
+                return true;
+            }
+        }
+
+        // Pattern 5: swap — "cambia X por Y" / "cambia la X por una Y"
+        m = Regex.Match(t,
+            @"^cambia\s+(?:(?:las?|los?|el|una?|unas?)\s+)?(.+?)\s+por\s+(?:(?:las?|los?|el|una?|unas?)\s+)?(.+)$",
+            RegexOptions.IgnoreCase);
+        if (m.Success)
+        {
+            var fromRaw = StripTrailingNoise(m.Groups[1].Value);
+            var toRaw = StripTrailingNoise(m.Groups[2].Value);
+            var resolvedFrom = NormalizeMenuItemName(fromRaw);
+            var resolvedTo = NormalizeMenuItemName(toRaw);
+            if (resolvedFrom != null && resolvedTo != null)
+            {
+                mod.Type = ModificationType.Swap;
+                mod.ItemName = resolvedFrom;
+                mod.SwapTargetName = resolvedTo;
+                mod.Quantity = 0;
                 return true;
             }
         }

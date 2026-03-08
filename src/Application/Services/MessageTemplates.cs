@@ -114,6 +114,14 @@ internal static class Msg
     internal static string ObservationDetected(string obs)
         => $"\u270d\ufe0f *Observaci\u00f3n detectada:* _{obs}_\n\n\u00bfDeseas agregar otra? Si no, responde *NO*.";
 
+    // ── Order confirmation gate ──
+
+    internal static string ConfirmOrderPrompt
+        => "Responde:\n"
+         + "\u2705 *CONFIRMAR* \u2014 para proceder con tus datos\n"
+         + "\u270f\ufe0f *EDITAR* \u2014 para modificar tu pedido\n"
+         + "\u274c *CANCELAR* \u2014 para empezar de nuevo";
+
     // ── Checkout form ──
 
     internal static string CheckoutForm
@@ -293,6 +301,9 @@ internal static class Msg
     internal static string ItemReplaced(int qty, string name)
         => $"\u2705 Listo, ahora son *{qty} {name}*. Escribe *CONFIRMAR* para finalizar.";
 
+    internal static string ItemSwapped(string oldItem, string newItem)
+        => $"\u2705 Listo, cambi\u00e9 *{oldItem}* por *{newItem}*. Escribe *CONFIRMAR* para finalizar.";
+
     internal static string EmptyCart
         => "\n\nTu pedido est\u00e1 vac\u00edo. \u00bfQu\u00e9 deseas ordenar?";
 
@@ -359,6 +370,31 @@ internal static class Msg
 
     internal static string SuggestionDeclined
         => "Perfecto, asi queda tu pedido. Escribe *CONFIRMAR* para finalizar.";
+
+    // ── Conversation recovery (ambiguous/stall responses) ──
+
+    internal static string GentleRedirect
+        => "\ud83e\udd14 No estoy seguro de lo que deseas.\n\n"
+         + "\u00bfQu\u00e9 deseas ordenar?\n"
+         + "_Ejemplo: 2 hamburguesas cl\u00e1sicas, 1 papa mediana, delivery_";
+
+    internal static string GentleRedirectWithOrder(IReadOnlyList<ConversationItemEntry> items)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("\ud83e\udd14 No logr\u00e9 entender tu mensaje.");
+        sb.AppendLine();
+        sb.AppendLine("Tu pedido actual:");
+        foreach (var item in items)
+        {
+            sb.Append($"  {item.Quantity}x {item.Name}");
+            if (!string.IsNullOrWhiteSpace(item.Modifiers))
+                sb.Append($" ({item.Modifiers})");
+            sb.AppendLine();
+        }
+        sb.AppendLine();
+        sb.Append("Puedes *agregar*, *quitar* o *cambiar* productos, o escribe *CONFIRMAR* para finalizar.");
+        return sb.ToString();
+    }
 
     internal static string AbandonedResume(string itemsSummary)
         => $"Hola de nuevo! Tienes un pedido pendiente:\n{itemsSummary}\n\nQuieres continuar o empezar de nuevo?";
