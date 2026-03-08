@@ -370,6 +370,25 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                         }
 
+                        // If menu was already sent in this active session and the trigger is
+                        // an ordering-intent phrase (not a direct greeting/menu request),
+                        // skip re-greeting — just nudge the user to order.
+                        if (state.MenuSent && IsOrderingIntent(t) && !IsGreeting(t) && !IsMenuRequest(t)
+                            && state.LastActivityUtc.HasValue
+                            && (DateTime.UtcNow - state.LastActivityUtc.Value).TotalMinutes <= 10)
+                        {
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.WhatToOrder,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
 
@@ -2935,6 +2954,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (resolved != null)
         {
             var before = m.Groups[1].Value.Trim();
+            // Before splitting, check if the whole phrase (before + after) resolves
+            // as a single menu item. E.g. "hamburguesas con bbq" → "hamburguesas bbq"
+            // → "Hamburguesa BBQ" — should NOT split.
+            var beforeNoQty = Regex.Replace(before, @"^\d+\s+", "").Trim();
+            if (NormalizeMenuItemName(beforeNoQty + " " + after) != null)
+                return null; // Combined name is a menu item — keep together
+            if (NormalizeMenuItemName(beforeNoQty + " con " + after) != null)
+                return null; // "con" is part of the item name (e.g. "Perro con Queso")
+
             // "con [menu-item]" — split into two segments
             return new List<string> { before, after };
         }
@@ -2966,6 +2994,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Strip trailing noise
         itemText = StripTrailingNoise(itemText);
+
+        // Try con-collapsed variant: "hamburguesa con bbq" → "hamburguesa bbq"
+        // This catches cases where "con" links a base item to its variant name
+        if (itemText.Contains(" con ", StringComparison.OrdinalIgnoreCase))
+        {
+            var collapsed = Regex.Replace(itemText, @"\s+con\s+", " ", RegexOptions.IgnoreCase).Trim();
+            var collapsedMatch = NormalizeMenuItemName(collapsed);
+            if (collapsedMatch != null)
+            {
+                return new ParsedItem
+                {
+                    Name = collapsedMatch,
+                    Quantity = 1,
+                    Modifiers = modifiers
+                };
+            }
+        }
 
         // Try matching word by word, expanding to multi-word names
         var words = itemText.Split(' ', StringSplitOptions.RemoveEmptyEntries);

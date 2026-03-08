@@ -450,6 +450,147 @@ public class ParserHardeningTests
     }
 
     // ═══════════════════════════════════════════════════════════
+    //   G) START-FLOW IDEMPOTENCY — Bug 1
+    //   "quisiera hacer un pedido" after greeting should NOT resend menu
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task OrderingIntent_AfterRecentGreeting_DoesNotResendMenu()
+    {
+        // Simulate: user already greeted, menu was sent, session is active
+        var state = new ConversationFields
+        {
+            MenuSent = true,
+            LastActivityUtc = DateTime.UtcNow.AddMinutes(-2) // 2 min ago — active session
+        };
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var payload = MakePayload("quisiera hacer un pedido");
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        // Should send exactly 1 message (the order prompt), NOT 3 (greeting sequence)
+        _whatsAppClientMock.Verify(
+            x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "ordering intent after recent greeting should send only 1 prompt, not resend menu");
+
+        // MenuSent should still be true (no reset)
+        state.MenuSent.Should().BeTrue("menu was already sent — should NOT reset");
+    }
+
+    [Fact]
+    public async Task OrderingIntent_StaleSession_ResendsFullGreeting()
+    {
+        // Simulate: user greeted long ago, session is stale (> 10 min)
+        var state = new ConversationFields
+        {
+            MenuSent = true,
+            LastActivityUtc = DateTime.UtcNow.AddMinutes(-30) // 30 min ago — stale
+        };
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var payload = MakePayload("quisiera hacer un pedido");
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        // Should send 3 messages (full greeting sequence)
+        _whatsAppClientMock.Verify(
+            x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3),
+            "ordering intent after stale session should resend full greeting sequence");
+    }
+
+    [Fact]
+    public async Task ExplicitGreeting_AfterRecentMenu_StillResendsGreeting()
+    {
+        // A direct greeting ("hola") should always resend, even if menu was sent recently
+        var state = new ConversationFields
+        {
+            MenuSent = true,
+            LastActivityUtc = DateTime.UtcNow.AddMinutes(-1)
+        };
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var payload = MakePayload("hola");
+        await _sut.ProcessAsync(payload, _testBusiness);
+
+        // Should send 3 messages (full greeting sequence) — greetings always restart
+        _whatsAppClientMock.Verify(
+            x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3),
+            "explicit greeting should always trigger full greeting sequence");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //   H) MIXED ORDER + MODIFIER — Bug 2
+    //   "2 hamburguesas con bbq" = 2x Hamburguesa BBQ, not split
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void ParseOrder_2HamburguesasConBbq_ResolvesAsBbqVariant()
+    {
+        var parsed = WebhookProcessor.ParseOrderText("2 hamburguesas con bbq");
+
+        parsed.Should().ContainSingle("should be a single item, not split");
+        parsed[0].Name.Should().Be("Hamburguesa BBQ");
+        parsed[0].Quantity.Should().Be(2);
+    }
+
+    [Fact]
+    public void ParseOrder_HamburguesaConBbq_ResolvesAsBbqVariant()
+    {
+        var parsed = WebhookProcessor.ParseOrderText("1 hamburguesa con bbq");
+
+        parsed.Should().ContainSingle();
+        parsed[0].Name.Should().Be("Hamburguesa BBQ");
+        parsed[0].Quantity.Should().Be(1);
+    }
+
+    [Fact]
+    public void TrySplitOnConMenuItem_HamburguesasConBbq_DoesNotSplit()
+    {
+        var result = WebhookProcessor.SplitIntoOrderSegments("2 hamburguesas con bbq");
+
+        // Should stay as one segment, not split into "2 hamburguesas" + "bbq"
+        result.Should().ContainSingle("'hamburguesas con bbq' is Hamburguesa BBQ — should not split");
+    }
+
+    [Fact]
+    public void ParseOrder_HamburguesasConPapas_StillSplits()
+    {
+        // "con papas" IS a separate item — should still split
+        var parsed = WebhookProcessor.ParseOrderText("2 hamburguesas con papas");
+
+        parsed.Should().HaveCount(2);
+        parsed.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
+        parsed.Should().Contain(i => i.Name == "Papas Medianas");
+    }
+
+    [Fact]
+    public void ParseOrder_PerroConQueso_ResolvesAsPerroConQueso()
+    {
+        // "Perro con Queso" is a menu item — should NOT split
+        var parsed = WebhookProcessor.ParseOrderText("1 perro con queso");
+
+        parsed.Should().ContainSingle();
+        parsed[0].Name.Should().Be("Perro con Queso");
+    }
+
+    [Fact]
+    public void ParseOrder_PapasConQueso_ResolvesAsPapasConQueso()
+    {
+        var parsed = WebhookProcessor.ParseOrderText("1 papas con queso");
+
+        parsed.Should().ContainSingle();
+        parsed[0].Name.Should().Be("Papas con Queso");
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //   Helpers
     // ═══════════════════════════════════════════════════════════
 
