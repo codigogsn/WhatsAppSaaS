@@ -340,6 +340,114 @@ public class WebhookProcessorTests
     }
 
     [Fact]
+    public void OrderSummary_SortedByCategoryPriority()
+    {
+        // Items in wrong order: bebida, salsa, hamburguesa, papas
+        var items = new List<ConversationItemEntry>
+        {
+            new() { Name = "Coca Cola", Quantity = 1, UnitPrice = 1.50m },
+            new() { Name = "Salsa Ajo", Quantity = 1, UnitPrice = 0.50m },
+            new() { Name = "Hamburguesa Clasica", Quantity = 2, UnitPrice = 6.50m },
+            new() { Name = "Papas Medianas", Quantity = 1, UnitPrice = 3.50m }
+        };
+
+        var summary = Msg.OrderSummaryWithTotal(items);
+
+        // Hamburguesas (1) should come before Papas (3) before Salsas (6) before Bebidas (7)
+        var idxHamb = summary.IndexOf("Hamburguesa Clasica");
+        var idxPapas = summary.IndexOf("Papas Medianas");
+        var idxSalsa = summary.IndexOf("Salsa Ajo");
+        var idxCoca = summary.IndexOf("Coca Cola");
+
+        idxHamb.Should().BeLessThan(idxPapas, "hamburguesas should come before papas");
+        idxPapas.Should().BeLessThan(idxSalsa, "papas should come before salsas");
+        idxSalsa.Should().BeLessThan(idxCoca, "salsas should come before bebidas");
+    }
+
+    [Fact]
+    public void Receipt_SortedByCategoryPriority()
+    {
+        // Items in reverse order: bebida first, hamburguesa last
+        var items = new List<ConversationItemEntry>
+        {
+            new() { Name = "Coca Cola", Quantity = 1, UnitPrice = 1.50m },
+            new() { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m }
+        };
+
+        var receipt = Msg.BuildReceipt(
+            "ABC123", "Juan", "V-123", "+58414123",
+            items, null, "Calle 1", "EFECTIVO", "delivery");
+
+        var idxHamb = receipt.IndexOf("Hamburguesa Clasica");
+        var idxCoca = receipt.IndexOf("Coca Cola");
+
+        idxHamb.Should().BeLessThan(idxCoca, "hamburguesas should appear before bebidas in receipt");
+    }
+
+    [Fact]
+    public void Receipt_PagoMovil_IncludesPreparationInstruction()
+    {
+        var items = new List<ConversationItemEntry>
+        {
+            new() { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m }
+        };
+
+        var receipt = Msg.BuildReceipt(
+            "ABC123", "Juan", "V-123", "+58414123",
+            items, null, "Calle 1",
+            Msg.PaymentMethodText("pago_movil"), "delivery");
+
+        receipt.Should().Contain("PAGO M\u00d3VIL");
+        receipt.Should().Contain("Cuando env\u00edes el comprobante tu pedido entrar\u00e1 en preparaci\u00f3n.");
+    }
+
+    [Fact]
+    public void Receipt_Efectivo_NoPreparationInstruction()
+    {
+        var items = new List<ConversationItemEntry>
+        {
+            new() { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m }
+        };
+
+        var receipt = Msg.BuildReceipt(
+            "ABC123", "Juan", "V-123", "+58414123",
+            items, null, "Calle 1", "EFECTIVO", "delivery");
+
+        receipt.Should().NotContain("Cuando env\u00edes el comprobante");
+    }
+
+    [Fact]
+    public void Receipt_IncludesEstimatedTime()
+    {
+        var items = new List<ConversationItemEntry>
+        {
+            new() { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m }
+        };
+
+        var receipt = Msg.BuildReceipt(
+            "ABC123", "Juan", "V-123", "+58414123",
+            items, null, "Calle 1", "EFECTIVO", "delivery");
+
+        receipt.Should().Contain("Tiempo estimado: 30 minutos");
+    }
+
+    [Fact]
+    public void Receipt_IncludesPreparationMessage()
+    {
+        var items = new List<ConversationItemEntry>
+        {
+            new() { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m }
+        };
+
+        var receipt = Msg.BuildReceipt(
+            "ABC123", "Juan", "V-123", "+58414123",
+            items, null, "Calle 1", "EFECTIVO", "delivery");
+
+        receipt.Should().Contain("Tu pedido est\u00e1 siendo preparado");
+        receipt.Should().Contain("Te avisaremos cuando salga para delivery");
+    }
+
+    [Fact]
     public async Task FullFlow_OrderSaved_WithUnitPricesAndTotal()
     {
         Order? savedOrder = null;
@@ -507,7 +615,8 @@ public class WebhookProcessorTests
         body.Should().Contain("1x Coca Cola");
         body.Should().Contain("Direcci\u00f3n: Calle Principal #10");
         body.Should().Contain("Pago: EFECTIVO");
-        body.Should().Contain("Gracias");
+        body.Should().Contain("Tu pedido est\u00e1 siendo preparado");
+        body.Should().Contain("Tiempo estimado: 30 minutos");
     }
 
     [Fact]

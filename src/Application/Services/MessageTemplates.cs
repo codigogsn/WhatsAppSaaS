@@ -183,6 +183,30 @@ internal static class Msg
     internal static string MissingDeliveryType
         => "\u00bfEs *pick up* o *delivery*?";
 
+    // ── Category display priority (for summary/receipt sorting) ──
+
+    private static int CategoryPriority(string itemName)
+    {
+        var catalog = WebhookProcessor.ActiveCatalog ?? WebhookProcessor.MenuCatalog;
+        var entry = catalog.FirstOrDefault(e =>
+            e.Canonical.Equals(itemName, StringComparison.OrdinalIgnoreCase));
+        var cat = entry?.Category?.ToLowerInvariant() ?? "";
+        return cat switch
+        {
+            "hamburguesas" => 1,
+            "perros calientes" => 2,
+            "papas" => 3,
+            "combos" => 4,
+            "extras" => 5,
+            "salsas" => 6,
+            "bebidas" => 7,
+            _ => 8
+        };
+    }
+
+    private static IReadOnlyList<ConversationItemEntry> SortByCategory(IReadOnlyList<ConversationItemEntry> items)
+        => items.OrderBy(i => CategoryPriority(i.Name)).ToList();
+
     // ── Order summary with prices (shown before checkout form) ──
 
     internal static string OrderSummaryWithTotal(IReadOnlyList<ConversationItemEntry> items)
@@ -192,7 +216,7 @@ internal static class Msg
         sb.AppendLine();
 
         decimal total = 0m;
-        foreach (var item in items)
+        foreach (var item in SortByCategory(items))
         {
             var lineTotal = item.UnitPrice * item.Quantity;
             total += lineTotal;
@@ -234,9 +258,9 @@ internal static class Msg
         sb.AppendLine($"\ud83d\udcf1 Tel\u00e9fono: {customerPhone}");
         sb.AppendLine();
 
-        // Items with prices
+        // Items with prices — sorted by menu category
         decimal total = 0m;
-        foreach (var item in items)
+        foreach (var item in SortByCategory(items))
         {
             var lineTotal = item.UnitPrice * item.Quantity;
             total += lineTotal;
@@ -254,16 +278,23 @@ internal static class Msg
             sb.AppendLine($"\ud83d\udcb0 *TOTAL A PAGAR: ${total:0.00}*");
         }
 
+        // Estimated preparation time
+        sb.AppendLine("\u23f1 Tiempo estimado: 30 minutos");
+
         // Special instructions
         if (!string.IsNullOrWhiteSpace(specialInstructions))
             sb.AppendLine($"\u270d\ufe0f Observaci\u00f3n: {specialInstructions}");
 
         sb.AppendLine($"\ud83c\udfe1 Direcci\u00f3n: {address}");
         sb.AppendLine($"\ud83d\udcb5 Pago: {paymentText}");
+        // Payment instruction for pago movil
+        if (paymentText.Contains("PAGO M\u00d3VIL", StringComparison.OrdinalIgnoreCase))
+            sb.AppendLine("Cuando env\u00edes el comprobante tu pedido entrar\u00e1 en preparaci\u00f3n.");
         sb.AppendLine($"\ud83d\ude97 {FormatDeliveryType(deliveryType)}");
 
         sb.AppendLine();
-        sb.Append("Gracias \ud83d\ude4c");
+        sb.AppendLine("Tu pedido est\u00e1 siendo preparado \ud83d\udc68\u200d\ud83c\udf73");
+        sb.Append("Te avisaremos cuando salga para delivery \ud83d\ude97");
 
         return sb.ToString();
     }
