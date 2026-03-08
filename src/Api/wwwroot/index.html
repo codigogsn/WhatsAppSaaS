@@ -35,26 +35,35 @@
     .key { width: 280px; max-width: 100%; }
 
     /* Status pills */
-    .pill { display:inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
-    .pill-Pending { background:#f5f5f5; color:#757575; }
-    .pill-Preparing { background:#fff3e0; color:#e65100; }
-    .pill-OutForDelivery { background:#e3f2fd; color:#1565c0; }
-    .pill-Completed { background:#e8f5e9; color:#2e7d32; }
-    .pill-Cancelled { background:#ffebee; color:#c62828; }
+    .pill { display:inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .3px; }
+    .pill-Pending { background:#fef9e7; color:#9a8200; border: 1px solid #f0e6a0; }
+    .pill-Preparing { background:#fff3e0; color:#e65100; border: 1px solid #ffcc80; }
+    .pill-OutForDelivery { background:#e3f2fd; color:#1565c0; border: 1px solid #90caf9; }
+    .pill-Completed { background:#e8f5e9; color:#2e7d32; border: 1px solid #a5d6a7; }
+    .pill-Cancelled { background:#ffebee; color:#c62828; border: 1px solid #ef9a9a; }
     .pill-active { background:#e8f5e9; color:#2e7d32; }
     .pill-inactive { background:#ffebee; color:#c62828; }
 
     /* Expandable detail */
     .detail-row { display: none; }
     .detail-row.open { display: table-row; }
-    .detail-row td { background: #fafbfc; padding: 12px 20px; }
-    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 24px; max-width: 800px; }
-    .detail-grid .dg-label { font-size: 11px; color: #888; text-transform: uppercase; }
-    .detail-grid .dg-value { font-size: 14px; margin-top: 2px; }
+    .detail-row td { background: transparent; padding: 8px 12px 16px; }
+    .detail-card { background: #fff; border: 1px solid #e0e4ea; border-radius: 12px; padding: 20px 24px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 28px; max-width: 800px; }
+    .detail-grid .dg-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .4px; }
+    .detail-grid .dg-value { font-size: 14px; margin-top: 3px; }
     .items-list { list-style: none; padding: 0; margin: 4px 0 0 0; }
-    .items-list li { padding: 3px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+    .items-list li { padding: 4px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
     .items-list li:last-child { border-bottom: none; }
+    .order-total { font-size: 20px; font-weight: 800; color: #1a1a1a; margin-top: 4px; }
+    .order-subtotal { font-size: 13px; color: #888; }
     .toggle-btn { background: none; border: none; cursor: pointer; font-size: 16px; padding: 2px 6px; color: #1a73e8; }
+
+    /* Action buttons in table */
+    .status-actions { display: flex; align-items: center; gap: 6px; }
+    .status-actions select { font-size: 12px; padding: 5px 8px; border-radius: 6px; border: 1px solid #ddd; background: #fafbfc; font-weight: 600; min-width: 130px; }
+    .status-actions button { font-size: 12px; padding: 5px 14px; border-radius: 6px; background: #1a73e8; color: #fff; border: none; font-weight: 600; cursor: pointer; transition: background .15s; }
+    .status-actions button:hover { background: #1557b0; }
     .obs-tag { background: #fff8e1; color: #f57f17; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
     .human-tag { background: #fce4ec; color: #c62828; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .3px; animation: pulse 2s infinite; }
     @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.6;} }
@@ -102,8 +111,11 @@
 
     @media (max-width: 768px) {
       .detail-grid { grid-template-columns: 1fr; }
+      .detail-card { padding: 14px 16px; }
       .kpi .card { min-width: 100px; }
       .biz-panel .form-grid, .modal .form-grid { grid-template-columns: 1fr; }
+      .status-actions { flex-direction: column; }
+      .status-actions select { min-width: 100%; }
     }
   </style>
 </head>
@@ -411,14 +423,14 @@
   <!-- Filters -->
   <div class="filters">
     <div class="row">
-      <label>Status:</label>
+      <label>Estado:</label>
       <select id="status">
         <option value="">(Todos)</option>
-        <option>Pending</option>
-        <option>Preparing</option>
-        <option>OutForDelivery</option>
-        <option>Completed</option>
-        <option>Cancelled</option>
+        <option value="Pending">Pendiente</option>
+        <option value="Preparing">En preparaci\u00f3n</option>
+        <option value="OutForDelivery">En camino</option>
+        <option value="Completed">Completado</option>
+        <option value="Cancelled">Cancelado</option>
         <option value="NeedsHuman">Necesita Humano</option>
       </select>
 
@@ -735,8 +747,17 @@ async function submitCreateBiz(){
 
 // ── Status / display helpers ──
 
+const STATUS_LABELS = {
+  Pending: 'Pendiente',
+  Preparing: 'En preparaci\u00f3n',
+  OutForDelivery: 'En camino',
+  Completed: 'Completado',
+  Cancelled: 'Cancelado'
+};
+
 function statusPill(s){
-  return `<span class="pill pill-${esc(s)}">${esc(s)}</span>`;
+  const label = STATUS_LABELS[s] || esc(s);
+  return `<span class="pill pill-${esc(s)}">${label}</span>`;
 }
 
 function fmtMoney(n){ return (n ?? 0).toLocaleString('es-VE', {minimumFractionDigits:2, maximumFractionDigits:2}); }
@@ -895,14 +916,16 @@ async function load(auto=false) {
       <td style="white-space:nowrap;">${o.totalAmount != null ? fmtMoney(o.totalAmount) : '-'}</td>
       <td>${hasObs ? '<span class="obs-tag">OBS</span>' : ''}</td>
       <td>
-        <select data-id="${esc(o.id)}" onclick="event.stopPropagation()">
-          <option ${o.status==='Pending'?'selected':''}>Pending</option>
-          <option ${o.status==='Preparing'?'selected':''}>Preparing</option>
-          <option ${o.status==='OutForDelivery'?'selected':''}>OutForDelivery</option>
-          <option ${o.status==='Completed'?'selected':''}>Completed</option>
-          <option ${o.status==='Cancelled'?'selected':''}>Cancelled</option>
-        </select>
-        <button onclick="event.stopPropagation();updateStatus(this)">OK</button>
+        <div class="status-actions">
+          <select data-id="${esc(o.id)}" onclick="event.stopPropagation()">
+            <option value="Pending" ${o.status==='Pending'?'selected':''}>Pendiente</option>
+            <option value="Preparing" ${o.status==='Preparing'?'selected':''}>En preparaci\u00f3n</option>
+            <option value="OutForDelivery" ${o.status==='OutForDelivery'?'selected':''}>En camino</option>
+            <option value="Completed" ${o.status==='Completed'?'selected':''}>Completado</option>
+            <option value="Cancelled" ${o.status==='Cancelled'?'selected':''}>Cancelado</option>
+          </select>
+          <button onclick="event.stopPropagation();updateStatus(this)">Actualizar</button>
+        </div>
       </td>
     `;
     tbody.appendChild(tr);
@@ -919,21 +942,24 @@ async function load(auto=false) {
 
     detailTr.innerHTML = `
       <td colspan="8">
+        <div class="detail-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid #f0f0f0;">
+          <div>
+            <span style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:.4px;">Pedido</span>
+            <div style="font-weight:700; font-size:15px;">#${esc(o.id).slice(0,8)}</div>
+          </div>
+          <div style="text-align:right;">
+            ${statusPill(o.status)}
+            <div style="font-size:12px; color:#888; margin-top:4px;">${new Date(o.createdAtUtc).toLocaleString('es-VE')}</div>
+          </div>
+        </div>
         <div class="detail-grid">
-          <div>
-            <div class="dg-label">ID Completo</div>
-            <div class="dg-value"><code>${esc(o.id)}</code></div>
-          </div>
-          <div>
-            <div class="dg-label">Fecha</div>
-            <div class="dg-value">${new Date(o.createdAtUtc).toLocaleString('es-VE')}</div>
-          </div>
           <div>
             <div class="dg-label">Cliente</div>
             <div class="dg-value"><b>${esc(o.customerName)}</b><br/>${esc(o.customerPhone)}<br/>${esc(o.customerIdNumber)}</div>
           </div>
           <div>
-            <div class="dg-label">Metodo de Pago</div>
+            <div class="dg-label">M\u00e9todo de Pago</div>
             <div class="dg-value">${esc(o.paymentMethod) || '-'}</div>
           </div>
           <div>
@@ -941,14 +967,14 @@ async function load(auto=false) {
             <div class="dg-value"><ul class="items-list">${itemsHtml || '<li class="muted">Sin items</li>'}</ul></div>
           </div>
           <div>
-            <div class="dg-label">Montos</div>
+            <div class="dg-label">Total</div>
             <div class="dg-value">
-              Subtotal: $${fmtMoney(o.subtotalAmount)}<br/>
-              <b>Total: $${fmtMoney(o.totalAmount)}</b>
+              <span class="order-subtotal">Subtotal: $${fmtMoney(o.subtotalAmount)}</span>
+              <div class="order-total">$${fmtMoney(o.totalAmount)}</div>
             </div>
           </div>
           <div>
-            <div class="dg-label">Direccion</div>
+            <div class="dg-label">Direcci\u00f3n</div>
             <div class="dg-value">${esc(o.address) || '-'}</div>
           </div>
           <div>
@@ -957,7 +983,7 @@ async function load(auto=false) {
           </div>
           <div style="grid-column: 1 / -1;">
             <div class="dg-label">Observaciones / Instrucciones Especiales</div>
-            <div class="dg-value" style="background:#fff8e1; padding:6px 10px; border-radius:4px; ${hasObs ? '' : 'color:#aaa;'}">${hasObs ? esc(o.specialInstructions) : 'Sin observaciones'}</div>
+            <div class="dg-value" style="background:#fff8e1; padding:8px 12px; border-radius:6px; ${hasObs ? '' : 'color:#aaa;'}">${hasObs ? esc(o.specialInstructions) : 'Sin observaciones'}</div>
           </div>
           ${o.paymentProofMediaId ? `
           <div style="grid-column: 1 / -1;">
@@ -994,6 +1020,7 @@ async function load(auto=false) {
             </div>
           </div>` : ''}
         </div>
+        </div>
       </td>
     `;
     tbody.appendChild(detailTr);
@@ -1003,7 +1030,7 @@ async function load(auto=false) {
 }
 
 async function updateStatus(btn) {
-  const select = btn.parentElement.querySelector('select');
+  const select = btn.closest('.status-actions').querySelector('select');
   const id = select.getAttribute('data-id');
   const status = select.value;
   btn.disabled = true;
