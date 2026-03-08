@@ -712,6 +712,43 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // Safety: if text has clear modifier intent (extra/sin + target), don't fall
+                    // through to product creation which could create unrelated items like Malta
+                    if (state.Items.Count > 0 && HasModifierIntent(rawText))
+                    {
+                        // Try applying as a global modifier directly
+                        var catalog = ActiveCatalog ?? MenuCatalog;
+                        if (TryApplyGlobalModifier(state, rawText, catalog))
+                        {
+                            var safeReply = BuildOrderReplyFromState(state);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = safeReply,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        // Modifier intent detected but couldn't fully parse — ask for clarification
+                        var clarifyReply = "No entendí la modificación. ¿Podrías repetirlo? " + Msg.ConfirmPrompt;
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = clarifyReply,
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        state.LastActivityUtc = DateTime.UtcNow;
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
                     // E0) Quick parse (no AI)
                     if (TryParseQuickOrder(rawText, out var quickItems, out var quickDelivery, out var quickObs))
                     {
@@ -1311,6 +1348,50 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // ──────────────────────────────────────────
 
     /// <summary>
+    /// Applies a grouped/global modifier to all matching items in the order.
+    /// Handles: "extra de queso en las 3 hamburguesas", "extra queso en todas las hamburguesas",
+    /// "extra queso en cada una de las hamburguesas", "ponle extra queso a las hamburguesas".
+    /// </summary>
+    internal static bool TryApplyGlobalModifier(ConversationFields state, string rawText, MenuEntry[] catalog)
+    {
+        // Normalize "extra de queso" → "extra queso" for matching
+        var normalized = Regex.Replace(rawText.Trim(), @"\bextra\s+de\s+", "extra ", RegexOptions.IgnoreCase);
+
+        var m = Regex.Match(normalized,
+            @"^(?:(?:agrega|agregale|ponle|a[nñ]adele)\s+)?(extra\s+\w+|sin\s+\w+)\s+(?:en|a)\s+(?:(?:cada\s+un[ao]\s+de\s+|tod[ao]s?\s+)?(?:las?|los?|el)\s+)(?:(\d+)\s+)?(.+)$",
+            RegexOptions.IgnoreCase);
+
+        if (!m.Success) return false;
+
+        var modText = m.Groups[1].Value.Trim();
+        var targetRaw = m.Groups[3].Value.Trim();
+
+        var resolved = ResolveModifierFromCatalog(modText, catalog);
+        if (resolved == null && modText.StartsWith("sin ", StringComparison.OrdinalIgnoreCase))
+            resolved = new ModifierInfo { Text = modText, Price = 0m };
+        if (resolved == null) return false;
+
+        var resolvedName = NormalizeMenuItemName(targetRaw, catalog);
+        if (resolvedName == null) return false;
+
+        var matchingItems = state.Items
+            .Where(i => i.Name.Equals(resolvedName, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        if (matchingItems.Count == 0) return false;
+
+        foreach (var item in matchingItems)
+        {
+            item.Modifiers = string.IsNullOrWhiteSpace(item.Modifiers)
+                ? resolved.Text
+                : item.Modifiers + ", " + resolved.Text;
+            item.UnitPrice += resolved.Price;
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Parses observation text for per-item modifier patterns like:
     ///   "extra de queso en una y extra de tocineta en la otra"
     ///   "la primera con extra queso y la segunda con extra tocineta"
@@ -1323,6 +1404,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (state.Items.Count == 0) return false;
 
         var catalog = ActiveCatalog ?? MenuCatalog;
+
+        // Check for grouped/global modifier targeting first
+        // e.g. "extra de queso en las 3 hamburguesas", "extra queso en todas las hamburguesas"
+        if (TryApplyGlobalModifier(state, rawText, catalog))
+            return true;
 
         // Parse the text into per-instance modifier segments
         var segments = ParseModifierSegments(rawText);
@@ -2003,13 +2089,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
 
         // Pattern 6: modifier application — "extra queso en las hamburguesas" / "ponle extra queso a las hamburguesas"
-        // Also: "agrega extra queso a las hamburguesas"
+        // Also: "agrega extra queso a las hamburguesas", "extra de queso en las 3 hamburguesas"
         m = Regex.Match(t,
-            @"^(?:(?:agrega|agregale|ponle|a[nñ]adele)\s+)?(extra\s+\w+|sin\s+\w+)\s+(?:en|a)\s+(?:(?:las?|los?|el)\s+)?(?:(\d+)\s+)?(.+)$",
+            @"^(?:(?:agrega|agregale|ponle|a[nñ]adele)\s+)?(extra\s+(?:de\s+)?\w+|sin\s+\w+)\s+(?:en|a)\s+(?:(?:cada\s+un[ao]\s+de\s+|tod[ao]s?\s+)?(?:las?|los?|el)\s+)?(?:(\d+)\s+)?(.+)$",
             RegexOptions.IgnoreCase);
         if (m.Success)
         {
-            var modifierText = m.Groups[1].Value.Trim();
+            var modifierText = Regex.Replace(m.Groups[1].Value.Trim(), @"^(extra)\s+de\s+", "$1 ", RegexOptions.IgnoreCase);
             var targetQtyStr = m.Groups[2].Value;
             var targetRaw = StripTrailingNoise(m.Groups[3].Value);
             var resolvedTarget = NormalizeMenuItemName(targetRaw);
@@ -2023,9 +2109,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
             }
         }
 
-        // Pattern 7: correction intent — "falto/falta/te falto/no agregaste/no pusiste el extra de queso"
+        // Pattern 7: correction intent — "falto/falta/te falto/no agregaste/no pusiste el extra de queso [en las hamburguesas]"
         m = Regex.Match(t,
-            @"^(?:te\s+)?(?:falto|falta|no\s+(?:agregaste|pusiste|a[nñ]adiste|incluiste))\s+(?:(?:el|la|los|las)\s+)?(extra\s+(?:de\s+)?\w+|sin\s+\w+)$",
+            @"^(?:te\s+)?(?:falto|falta|no\s+(?:agregaste|pusiste|a[nñ]adiste|incluiste))\s+(?:(?:el|la|los|las)\s+)?(extra\s+(?:de\s+)?\w+|sin\s+\w+)(?:\s+(?:en|a)\s+(?:(?:cada\s+un[ao]\s+de\s+|tod[ao]s?\s+)?(?:las?|los?|el)\s+)(?:(\d+)\s+)?(.+))?$",
             RegexOptions.IgnoreCase);
         if (m.Success)
         {
@@ -2034,11 +2120,37 @@ public sealed class WebhookProcessor : IWebhookProcessor
             modifierText = Regex.Replace(modifierText, @"^(extra)\s+de\s+", "$1 ", RegexOptions.IgnoreCase);
             mod.Type = ModificationType.AddModifier;
             mod.ModifierText = modifierText;
-            mod.TargetItemName = ""; // Will be inferred from existing items
+            // If target item specified, resolve it
+            if (m.Groups[3].Success && !string.IsNullOrEmpty(m.Groups[3].Value))
+            {
+                var targetRaw = StripTrailingNoise(m.Groups[3].Value);
+                var resolvedTarget = NormalizeMenuItemName(targetRaw);
+                mod.TargetItemName = resolvedTarget ?? "";
+            }
+            else
+            {
+                mod.TargetItemName = ""; // Will be inferred from existing items
+            }
             mod.Quantity = 0;
             return true;
         }
 
+        return false;
+    }
+
+    /// <summary>
+    /// Returns true if the text has clear modifier intent targeting items already in the order.
+    /// Used as a safety net to prevent falling through to product creation (e.g. creating Malta).
+    /// </summary>
+    internal static bool HasModifierIntent(string text)
+    {
+        var t = text.Trim();
+        // Pattern: "extra/sin ... en/a las/los/el/cada/todas ..."
+        if (Regex.IsMatch(t, @"\b(?:extra\s+(?:de\s+)?\w+|sin\s+\w+)\s+(?:en|a)\s+(?:las?|los?|el|cada|tod)", RegexOptions.IgnoreCase))
+            return true;
+        // Pattern: correction verb + extra/sin
+        if (Regex.IsMatch(t, @"^(?:te\s+)?(?:falto|falta|no\s+(?:agregaste|pusiste|a[nñ]adiste|incluiste))\b.*\bextra\b", RegexOptions.IgnoreCase))
+            return true;
         return false;
     }
 
