@@ -18,6 +18,7 @@ public class AppDbContext : DbContext
     public DbSet<MenuItem> MenuItems => Set<MenuItem>();
     public DbSet<MenuItemAlias> MenuItemAliases => Set<MenuItemAlias>();
     public DbSet<BusinessUser> BusinessUsers => Set<BusinessUser>();
+    public DbSet<BackgroundJob> BackgroundJobs => Set<BackgroundJob>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -234,6 +235,23 @@ public class AppDbContext : DbContext
                 .OnDelete(DeleteBehavior.Cascade);
 
             b.HasIndex(x => new { x.BusinessId, x.Email }).IsUnique();
+        });
+
+        modelBuilder.Entity<BackgroundJob>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.JobType).IsRequired().HasMaxLength(100);
+            b.Property(x => x.PayloadJson).IsRequired();
+            b.Property(x => x.Status).IsRequired().HasMaxLength(20);
+            b.Property(x => x.RetryCount);
+            b.Property(x => x.MaxRetries);
+            b.Property(x => x.LastError).HasMaxLength(2000);
+            b.Property(x => x.ScheduledAtUtc).IsRequired();
+            b.Property(x => x.LockedAtUtc);
+            b.Property(x => x.CompletedAtUtc);
+            b.Property(x => x.BusinessId);
+
+            b.HasIndex(x => new { x.Status, x.ScheduledAtUtc });
         });
 
         modelBuilder.Entity<ConversationState>(b =>

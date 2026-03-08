@@ -103,6 +103,12 @@ try
         WhatsAppSaaS.Infrastructure.Messaging.InMemoryMessageQueue>();
     builder.Services.AddHostedService<WhatsAppSaaS.Api.Workers.WebhookProcessingWorker>();
 
+    // Background job processing
+    builder.Services.AddScoped<WhatsAppSaaS.Application.Interfaces.IBackgroundJobService,
+        WhatsAppSaaS.Infrastructure.Services.BackgroundJobService>();
+    builder.Services.AddHostedService<WhatsAppSaaS.Api.Workers.BackgroundJobWorker>();
+    builder.Services.AddHostedService<WhatsAppSaaS.Api.Workers.CleanupJobScheduler>();
+
     // ────────────────────────────────────────
     // JWT Authentication
     // ────────────────────────────────────────
@@ -506,6 +512,10 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     ExecSql(conn, """CREATE TABLE IF NOT EXISTS "BusinessUsers" ("Id" uuid NOT NULL PRIMARY KEY, "BusinessId" uuid NOT NULL REFERENCES "Businesses"("Id") ON DELETE CASCADE, "Name" text NOT NULL, "Email" text NOT NULL, "PasswordHash" text NOT NULL, "Role" text NOT NULL DEFAULT 'Operator', "IsActive" boolean NOT NULL DEFAULT true, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
     ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_BusinessUsers_BusinessId_Email" ON "BusinessUsers" ("BusinessId", "Email")""");
 
+    // ── BackgroundJobs table ──
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "BackgroundJobs" ("Id" uuid NOT NULL PRIMARY KEY, "JobType" varchar(100) NOT NULL, "PayloadJson" text NOT NULL DEFAULT '{}', "Status" varchar(20) NOT NULL DEFAULT 'Pending', "RetryCount" integer NOT NULL DEFAULT 0, "MaxRetries" integer NOT NULL DEFAULT 3, "LastError" varchar(2000), "ScheduledAtUtc" timestamp NOT NULL DEFAULT now(), "LockedAtUtc" timestamp, "CompletedAtUtc" timestamp, "BusinessId" uuid)""");
+    ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_BackgroundJobs_Status_ScheduledAtUtc" ON "BackgroundJobs" ("Status", "ScheduledAtUtc")""");
+
     // ── Boolean column repair ──
     string[] boolRepairs =
     [
@@ -555,6 +565,7 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         "20260307191229_AddPaymentProofFields",
         "20260307193423_AddBusinessUsers",
         "20260307212018_AddRestaurantType",
+        "20260308012829_AddBackgroundJobs",
     ];
     foreach (var mid in allMigrations)
     {
