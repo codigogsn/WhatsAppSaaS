@@ -48,15 +48,28 @@
     .detail-row { display: none; }
     .detail-row.open { display: table-row; }
     .detail-row td { background: transparent; padding: 8px 12px 16px; }
-    .detail-card { background: #fff; border: 1px solid #e0e4ea; border-radius: 12px; padding: 20px 24px; box-shadow: 0 2px 8px rgba(0,0,0,.06); }
-    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 28px; max-width: 800px; }
-    .detail-grid .dg-label { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .4px; }
-    .detail-grid .dg-value { font-size: 14px; margin-top: 3px; }
-    .items-list { list-style: none; padding: 0; margin: 4px 0 0 0; }
-    .items-list li { padding: 4px 0; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+    .detail-card { background: #fff; border: 1px solid #e0e4ea; border-radius: 12px; padding: 0; box-shadow: 0 2px 8px rgba(0,0,0,.06); overflow: hidden; }
+    .detail-header { display:flex; justify-content:space-between; align-items:center; padding: 16px 24px; background: #f8f9fb; border-bottom: 1px solid #eef0f4; }
+    .detail-header .dh-id { font-weight: 700; font-size: 15px; color: #333; }
+    .detail-header .dh-sub { font-size: 11px; color: #888; text-transform: uppercase; letter-spacing: .4px; }
+    .detail-header .dh-date { font-size: 12px; color: #888; margin-top: 4px; }
+    .detail-body { padding: 20px 24px; }
+    .detail-section { margin-bottom: 20px; }
+    .detail-section:last-child { margin-bottom: 0; }
+    .detail-section-title { font-size: 11px; font-weight: 700; color: #1a73e8; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; padding-bottom: 6px; border-bottom: 2px solid #e8f0fe; }
+    .detail-section-content { font-size: 14px; line-height: 1.5; }
+    .detail-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .dc-label { font-size: 11px; color: #999; margin-bottom: 2px; }
+    .dc-value { font-size: 14px; }
+    .customer-name { font-size: 16px; font-weight: 700; color: #1a1a1a; }
+    .items-list { list-style: none; padding: 0; margin: 0; }
+    .items-list li { padding: 6px 0; border-bottom: 1px solid #f4f4f4; font-size: 13px; display: flex; justify-content: space-between; align-items: baseline; }
     .items-list li:last-child { border-bottom: none; }
-    .order-total { font-size: 20px; font-weight: 800; color: #1a1a1a; margin-top: 4px; }
-    .order-subtotal { font-size: 13px; color: #888; }
+    .item-name { flex: 1; }
+    .item-price { font-weight: 600; color: #555; white-space: nowrap; margin-left: 12px; }
+    .order-total-row { display: flex; justify-content: space-between; align-items: baseline; padding-top: 10px; border-top: 2px solid #eee; margin-top: 6px; }
+    .order-total { font-size: 22px; font-weight: 800; color: #1a1a1a; }
+    .order-subtotal { font-size: 13px; color: #888; display: flex; justify-content: space-between; }
     .toggle-btn { background: none; border: none; cursor: pointer; font-size: 16px; padding: 2px 6px; color: #1a73e8; }
 
     /* Action buttons in table */
@@ -110,8 +123,9 @@
     .selected-biz-name { font-weight: 700; font-size: 14px; color: #1a73e8; }
 
     @media (max-width: 768px) {
-      .detail-grid { grid-template-columns: 1fr; }
-      .detail-card { padding: 14px 16px; }
+      .detail-cols { grid-template-columns: 1fr; }
+      .detail-header { padding: 12px 16px; }
+      .detail-body { padding: 14px 16px; }
       .kpi .card { min-width: 100px; }
       .biz-panel .form-grid, .modal .form-grid { grid-template-columns: 1fr; }
       .status-actions { flex-direction: column; }
@@ -936,89 +950,137 @@ async function load(auto=false) {
     detailTr.id = 'detail-' + o.id;
 
     const itemsHtml = (o.items || []).map(i => {
-      const price = i.unitPrice != null ? ` — $${fmtMoney(i.unitPrice)}` : '';
-      return `<li><b>${i.quantity}x</b> ${esc(i.name)}${price}</li>`;
+      const mods = i.modifiers ? ` <span style="color:#888;">(${esc(i.modifiers)})</span>` : '';
+      const price = i.unitPrice != null ? `$${fmtMoney(i.unitPrice)}` : '';
+      return `<li><span class="item-name"><b>${i.quantity}x</b> ${esc(i.name)}${mods}</span><span class="item-price">${price}</span></li>`;
     }).join('');
+
+    const deliveryLabel = o.deliveryType === 'pickup' ? 'Retiro en local' : o.deliveryType === 'delivery' ? 'Delivery' : (esc(o.deliveryType) || '-');
 
     detailTr.innerHTML = `
       <td colspan="8">
         <div class="detail-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; padding-bottom:10px; border-bottom:1px solid #f0f0f0;">
+
+        <div class="detail-header">
           <div>
-            <span style="font-size:11px; color:#888; text-transform:uppercase; letter-spacing:.4px;">Pedido</span>
-            <div style="font-weight:700; font-size:15px;">#${esc(o.id).slice(0,8)}</div>
+            <div class="dh-sub">Pedido</div>
+            <div class="dh-id">#${esc(o.id).slice(0,8)}</div>
           </div>
           <div style="text-align:right;">
             ${statusPill(o.status)}
-            <div style="font-size:12px; color:#888; margin-top:4px;">${new Date(o.createdAtUtc).toLocaleString('es-VE')}</div>
+            <div class="dh-date">${new Date(o.createdAtUtc).toLocaleString('es-VE')}</div>
           </div>
         </div>
-        <div class="detail-grid">
-          <div>
-            <div class="dg-label">Cliente</div>
-            <div class="dg-value"><b>${esc(o.customerName)}</b><br/>${esc(o.customerPhone)}<br/>${esc(o.customerIdNumber)}</div>
-          </div>
-          <div>
-            <div class="dg-label">M\u00e9todo de Pago</div>
-            <div class="dg-value">${esc(o.paymentMethod) || '-'}</div>
-          </div>
-          <div>
-            <div class="dg-label">Items del Pedido</div>
-            <div class="dg-value"><ul class="items-list">${itemsHtml || '<li class="muted">Sin items</li>'}</ul></div>
-          </div>
-          <div>
-            <div class="dg-label">Total</div>
-            <div class="dg-value">
-              <span class="order-subtotal">Subtotal: $${fmtMoney(o.subtotalAmount)}</span>
-              <div class="order-total">$${fmtMoney(o.totalAmount)}</div>
+
+        <div class="detail-body">
+
+          <!-- SECTION 1: Cliente -->
+          <div class="detail-section">
+            <div class="detail-section-title">Cliente</div>
+            <div class="detail-section-content">
+              <div class="customer-name">${esc(o.customerName) || '-'}</div>
+              <div style="margin-top:4px; color:#555;">${esc(o.customerPhone) || '-'}</div>
+              ${o.customerIdNumber ? `<div style="color:#888; font-size:13px;">C.I. ${esc(o.customerIdNumber)}</div>` : ''}
             </div>
           </div>
-          <div>
-            <div class="dg-label">Direcci\u00f3n</div>
-            <div class="dg-value">${esc(o.address) || '-'}</div>
-          </div>
-          <div>
-            <div class="dg-label">GPS</div>
-            <div class="dg-value">${gpsLink ? `<a href="${gpsLink}" target="_blank">${esc(gps)}</a>` : (esc(o.locationText) || '-')}</div>
-          </div>
-          <div style="grid-column: 1 / -1;">
-            <div class="dg-label">Observaciones / Instrucciones Especiales</div>
-            <div class="dg-value" style="background:#fff8e1; padding:8px 12px; border-radius:6px; ${hasObs ? '' : 'color:#aaa;'}">${hasObs ? esc(o.specialInstructions) : 'Sin observaciones'}</div>
-          </div>
-          ${o.paymentProofMediaId ? `
-          <div style="grid-column: 1 / -1;">
-            <div class="dg-label" style="color:#e65100;">Comprobante de Pago
-              <span class="proof-badge ${o.paymentVerifiedAtUtc ? 'proof-badge-verified' : 'proof-badge-pending'}" style="margin-left:6px;">
-                ${o.paymentVerifiedAtUtc ? 'VERIFICADO' : 'PENDIENTE'}
-              </span>
+
+          <!-- SECTION 2: Pedido -->
+          <div class="detail-section">
+            <div class="detail-section-title">Pedido</div>
+            <div class="detail-section-content">
+              <ul class="items-list">${itemsHtml || '<li class="muted">Sin items</li>'}</ul>
+              ${hasObs ? `<div style="margin-top:10px; background:#fff8e1; padding:8px 12px; border-radius:6px; font-size:13px;"><b style="color:#f57f17;">Obs:</b> ${esc(o.specialInstructions)}</div>` : ''}
             </div>
-            <div class="dg-value" style="background:#fff3e0; padding:10px 12px; border-radius:4px;">
-              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
-                <button onclick="event.stopPropagation();showProofPreview('${esc(o.id)}')" style="background:#1a73e8;color:#fff;border-color:#1a73e8;font-weight:600;">
-                  Ver Comprobante
-                </button>
-                <a href="#" onclick="event.stopPropagation();event.preventDefault();openProofNewTab('${esc(o.id)}')" style="font-size:12px;color:#1a73e8;">Abrir en pestana nueva</a>
+          </div>
+
+          <!-- SECTION 3: Total -->
+          <div class="detail-section">
+            <div class="detail-section-title">Total</div>
+            <div class="detail-section-content">
+              <div class="order-subtotal"><span>Subtotal</span><span>$${fmtMoney(o.subtotalAmount)}</span></div>
+              <div class="order-total-row"><span style="font-size:14px; font-weight:600;">Total</span><span class="order-total">$${fmtMoney(o.totalAmount)}</span></div>
+            </div>
+          </div>
+
+          <!-- SECTION 4: Entrega -->
+          <div class="detail-section">
+            <div class="detail-section-title">Entrega</div>
+            <div class="detail-section-content">
+              <div class="detail-cols">
+                <div>
+                  <div class="dc-label">Tipo</div>
+                  <div class="dc-value">${deliveryLabel}</div>
+                </div>
+                <div>
+                  <div class="dc-label">Direcci\u00f3n</div>
+                  <div class="dc-value">${esc(o.address) || '-'}</div>
+                </div>
+                ${gpsLink ? `<div>
+                  <div class="dc-label">GPS</div>
+                  <div class="dc-value"><a href="${gpsLink}" target="_blank" style="color:#1a73e8;">${esc(gps)}</a></div>
+                </div>` : (o.locationText ? `<div>
+                  <div class="dc-label">Ubicaci\u00f3n</div>
+                  <div class="dc-value">${esc(o.locationText)}</div>
+                </div>` : '')}
               </div>
-              <span class="small muted">Enviado: ${o.paymentProofSubmittedAtUtc ? new Date(o.paymentProofSubmittedAtUtc).toLocaleString('es-VE') : '-'}</span><br/>
-              ${o.paymentVerifiedAtUtc
-                ? '<span style="color:#2e7d32;"><b>VERIFICADO</b> ' + new Date(o.paymentVerifiedAtUtc).toLocaleString('es-VE') + ' por ' + esc(o.paymentVerifiedBy) + '</span>'
-                : `<div style="margin-top:6px;">
-                     <button onclick="event.stopPropagation();verifyPayment('${esc(o.id)}')" style="background:#2e7d32;color:#fff;border-color:#2e7d32;">Verificar Pago</button>
-                     <button onclick="event.stopPropagation();rejectPayment('${esc(o.id)}')" style="margin-left:4px;background:#c62828;color:#fff;border-color:#c62828;">Rechazar</button>
-                   </div>`
-              }
             </div>
-          </div>` : ''}
-          ${handoff ? `
-          <div style="grid-column: 1 / -1;">
-            <div class="dg-label" style="color:#c62828;">Estado de Handoff Humano</div>
-            <div class="dg-value" style="background:#fce4ec; padding:10px 12px; border-radius:4px;">
-              <b style="color:#c62828;">NECESITA ATENCION HUMANA</b><br/>
-              <span class="small muted">Solicitado: ${handoff.handoffAtUtc ? new Date(handoff.handoffAtUtc).toLocaleString('es-VE') : '-'}</span><br/>
-              <span class="small muted">Mensajes en espera: ${handoff.notifiedCount || 0}</span><br/>
-              <button onclick="event.stopPropagation();resolveHandoff('${esc(handoff.conversationId)}')" style="margin-top:6px;background:#2e7d32;color:#fff;border-color:#2e7d32;">Resolver (reactivar bot)</button>
+          </div>
+
+          <!-- SECTION 5: Pago -->
+          <div class="detail-section">
+            <div class="detail-section-title">Pago</div>
+            <div class="detail-section-content">
+              <div style="font-size:14px; font-weight:600;">${esc(o.paymentMethod) || '-'}</div>
+              ${o.paymentProofMediaId ? `
+              <div style="margin-top:10px; background:#fff3e0; padding:10px 12px; border-radius:6px;">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px;">
+                  <span class="proof-badge ${o.paymentVerifiedAtUtc ? 'proof-badge-verified' : 'proof-badge-pending'}">
+                    ${o.paymentVerifiedAtUtc ? 'VERIFICADO' : 'PENDIENTE'}
+                  </span>
+                  <button onclick="event.stopPropagation();showProofPreview('${esc(o.id)}')" style="background:#1a73e8;color:#fff;border:none;border-radius:4px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">
+                    Ver Comprobante
+                  </button>
+                  <a href="#" onclick="event.stopPropagation();event.preventDefault();openProofNewTab('${esc(o.id)}')" style="font-size:12px;color:#1a73e8;">Nueva pesta\u00f1a</a>
+                </div>
+                <span class="small muted">Enviado: ${o.paymentProofSubmittedAtUtc ? new Date(o.paymentProofSubmittedAtUtc).toLocaleString('es-VE') : '-'}</span>
+                ${o.paymentVerifiedAtUtc
+                  ? '<br/><span style="color:#2e7d32;font-size:13px;"><b>VERIFICADO</b> ' + new Date(o.paymentVerifiedAtUtc).toLocaleString('es-VE') + ' por ' + esc(o.paymentVerifiedBy) + '</span>'
+                  : `<div style="margin-top:8px; display:flex; gap:6px;">
+                       <button onclick="event.stopPropagation();verifyPayment('${esc(o.id)}')" style="background:#2e7d32;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">Verificar</button>
+                       <button onclick="event.stopPropagation();rejectPayment('${esc(o.id)}')" style="background:#c62828;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">Rechazar</button>
+                     </div>`
+                }
+              </div>` : ''}
             </div>
-          </div>` : ''}
+          </div>
+
+          <!-- SECTION 6: Estado -->
+          <div class="detail-section">
+            <div class="detail-section-title">Estado</div>
+            <div class="detail-section-content">
+              <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+                ${statusPill(o.status)}
+                <div class="status-actions">
+                  <select data-id="${esc(o.id)}" onclick="event.stopPropagation()">
+                    <option value="Pending" ${o.status==='Pending'?'selected':''}>Pendiente</option>
+                    <option value="Preparing" ${o.status==='Preparing'?'selected':''}>En preparaci\u00f3n</option>
+                    <option value="OutForDelivery" ${o.status==='OutForDelivery'?'selected':''}>En camino</option>
+                    <option value="Completed" ${o.status==='Completed'?'selected':''}>Completado</option>
+                    <option value="Cancelled" ${o.status==='Cancelled'?'selected':''}>Cancelado</option>
+                  </select>
+                  <button onclick="event.stopPropagation();updateStatus(this)">Actualizar</button>
+                </div>
+              </div>
+              ${handoff ? `
+              <div style="margin-top:12px; background:#fce4ec; padding:10px 12px; border-radius:6px;">
+                <b style="color:#c62828;">NECESITA ATENCION HUMANA</b><br/>
+                <span class="small muted">Solicitado: ${handoff.handoffAtUtc ? new Date(handoff.handoffAtUtc).toLocaleString('es-VE') : '-'}</span><br/>
+                <span class="small muted">Mensajes en espera: ${handoff.notifiedCount || 0}</span><br/>
+                <button onclick="event.stopPropagation();resolveHandoff('${esc(handoff.conversationId)}')" style="margin-top:6px;background:#2e7d32;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">Resolver (reactivar bot)</button>
+              </div>` : ''}
+            </div>
+          </div>
+
         </div>
         </div>
       </td>
