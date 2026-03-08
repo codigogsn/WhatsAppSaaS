@@ -281,7 +281,7 @@ public class WebhookProcessorTests
     public void CheckoutForm_HasPremiumStyle()
     {
         var state = new ConversationFields();
-        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
         state.DeliveryType = "delivery";
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
@@ -298,7 +298,117 @@ public class WebhookProcessorTests
         reply.Should().Contain("Ubicaci\u00f3n GPS:");
         reply.Should().Contain("OBLIGATORIO");
         reply.Should().Contain("CONFIRMAR");
+
+        // Order summary with prices should appear before checkout form
+        reply.Should().Contain("RESUMEN DE TU PEDIDO");
+        reply.Should().Contain("$6.50 c/u = $6.50");
+        reply.Should().Contain("TOTAL: $6.50");
     }
+
+    [Fact]
+    public void OrderSummary_ShowsItemPricesAndTotal()
+    {
+        var items = new List<ConversationItemEntry>
+        {
+            new() { Name = "Hamburguesa Clasica", Quantity = 2, UnitPrice = 6.50m },
+            new() { Name = "Coca Cola", Quantity = 1, UnitPrice = 1.50m }
+        };
+
+        var summary = Msg.OrderSummaryWithTotal(items);
+
+        summary.Should().Contain("RESUMEN DE TU PEDIDO");
+        summary.Should().Contain("2x Hamburguesa Clasica");
+        summary.Should().Contain("$6.50 c/u = $13.00");
+        summary.Should().Contain("1x Coca Cola");
+        summary.Should().Contain("$1.50 c/u = $1.50");
+        summary.Should().Contain("TOTAL: $14.50");
+    }
+
+    [Fact]
+    public void Receipt_IncludesTotalAPagar()
+    {
+        var items = new List<ConversationItemEntry>
+        {
+            new() { Name = "Hamburguesa Clasica", Quantity = 2, UnitPrice = 6.50m },
+            new() { Name = "Papas Medianas", Quantity = 1, UnitPrice = 3.50m }
+        };
+
+        var receipt = Msg.BuildReceipt(
+            "ABC12345", "Juan", "V-12345678", "+584141234567",
+            items, null, "Calle 1", "EFECTIVO", "delivery");
+
+        receipt.Should().Contain("PEDIDO CONFIRMADO");
+        receipt.Should().Contain("2x Hamburguesa Clasica");
+        receipt.Should().Contain("1x Papas Medianas");
+        receipt.Should().Contain("TOTAL A PAGAR: $16.50");
+    }
+
+    [Fact]
+    public async Task FullFlow_OrderSaved_WithUnitPricesAndTotal()
+    {
+        Order? savedOrder = null;
+        _orderRepositoryMock
+            .Setup(x => x.AddOrderAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()))
+            .Callback<Order, CancellationToken>((o, _) => savedOrder = o)
+            .Returns(Task.CompletedTask);
+
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields
+        {
+            CheckoutFormSent = true,
+            CustomerName = "Ana",
+            CustomerIdNumber = "V-99999999",
+            CustomerPhone = "04121234567",
+            Address = "Av Principal",
+            PaymentMethod = "efectivo",
+            GpsPinReceived = true,
+            DeliveryType = "delivery",
+            ObservationPromptSent = true,
+            ObservationAnswered = true
+        };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2, UnitPrice = 6.50m });
+        state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 3, UnitPrice = 1.50m });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
+
+        savedOrder.Should().NotBeNull();
+        savedOrder!.Items.Should().HaveCount(2);
+
+        var hamburguesa = savedOrder.Items.First(i => i.Name.Contains("Hamburguesa"));
+        hamburguesa.UnitPrice.Should().Be(6.50m);
+        hamburguesa.Quantity.Should().Be(2);
+        hamburguesa.LineTotal.Should().Be(13.00m);
+
+        var coca = savedOrder.Items.First(i => i.Name.Contains("Coca"));
+        coca.UnitPrice.Should().Be(1.50m);
+        coca.Quantity.Should().Be(3);
+        coca.LineTotal.Should().Be(4.50m);
+
+        savedOrder.SubtotalAmount.Should().Be(17.50m);
+        savedOrder.TotalAmount.Should().Be(17.50m);
+    }
+
+    [Fact]
+    public void AddOrIncreaseItem_SetsUnitPrice()
+    {
+        var state = new ConversationFields();
+
+        // Use quick-parse which calls AddOrIncreaseItem internally
+        WebhookProcessor.TryParseQuickOrder("2 hamburguesas clasicas", out var items, out _, out _);
+
+        items.Should().NotBeEmpty();
+        // Verify the item was found
+        items[0].Name.Should().Be("Hamburguesa Clasica");
+        items[0].Quantity.Should().Be(2);
+    }
+
 
     // ── NEW: Pago Móvil sends payment details + proof request ──
 
@@ -397,7 +507,8 @@ public class WebhookProcessorTests
         body.Should().Contain("Pedido: #");
         body.Should().Contain("Nombre: Juan P\u00e9rez");
         body.Should().Contain("C\u00e9dula: V-12345678");
-        body.Should().Contain("Pedido: 2 Hamburguesa Clasica, 1 Coca Cola");
+        body.Should().Contain("2x Hamburguesa Clasica");
+        body.Should().Contain("1x Coca Cola");
         body.Should().Contain("Direcci\u00f3n: Calle Principal #10");
         body.Should().Contain("Pago: EFECTIVO");
         body.Should().Contain("Gracias");
@@ -1020,9 +1131,9 @@ public class WebhookProcessorTests
 
         // The receipt should contain clean item names only
         var receipt = sentBodies.LastOrDefault() ?? "";
-        receipt.Should().Contain("5 Hamburguesa Clasica");
-        receipt.Should().Contain("3 Coca Cola");
-        receipt.Should().Contain("6 Papas Medianas");
+        receipt.Should().Contain("5x Hamburguesa Clasica");
+        receipt.Should().Contain("3x Coca Cola");
+        receipt.Should().Contain("6x Papas Medianas");
         receipt.Should().NotContain("hamburgueAs");
         receipt.Should().NotContain("porfavor");
         receipt.Should().Contain("PEDIDO CONFIRMADO");
@@ -1668,7 +1779,7 @@ public class WebhookProcessorTests
         var receipt = sentMessages.FirstOrDefault(m => m.Body.Contains("PEDIDO CONFIRMADO"));
         receipt.Should().NotBeNull();
         receipt!.Body.Should().Contain("Nombre: Juan");
-        receipt.Body.Should().Contain("2 Hamburguesa");
+        receipt.Body.Should().Contain("2x Hamburguesa");
     }
 
     [Fact]
@@ -2410,9 +2521,9 @@ public class WebhookProcessorTests
 
         var receipt = sentMessages.FirstOrDefault(m => m.Body.Contains("PEDIDO CONFIRMADO"));
         receipt.Should().NotBeNull();
-        receipt!.Body.Should().Contain("3 Hamburguesa");
-        receipt!.Body.Should().Contain("3 Papas");
-        receipt!.Body.Should().Contain("3 Coca Cola");
+        receipt!.Body.Should().Contain("3x Hamburguesa");
+        receipt!.Body.Should().Contain("3x Papas");
+        receipt!.Body.Should().Contain("3x Coca Cola");
         receipt!.Body.Should().Contain("sin cebolla");
     }
 

@@ -175,6 +175,35 @@ internal static class Msg
     internal static string MissingDeliveryType
         => "\u00bfEs *pick up* o *delivery*?";
 
+    // ── Order summary with prices (shown before checkout form) ──
+
+    internal static string OrderSummaryWithTotal(IReadOnlyList<ConversationItemEntry> items)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("\ud83e\uddfe *RESUMEN DE TU PEDIDO*");
+        sb.AppendLine();
+
+        decimal total = 0m;
+        foreach (var item in items)
+        {
+            var lineTotal = item.UnitPrice * item.Quantity;
+            total += lineTotal;
+
+            var line = $"  {item.Quantity}x {item.Name}";
+            if (!string.IsNullOrWhiteSpace(item.Modifiers))
+                line += $" ({item.Modifiers})";
+            if (item.UnitPrice > 0)
+                line += $"  ${item.UnitPrice:0.00} c/u = ${lineTotal:0.00}";
+            sb.AppendLine(line);
+        }
+
+        sb.AppendLine();
+        if (total > 0)
+            sb.AppendLine($"*TOTAL: ${total:0.00}*");
+
+        return sb.ToString().TrimEnd();
+    }
+
     internal static string BuildReceipt(
         string orderNumber,
         string customerName,
@@ -197,9 +226,25 @@ internal static class Msg
         sb.AppendLine($"\ud83d\udcf1 Tel\u00e9fono: {customerPhone}");
         sb.AppendLine();
 
-        // Items
-        var itemsText = string.Join(", ", items.Select(i => FormatItemText(i)));
-        sb.AppendLine($"\ud83c\udf7d\ufe0f Pedido: {itemsText}");
+        // Items with prices
+        decimal total = 0m;
+        foreach (var item in items)
+        {
+            var lineTotal = item.UnitPrice * item.Quantity;
+            total += lineTotal;
+            sb.Append($"  {item.Quantity}x {item.Name}");
+            if (!string.IsNullOrWhiteSpace(item.Modifiers))
+                sb.Append($" ({item.Modifiers})");
+            if (item.UnitPrice > 0)
+                sb.Append($"  ${lineTotal:0.00}");
+            sb.AppendLine();
+        }
+
+        if (total > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"\ud83d\udcb0 *TOTAL A PAGAR: ${total:0.00}*");
+        }
 
         // Special instructions
         if (!string.IsNullOrWhiteSpace(specialInstructions))

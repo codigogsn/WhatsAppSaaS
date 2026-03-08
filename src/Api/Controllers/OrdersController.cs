@@ -115,10 +115,12 @@ public sealed class OrdersController : ControllerBase
                 x.PaymentProofSubmittedAtUtc,
                 x.PaymentVerifiedAtUtc,
                 x.PaymentVerifiedBy,
+                x.SubtotalAmount,
+                x.TotalAmount,
                 PaymentProofExists = x.PaymentProofMediaId != null,
                 PaymentVerificationStatus = x.PaymentProofMediaId == null ? "none"
                     : x.PaymentVerifiedAtUtc != null ? "verified" : "pending",
-                Items = x.Items.Select(i => new { i.Id, i.Name, i.Quantity })
+                Items = x.Items.Select(i => new { i.Id, i.Name, i.Quantity, i.UnitPrice, i.LineTotal })
             })
             .SingleOrDefaultAsync();
 

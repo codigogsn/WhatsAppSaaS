@@ -817,7 +817,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (!state.CheckoutFormSent)
         {
             state.CheckoutFormSent = true;
-            return Msg.CheckoutForm;
+            // Show order summary with prices, then checkout form
+            return Msg.OrderSummaryWithTotal(state.Items) + "\n\n" + Msg.CheckoutForm;
         }
 
         return Msg.CheckoutDataReceived;
@@ -878,10 +879,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
             Items = state.Items.Select(i =>
             {
-                var catalog = _activeMenu ?? MenuCatalog;
-                var entry = catalog.FirstOrDefault(m =>
-                    m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase));
-                var unitPrice = entry?.Price ?? 0m;
+                var unitPrice = i.UnitPrice;
+                // Fallback to catalog lookup if price wasn't tracked in conversation
+                if (unitPrice == 0m)
+                {
+                    var catalog = _activeMenu ?? MenuCatalog;
+                    var entry = catalog.FirstOrDefault(m =>
+                        m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase));
+                    unitPrice = entry?.Price ?? 0m;
+                }
 
                 return new WhatsAppSaaS.Domain.Entities.OrderItem
                 {
@@ -1119,10 +1125,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     private static void AddOrIncreaseItem(ConversationFields state, string name, int qty, string? modifiers = null)
     {
+        // Look up unit price from catalog
+        var catalog = ActiveCatalog ?? MenuCatalog;
+        var entry = catalog.FirstOrDefault(m =>
+            m.Canonical.Equals(name, StringComparison.OrdinalIgnoreCase));
+        var unitPrice = entry?.Price ?? 0m;
+
         var existing = state.Items.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
             existing.Quantity += qty;
+            if (existing.UnitPrice == 0m && unitPrice > 0m)
+                existing.UnitPrice = unitPrice;
             // Merge modifiers if new ones provided
             if (!string.IsNullOrWhiteSpace(modifiers))
             {
@@ -1133,7 +1147,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
         else
         {
-            state.Items.Add(new ConversationItemEntry { Name = name, Quantity = qty, Modifiers = modifiers });
+            state.Items.Add(new ConversationItemEntry { Name = name, Quantity = qty, Modifiers = modifiers, UnitPrice = unitPrice });
         }
     }
 
