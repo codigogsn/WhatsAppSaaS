@@ -224,10 +224,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                         if (!IsNoObservation(t))
                         {
-                            // Append to existing observations
-                            state.SpecialInstructions = string.IsNullOrWhiteSpace(state.SpecialInstructions)
-                                ? rawText.Trim()
-                                : state.SpecialInstructions + "; " + rawText.Trim();
+                            // Try structured per-item modifier parsing first
+                            // (e.g. "extra de queso en una y extra de tocineta en la otra")
+                            if (!TryApplyPerItemModifiers(state, rawText))
+                            {
+                                // Fallback: store as raw observation text
+                                state.SpecialInstructions = string.IsNullOrWhiteSpace(state.SpecialInstructions)
+                                    ? rawText.Trim()
+                                    : state.SpecialInstructions + "; " + rawText.Trim();
+                            }
                         }
 
                         // Now continue to order confirmation gate
@@ -1302,6 +1307,350 @@ public sealed class WebhookProcessor : IWebhookProcessor
     }
 
     // ──────────────────────────────────────────
+    // Per-item modifier distribution (observation stage)
+    // ──────────────────────────────────────────
+
+    /// <summary>
+    /// Parses observation text for per-item modifier patterns like:
+    ///   "extra de queso en una y extra de tocineta en la otra"
+    ///   "la primera con extra queso y la segunda con extra tocineta"
+    ///   "uno sin cebolla y el otro con extra queso"
+    /// When found, splits multi-quantity items and applies modifiers + prices.
+    /// Returns true if modifiers were applied (caller should NOT store raw text as SpecialInstructions).
+    /// </summary>
+    internal static bool TryApplyPerItemModifiers(ConversationFields state, string rawText)
+    {
+        if (state.Items.Count == 0) return false;
+
+        var catalog = ActiveCatalog ?? MenuCatalog;
+
+        // Parse the text into per-instance modifier segments
+        var segments = ParseModifierSegments(rawText);
+        if (segments.Count == 0) return false;
+
+        // Check if ALL segments have at least one recognized modifier
+        if (segments.Any(s => s.Modifiers.Count == 0)) return false;
+
+        // Find the target item type — look for items with quantity > 1 that can be split
+        // If segments reference "primera/segunda" or "una/otra", find the multi-qty item
+        ConversationItemEntry? targetItem = null;
+
+        // Try to find a multi-quantity item (most common case)
+        if (segments.Count >= 2)
+        {
+            targetItem = state.Items.FirstOrDefault(i => i.Quantity >= segments.Count);
+        }
+
+        // Fallback: if only 1 segment, apply to first multi-qty item or first item
+        if (targetItem == null && segments.Count == 1)
+        {
+            targetItem = state.Items.FirstOrDefault(i => i.Quantity >= 1);
+        }
+
+        if (targetItem == null) return false;
+
+        // If the target item has quantity matching segments count, split into individual items
+        if (targetItem.Quantity >= 2 && segments.Count >= 2 && targetItem.Quantity >= segments.Count)
+        {
+            var basePrice = targetItem.UnitPrice;
+            var baseName = targetItem.Name;
+            var existingMods = targetItem.Modifiers;
+            var totalQty = targetItem.Quantity;
+
+            // Remove original item
+            state.Items.Remove(targetItem);
+
+            // Create individual items per segment
+            for (int i = 0; i < segments.Count; i++)
+            {
+                var seg = segments[i];
+                var modTexts = new List<string>();
+                decimal extraPrice = 0m;
+
+                foreach (var mod in seg.Modifiers)
+                {
+                    modTexts.Add(mod.Text);
+                    extraPrice += mod.Price;
+                }
+
+                var modString = string.Join(", ", modTexts);
+                if (!string.IsNullOrWhiteSpace(existingMods))
+                    modString = existingMods + ", " + modString;
+
+                state.Items.Add(new ConversationItemEntry
+                {
+                    Name = baseName,
+                    Quantity = 1,
+                    UnitPrice = basePrice + extraPrice,
+                    Modifiers = modString
+                });
+            }
+
+            // If there are remaining units not covered by segments, keep them
+            var remaining = totalQty - segments.Count;
+            if (remaining > 0)
+            {
+                state.Items.Add(new ConversationItemEntry
+                {
+                    Name = baseName,
+                    Quantity = remaining,
+                    UnitPrice = basePrice,
+                    Modifiers = existingMods
+                });
+            }
+
+            return true;
+        }
+
+        // Single segment: if qty > 1, split off 1 unit for the modifier; otherwise apply to whole item
+        if (segments.Count == 1)
+        {
+            var seg = segments[0];
+            var modTexts = new List<string>();
+            decimal extraPrice = 0m;
+
+            foreach (var mod in seg.Modifiers)
+            {
+                modTexts.Add(mod.Text);
+                extraPrice += mod.Price;
+            }
+
+            var modString = string.Join(", ", modTexts);
+
+            if (targetItem.Quantity > 1)
+            {
+                // Split: 1 unit gets modifier, rest stay unchanged
+                var basePrice = targetItem.UnitPrice;
+                var existingMods = targetItem.Modifiers;
+
+                targetItem.Quantity -= 1;
+
+                var newModString = string.IsNullOrWhiteSpace(existingMods)
+                    ? modString
+                    : existingMods + ", " + modString;
+
+                state.Items.Add(new ConversationItemEntry
+                {
+                    Name = targetItem.Name,
+                    Quantity = 1,
+                    UnitPrice = basePrice + extraPrice,
+                    Modifiers = newModString
+                });
+            }
+            else
+            {
+                targetItem.Modifiers = string.IsNullOrWhiteSpace(targetItem.Modifiers)
+                    ? modString
+                    : targetItem.Modifiers + ", " + modString;
+                targetItem.UnitPrice += extraPrice;
+            }
+
+            return true;
+        }
+
+        return false;
+    }
+
+    internal sealed class ModifierInfo
+    {
+        public string Text { get; set; } = "";
+        public decimal Price { get; set; }
+    }
+
+    internal sealed class ModifierSegment
+    {
+        public List<ModifierInfo> Modifiers { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Splits observation text into per-instance modifier segments.
+    /// Recognizes patterns: "en una/en la otra", "la primera/la segunda",
+    /// "uno sin .../el otro con ...", or newline-separated.
+    /// </summary>
+    internal static List<ModifierSegment> ParseModifierSegments(string rawText)
+    {
+        var catalog = ActiveCatalog ?? MenuCatalog;
+        var result = new List<ModifierSegment>();
+
+        // Normalize: strip "de" from "extra de queso" → "extra queso" for matching
+        var text = Regex.Replace(rawText, @"\bextra\s+de\s+", "extra ", RegexOptions.IgnoreCase);
+
+        // Split by newlines first
+        var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        // Targeting keywords: "en una", "en la otra", "uno/una con/sin", "el/la otro/a", "primera/segunda"
+        var targetingPattern = @"\b(en\s+un[ao]|en\s+l[ao]\s+otr[ao]|en\s+el\s+otr[ao]|la\s+primer[ao]|la\s+segund[ao]|un[ao]\s+(?:con|sin)|uno\s+(?:con|sin)|el\s+otr[ao]|l[ao]\s+otr[ao])\b";
+        var hasTargeting = Regex.IsMatch(text, targetingPattern, RegexOptions.IgnoreCase);
+
+        if (!hasTargeting && lines.Length <= 1)
+        {
+            // No per-item targeting — not a per-item modifier message
+            return result;
+        }
+
+        // Strategy: split into segments by per-item targeting boundaries or newlines
+        var allSegments = new List<string>();
+
+        foreach (var line in lines)
+        {
+            // Split by " y " when followed by a per-item targeting word or a modifier that
+            // will eventually have targeting (e.g. "extra queso en la otra")
+            var parts = SplitLineByTargetingBoundaries(line);
+
+            foreach (var part in parts)
+            {
+                var trimmed = part.Trim();
+                if (!string.IsNullOrWhiteSpace(trimmed))
+                    allSegments.Add(trimmed);
+            }
+        }
+
+        foreach (var seg in allSegments)
+        {
+            var segment = new ModifierSegment();
+
+            // Try to extract modifier content from targeting constructs
+            // Form 1: "una/uno/el otro/la otra con/sin ..." — extract after "con/sin"
+            var conMatch = Regex.Match(seg,
+                @"\b(?:la\s+primer[ao]|la\s+segund[ao]|un[ao]|uno|el\s+otr[ao]|l[ao]\s+otr[ao])\s+(con\s+.+|sin\s+.+)$",
+                RegexOptions.IgnoreCase);
+
+            string cleaned;
+            if (conMatch.Success)
+            {
+                cleaned = conMatch.Groups[1].Value.Trim();
+            }
+            else
+            {
+                // Form 2: "extra queso en una/en la otra" — strip the targeting suffix
+                cleaned = Regex.Replace(seg,
+                    @"\s*\b(en\s+(?:un[ao]|l[ao]\s+otr[ao]|el\s+otr[ao]))\s*$",
+                    "", RegexOptions.IgnoreCase).Trim();
+            }
+
+            // Split by "+" or " y " for multiple modifiers in same segment
+            var modParts = Regex.Split(cleaned, @"\s*\+\s*|\s+y\s+", RegexOptions.IgnoreCase);
+
+            foreach (var modPart in modParts)
+            {
+                var modText = modPart.Trim();
+                if (string.IsNullOrWhiteSpace(modText)) continue;
+
+                // Strip leading "con " if present
+                modText = Regex.Replace(modText, @"^con\s+", "", RegexOptions.IgnoreCase).Trim();
+
+                // Try to resolve as a known extra/modifier from catalog
+                var resolved = ResolveModifierFromCatalog(modText, catalog);
+                if (resolved != null)
+                {
+                    segment.Modifiers.Add(resolved);
+                }
+                else if (modText.StartsWith("sin ", StringComparison.OrdinalIgnoreCase))
+                {
+                    // "sin X" is always valid as a modifier, no price
+                    segment.Modifiers.Add(new ModifierInfo { Text = modText, Price = 0m });
+                }
+            }
+
+            if (segment.Modifiers.Count > 0)
+                result.Add(segment);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Splits a single line into segments at " y " boundaries where per-item targeting occurs.
+    /// E.g. "extra queso en una y extra tocineta en la otra" → ["extra queso en una", "extra tocineta en la otra"]
+    /// But "la otra con extra queso y extra tocineta" stays as one segment (no re-targeting after " y ").
+    /// </summary>
+    private static List<string> SplitLineByTargetingBoundaries(string line)
+    {
+        var result = new List<string>();
+        // Find all " y " positions and check if each one separates two targeting segments
+        var yPattern = @"\s+y\s+";
+        var matches = Regex.Matches(line, yPattern, RegexOptions.IgnoreCase);
+
+        if (matches.Count == 0)
+        {
+            result.Add(line);
+            return result;
+        }
+
+        // Targeting pattern for checking if a segment contains per-item targeting
+        var targetCheck = @"\b(en\s+un[ao]|en\s+l[ao]\s+otr[ao]|en\s+el\s+otr[ao]|la\s+primer[ao]|la\s+segund[ao]|un[ao]\s+(?:con|sin)|uno\s+(?:con|sin)|el\s+otr[ao]|l[ao]\s+otr[ao])\b";
+
+        // Try each " y " as a potential split point
+        // Split at the " y " where the LEFT part has targeting, creating a clean segment boundary
+        int lastSplit = 0;
+        foreach (Match m in matches)
+        {
+            var left = line[lastSplit..m.Index];
+            var right = line[(m.Index + m.Length)..];
+
+            // Split here if left side contains targeting OR right side starts with/contains targeting
+            var leftHasTarget = Regex.IsMatch(left, targetCheck, RegexOptions.IgnoreCase);
+            var rightHasTarget = Regex.IsMatch(right, targetCheck, RegexOptions.IgnoreCase);
+
+            if (leftHasTarget && rightHasTarget)
+            {
+                result.Add(left.Trim());
+                lastSplit = m.Index + m.Length;
+            }
+        }
+
+        // Add remaining text
+        var remainder = line[lastSplit..].Trim();
+        if (!string.IsNullOrWhiteSpace(remainder))
+            result.Add(remainder);
+
+        // If no splits happened, return original
+        if (result.Count == 0)
+            result.Add(line);
+
+        return result;
+    }
+
+    /// <summary>
+    /// Resolves a modifier text to a known extra from the catalog.
+    /// Handles "extra queso", "queso extra", "extra rocineta" (typo), etc.
+    /// Returns null if no safe match found.
+    /// </summary>
+    private static ModifierInfo? ResolveModifierFromCatalog(string modText, MenuEntry[] catalog)
+    {
+        var t = StripAccents(modText.Trim().ToLowerInvariant());
+
+        // Look for extras category items
+        foreach (var entry in catalog.Where(e => e.Category == "extras"))
+        {
+            var canonLower = StripAccents(entry.Canonical.ToLowerInvariant());
+            if (t == canonLower) return new ModifierInfo { Text = entry.Canonical.ToLowerInvariant(), Price = entry.Price };
+
+            foreach (var alias in entry.Aliases)
+            {
+                var a = StripAccents(alias.ToLowerInvariant());
+                if (t == a) return new ModifierInfo { Text = entry.Canonical.ToLowerInvariant(), Price = entry.Price };
+            }
+
+            // Fuzzy match for close typos (e.g. "rocineta" → "tocineta") — conservative distance
+            if (t.Length >= 5)
+            {
+                if (LevenshteinDistance(t, canonLower) <= 2)
+                    return new ModifierInfo { Text = entry.Canonical.ToLowerInvariant(), Price = entry.Price };
+
+                foreach (var alias in entry.Aliases)
+                {
+                    var a = StripAccents(alias.ToLowerInvariant());
+                    if (a.Length >= 5 && LevenshteinDistance(t, a) <= 2)
+                        return new ModifierInfo { Text = entry.Canonical.ToLowerInvariant(), Price = entry.Price };
+                }
+            }
+        }
+
+        return null;
+    }
+
+    // ──────────────────────────────────────────
     // AI Assistant: smart suggestions (upsell, combo)
     // ──────────────────────────────────────────
 
@@ -1799,7 +2148,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         new() { Canonical = "Extra Queso", Aliases = new[] { "extra queso", "queso extra", "mas queso" },
             Category = "extras", Price = 1.00m },
         new() { Canonical = "Extra Tocineta", Aliases = new[] { "extra tocineta", "tocineta extra",
-            "extra bacon", "mas tocineta" },
+            "extra bacon", "mas tocineta", "extra rocineta", "rocineta extra" },
             Category = "extras", Price = 1.50m },
         new() { Canonical = "Extra Carne", Aliases = new[] { "extra carne", "carne extra", "doble carne", "mas carne" },
             Category = "extras", Price = 2.50m },
