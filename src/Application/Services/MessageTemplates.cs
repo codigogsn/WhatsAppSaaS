@@ -81,7 +81,7 @@ internal static class Msg
          + "\ud83e\udeaa *C\u00e9dula:*\n"
          + "\ud83d\udcf1 *Tel\u00e9fono:*\n"
          + "\ud83c\udfe1 *Direcci\u00f3n:*\n"
-         + "\ud83d\udcb5 *Pago:* EFECTIVO / DIVISAS / PAGO M\u00d3VIL\n"
+         + "\ud83d\udcb5 *Pago (PAGO M\u00d3VIL / EFECTIVO / DIVISAS / ZELLE):*\n"
          + "\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n"
          + "\u2705 *OBLIGATORIO*\n\n"
          + "Puedes responder copiando y pegando esta planilla\n"
@@ -315,6 +315,7 @@ internal static class Msg
             "pago_movil" => "PAGO M\u00d3VIL (pendiente verificaci\u00f3n)",
             "divisas" => "DIVISAS (pendiente verificaci\u00f3n)",
             "efectivo" => "EFECTIVO",
+            "zelle" => "ZELLE (pendiente verificaci\u00f3n)",
             _ => "EFECTIVO"
         };
 }

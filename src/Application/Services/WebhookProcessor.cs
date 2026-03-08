@@ -435,6 +435,29 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // B3) Standalone delivery/pickup answer (no items, just the word)
+                    if (state.Items.Count > 0 && string.IsNullOrWhiteSpace(state.DeliveryType))
+                    {
+                        var standaloneDelivery = NormalizeDeliveryType(rawText);
+                        if (standaloneDelivery != null)
+                        {
+                            state.DeliveryType = standaloneDelivery;
+                            var deliveryReply = BuildOrderReplyFromState(state);
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = deliveryReply,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                    }
+
                     // C) Order modification: add/remove/replace items (typo-tolerant)
                     if (TryParseOrderModification(rawText, out var orderMod))
                     {
@@ -614,17 +637,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // E0) Quick parse (no AI)
                     if (TryParseQuickOrder(rawText, out var quickItems, out var quickDelivery, out var quickObs))
                     {
-                        // Use the richer ParseOrderText to get modifiers
+                        // TryParseQuickOrder already calls ParseOrderText internally.
+                        // Use its returned items directly to avoid double-adding.
                         var parsedRich = ParseOrderText(rawText);
                         foreach (var p in parsedRich)
                             AddOrIncreaseItem(state, p.Name, p.Quantity, p.Modifiers);
-                        // Fallback: if ParseOrderText missed items that regex found, add them
-                        var richNames = new HashSet<string>(parsedRich.Select(p => p.Name), StringComparer.OrdinalIgnoreCase);
-                        foreach (var (name, qty) in quickItems)
-                        {
-                            if (!richNames.Contains(name))
-                                AddOrIncreaseItem(state, name, qty);
-                        }
 
                         if (!string.IsNullOrWhiteSpace(quickDelivery))
                             state.DeliveryType = quickDelivery;
@@ -1864,6 +1881,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return "divisas";
         if (p.Contains("efect") || p is "cash")
             return "efectivo";
+        if (p.Contains("zelle"))
+            return "zelle";
 
         return null;
     }

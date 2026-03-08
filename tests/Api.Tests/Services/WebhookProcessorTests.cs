@@ -293,8 +293,8 @@ public class WebhookProcessorTests
         reply.Should().Contain("C\u00e9dula:");
         reply.Should().Contain("Tel\u00e9fono:");
         reply.Should().Contain("Direcci\u00f3n:");
-        reply.Should().Contain("Pago:");
-        reply.Should().Contain("EFECTIVO / DIVISAS / PAGO M\u00d3VIL");
+        reply.Should().Contain("Pago (PAGO M\u00d3VIL");
+        reply.Should().Contain("ZELLE):");
         reply.Should().Contain("Ubicaci\u00f3n GPS:");
         reply.Should().Contain("OBLIGATORIO");
         reply.Should().Contain("CONFIRMAR");
@@ -2732,5 +2732,210 @@ public class WebhookProcessorTests
     {
         WebhookProcessor.IsSuggestionAcceptance(WebhookProcessor.Normalize(input))
             .Should().Be(expected);
+    }
+
+    // ── BUG 1 regression: "delivery" must advance stage, not restart ──
+
+    [Fact]
+    public async Task DeliveryAnswer_AdvancesConversation_DoesNotRestart()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // State: user has items but hasn't chosen delivery type yet
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // User sends just "delivery"
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "delivery"),
+            _testBusiness);
+
+        // Delivery type should be set
+        state.DeliveryType.Should().Be("delivery");
+
+        // Items should be preserved (not reset)
+        state.Items.Should().HaveCount(1);
+        state.Items[0].Name.Should().Be("Hamburguesa");
+        state.Items[0].Quantity.Should().Be(2);
+
+        // Should NOT contain greeting/welcome/menu (restart indicators)
+        var allText = string.Join(" ", sentMessages.Select(m => m.Body));
+        allText.Should().NotContain("bienvenido", "delivery should not restart the conversation");
+    }
+
+    [Fact]
+    public async Task PickupAnswer_AdvancesConversation_DoesNotRestart()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Coca Cola", Quantity = 1 });
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "pick up"),
+            _testBusiness);
+
+        state.DeliveryType.Should().Be("pickup");
+        state.Items.Should().HaveCount(1);
+        state.Items[0].Name.Should().Be("Coca Cola");
+    }
+
+    // ── BUG 2 regression: payment template format ──
+
+    [Fact]
+    public void CheckoutForm_PaymentField_HasOptionsInLabel()
+    {
+        var form = Msg.CheckoutForm;
+
+        // Options should be in the label (parenthetical), not after colon as values
+        form.Should().Contain("Pago (PAGO M");
+        form.Should().Contain("ZELLE):");
+
+        // The old format had options as colon-values that got parsed as payment text
+        form.Should().NotContain("Pago:* EFECTIVO", "options must not appear after colon");
+    }
+
+    // ── BUG 3 regression: order quantity aggregation ──
+
+    [Fact]
+    public async Task QuickParse_DoesNotDoubleAddItems()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // User orders "2 hamburguesas" — should result in exactly 2, not 4
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "2 hamburguesas"),
+            _testBusiness);
+
+        var burger = state.Items.FirstOrDefault(i =>
+            i.Name.Contains("amburg", StringComparison.OrdinalIgnoreCase));
+        burger.Should().NotBeNull();
+        burger!.Quantity.Should().Be(2, "initial order of 2 should not be doubled");
+    }
+
+    [Fact]
+    public async Task OrderModification_AddItems_CorrectMath()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // Start with 2 hamburguesas already in cart
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa", Quantity = 2 });
+        state.DeliveryType = "delivery";
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // User says "agrega 6 hamburguesas mas"
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "agrega 6 hamburguesas mas"),
+            _testBusiness);
+
+        var burger = state.Items.FirstOrDefault(i =>
+            i.Name.Contains("amburg", StringComparison.OrdinalIgnoreCase));
+        burger.Should().NotBeNull();
+        burger!.Quantity.Should().Be(8, "2 existing + 6 added = 8, not 10");
+    }
+
+    [Fact]
+    public async Task CompoundOrder_CorrectQuantities()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Compound order: "2 hamburguesas con papas y coca cola"
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "2 hamburguesas con papas y coca cola"),
+            _testBusiness);
+
+        // Should have items without doubling
+        var totalItems = state.Items.Sum(i => i.Quantity);
+        totalItems.Should().BeLessOrEqualTo(5, "compound order should not double-add items");
+
+        // Hamburguesa should be exactly 2
+        var burger = state.Items.FirstOrDefault(i =>
+            i.Name.Contains("amburg", StringComparison.OrdinalIgnoreCase));
+        burger.Should().NotBeNull();
+        burger!.Quantity.Should().Be(2);
+    }
+
+    // ── Full flow regression: order → delivery → observation → checkout ──
+
+    [Fact]
+    public async Task FullFlow_OrderThenDelivery_AdvancesCorrectly()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Step 1: Order items
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "quiero 1 hamburguesa"),
+            _testBusiness);
+
+        state.Items.Should().NotBeEmpty("items should be parsed");
+
+        // Step 2: Answer delivery type
+        sentMessages.Clear();
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "delivery"),
+            _testBusiness);
+
+        state.DeliveryType.Should().Be("delivery");
+        state.Items.Should().NotBeEmpty("items must survive delivery answer");
+
+        // Step 3: Answer observation
+        sentMessages.Clear();
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "no"),
+            _testBusiness);
+
+        state.ObservationAnswered.Should().BeTrue();
+        state.CheckoutFormSent.Should().BeTrue("checkout form should be sent after observation");
     }
 }
