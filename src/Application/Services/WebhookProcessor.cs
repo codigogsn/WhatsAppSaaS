@@ -1099,10 +1099,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         var t = input.ToLowerInvariant();
 
-        if (t.Contains("delivery") || t.Contains("domicilio"))
+        if (t.Contains("delivery") || t.Contains("domicilio") || t.Contains("envio") || t.Contains("envío"))
             return "delivery";
 
-        if (t.Contains("pick") || t.Contains("pickup") || t.Contains("recoger"))
+        if (t.Contains("pick") || t.Contains("pickup") || t.Contains("recoger")
+            || t.Contains("retirar") || t.Contains("buscar"))
             return "pickup";
 
         return null;
@@ -1986,9 +1987,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         var t = rawText.ToLowerInvariant();
 
-        if (t.Contains("delivery") || t.Contains("domicilio"))
+        if (t.Contains("delivery") || t.Contains("domicilio") || t.Contains("envio") || t.Contains("envío"))
             deliveryType = "delivery";
-        else if (t.Contains("pick up") || t.Contains("pickup") || t.Contains("recoger"))
+        else if (t.Contains("pick up") || t.Contains("pickup") || t.Contains("recoger")
+                 || t.Contains("retirar") || t.Contains("buscar"))
             deliveryType = "pickup";
 
         var parsed = ParseOrderText(rawText);
@@ -2024,6 +2026,51 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return TryParseQuickOrder(rawText, out items, out deliveryType, out _);
     }
 
+    // Convert Spanish word numbers to digits: "una hamburguesa" → "1 hamburguesa"
+    // Converts at start of line/segment or after comma/conjunction " y "
+    internal static string ConvertWordNumbersToDigits(string text)
+    {
+        // Process each line independently to preserve newlines
+        var lines = text.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            // Replace word numbers at: start of line, after comma, after " y "
+            var line = lines[i];
+            // Start of line
+            line = Regex.Replace(line,
+                @"^\s*(un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+",
+                m => WordToDigit(m.Groups[1].Value) + " ",
+                RegexOptions.IgnoreCase);
+            // After comma
+            line = Regex.Replace(line,
+                @"(?<=,)\s*(un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+",
+                m => WordToDigit(m.Groups[1].Value) + " ",
+                RegexOptions.IgnoreCase);
+            // After " y "
+            line = Regex.Replace(line,
+                @"(?<=\s+y\s+)(un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+",
+                m => WordToDigit(m.Groups[1].Value) + " ",
+                RegexOptions.IgnoreCase);
+            lines[i] = line;
+        }
+        return string.Join("\n", lines);
+    }
+
+    private static string WordToDigit(string word) => word.ToLowerInvariant() switch
+    {
+        "un" or "una" or "uno" => "1",
+        "dos" => "2",
+        "tres" => "3",
+        "cuatro" => "4",
+        "cinco" => "5",
+        "seis" => "6",
+        "siete" => "7",
+        "ocho" => "8",
+        "nueve" => "9",
+        "diez" => "10",
+        _ => word
+    };
+
     // Core order text parser: splits by conjunctions, handles "N items con/y other items"
     // Supports compound orders like "3 hamburguesas cada una con papas y refresco"
     // where the parent quantity (3) propagates to companion items (papas, refresco).
@@ -2032,20 +2079,29 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var results = new List<ParsedItem>();
         var text = rawText.Trim();
 
-        // Noise words to strip (greetings + filler)
-        var noisePattern = @"\b(hola|buenas?|buenos?\s+d[ií]as?|buenas\s+tardes|buenas\s+noches|hey|epa|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|me\s+das?|dame|necesito|pedimos|para\s+llevar|para\s+comer|mand[ae]\s*me)\b";
+        // Noise words to strip (greetings + filler) — preserve newlines for segment splitting
+        var noisePattern = @"\b(hola|buenas?|buenos?\s+d[ií]as?|buenas\s+tardes|buenas\s+noches|hey|epa|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|me\s+das?|dame|necesito|pedimos|para\s+comer|mand[ae]\s*me)\b";
         var cleaned = Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase);
-        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
+        // Collapse spaces on each line but preserve newlines
+        cleaned = string.Join("\n", cleaned.Split('\n').Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim()));
+        cleaned = cleaned.Trim();
+
+        // Convert Spanish word numbers to digits at the start of segments
+        cleaned = ConvertWordNumbersToDigits(cleaned);
+
+        // Strip delivery/pickup keywords — already captured by TryParseQuickOrder
+        cleaned = Regex.Replace(cleaned,
+            @"\b(para\s+)?(delivery|pick\s*up|domicilio|a\s+domicilio|env[ií]o|para\s+retirar|voy\s+a\s+buscar|para\s+llevar)\b",
+            " ", RegexOptions.IgnoreCase);
+        cleaned = string.Join("\n", cleaned.Split('\n').Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim()));
+        cleaned = cleaned.Trim();
 
         // Detect "cada una/uno" propagation pattern — strip phrase, remember to propagate
-        bool propagateQty = false;
-        cleaned = Regex.Replace(cleaned, @"\s+cada\s+un[ao]?\b", " ", RegexOptions.IgnoreCase);
-        if (!string.Equals(cleaned, Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase).Replace("  ", " ").Trim()))
-            propagateQty = true;
-        // Also detect "todas con", "todos con" pattern
-        if (Regex.IsMatch(text, @"\b(tod[ao]s?\s+con)\b", RegexOptions.IgnoreCase))
-            propagateQty = true;
-        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
+        bool propagateQty = Regex.IsMatch(cleaned, @"\bcada\s+un[ao]?\b", RegexOptions.IgnoreCase)
+                         || Regex.IsMatch(text, @"\b(tod[ao]s?\s+con)\b", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"\bcada\s+un[ao]?\b", " ", RegexOptions.IgnoreCase);
+        cleaned = string.Join("\n", cleaned.Split('\n').Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim()))
+                      .Trim();
 
         // First, split into segments on "con [menu-item]" and " y " boundaries
         var segments = SplitIntoOrderSegments(cleaned);
@@ -2075,6 +2131,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 }
             }
 
+            // Handle "otra/otro [item]" — means quantity=1 with possible modifier
+            var otraMatch = Regex.Match(s, @"^otr[ao]s?\s+(.+)$", RegexOptions.IgnoreCase);
+            if (otraMatch.Success)
+            {
+                var otraItem = ExtractItemAndModifiers(otraMatch.Groups[1].Value.Trim());
+                if (otraItem != null)
+                {
+                    results.Add(otraItem);
+                    continue;
+                }
+            }
+
             // No quantity prefix — try as a single item
             var singleItem = ExtractItemAndModifiers(s);
             if (singleItem != null)
@@ -2096,29 +2164,35 @@ public sealed class WebhookProcessor : IWebhookProcessor
     {
         var results = new List<string>();
 
-        // First split on commas
-        var commaParts = text.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        // Split on newlines first, then commas — users send multi-line WhatsApp messages
+        var lineParts = text.Split(new[] { '\n', '\r' }, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 
-        foreach (var cp in commaParts)
+        foreach (var lp in lineParts)
         {
-            // Split on " y " — always split on conjunction
-            var yParts = Regex.Split(cp, @"\s+y\s+", RegexOptions.IgnoreCase);
+            // Then split on commas
+            var commaParts = lp.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
 
-            foreach (var yp in yParts)
+            foreach (var cp in commaParts)
             {
-                var part = yp.Trim();
-                if (string.IsNullOrWhiteSpace(part)) continue;
+                // Split on " y " — always split on conjunction
+                var yParts = Regex.Split(cp, @"\s+y\s+", RegexOptions.IgnoreCase);
 
-                // Check if this segment has "con [menu-item]" pattern
-                // e.g. "3 hamburguesas con papas" → split into "3 hamburguesas" and "papas"
-                var conSplit = TrySplitOnConMenuItem(part);
-                if (conSplit != null)
+                foreach (var yp in yParts)
                 {
-                    results.AddRange(conSplit);
-                }
-                else
-                {
-                    results.Add(part);
+                    var part = yp.Trim();
+                    if (string.IsNullOrWhiteSpace(part)) continue;
+
+                    // Check if this segment has "con [menu-item]" pattern
+                    // e.g. "3 hamburguesas con papas" → split into "3 hamburguesas" and "papas"
+                    var conSplit = TrySplitOnConMenuItem(part);
+                    if (conSplit != null)
+                    {
+                        results.AddRange(conSplit);
+                    }
+                    else
+                    {
+                        results.Add(part);
+                    }
                 }
             }
         }
@@ -2134,8 +2208,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var m = Regex.Match(text, @"^(.+?)\s+con\s+(.+)$", RegexOptions.IgnoreCase);
         if (!m.Success) return null;
 
-        var before = m.Groups[1].Value.Trim();
         var after = m.Groups[2].Value.Trim();
+
+        // "con extra X" / "con todo" / "sin X" are modifiers, never split
+        if (Regex.IsMatch(after, @"^(extra\s+|todo\b|sin\s+)", RegexOptions.IgnoreCase))
+            return null;
 
         // Check if the word(s) after "con" start with a known menu item
         var afterWords = after.Split(' ', StringSplitOptions.RemoveEmptyEntries);
@@ -2151,11 +2228,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         if (resolved != null)
         {
+            var before = m.Groups[1].Value.Trim();
             // "con [menu-item]" — split into two segments
             return new List<string> { before, after };
         }
 
-        // "con extra queso" / "con todo" — not a menu item, keep as modifier
+        // Not a menu item link — keep as modifier
         return null;
     }
 
@@ -2172,7 +2250,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Check for modifier phrases
         var modMatch = Regex.Match(t,
-            @"\s+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|mitad\s+.+|bien\s+(?:cocid|asad|hech).+|al\s+punto|termino\s+\w+|doble\s+\w+)$",
+            @"\s+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|mitad\s+.+|bien\s+(?:cocid|asad|hech|tostad).+|al\s+punto|termino\s+\w+|doble\s+\w+)$",
             RegexOptions.IgnoreCase);
         if (modMatch.Success)
         {

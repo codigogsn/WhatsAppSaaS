@@ -18,7 +18,9 @@ internal static class Msg
         => $"Hola, bienvenido a *{businessName}* \ud83d\udc4b";
 
     internal static string MenuPrompt
-        => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?";
+        => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?\n\n"
+         + "_Ejemplo: 2 hamburguesas cl\u00e1sicas, 1 papa mediana, 2 Coca Cola, delivery_\n"
+         + "_O: 1 hamburguesa doble sin cebolla, 1 perro caliente con extra queso_";
 
     // ── Menu ──
 
@@ -100,7 +102,8 @@ internal static class Msg
     // ── Order flow ──
 
     internal static string WhatToOrder
-        => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?";
+        => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?\n\n"
+         + "_Ejemplo: 2 hamburguesas cl\u00e1sicas, 1 papa mediana, 2 Coca Cola, delivery_";
 
     internal static string PickupOrDelivery
         => "\u00bfC\u00f3mo lo quieres?\n\n\ud83d\ude97 *delivery* \u2014 te lo llevamos\n\ud83c\udfe0 *pick up* \u2014 lo recoges en tienda";

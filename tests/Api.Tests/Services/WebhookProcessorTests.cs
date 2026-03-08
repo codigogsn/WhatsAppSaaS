@@ -1914,6 +1914,208 @@ public class WebhookProcessorTests
         parts.Should().HaveCountGreaterOrEqualTo(2);
     }
 
+    // ── Word number conversion tests ──
+
+    [Theory]
+    [InlineData("una hamburguesa", "1 hamburguesa")]
+    [InlineData("dos perros", "2 perros")]
+    [InlineData("tres cocas", "3 cocas")]
+    [InlineData("cuatro papas", "4 papas")]
+    [InlineData("cinco hamburguesas", "5 hamburguesas")]
+    public void ConvertWordNumbers_ConvertsSpanishNumbers(string input, string expected)
+    {
+        WebhookProcessor.ConvertWordNumbersToDigits(input).Trim()
+            .Should().Be(expected);
+    }
+
+    // ── Multi-line order parsing ──
+
+    [Fact]
+    public void ParseOrderText_MultiLineOrder_ParsesAllItems()
+    {
+        var result = WebhookProcessor.ParseOrderText("2 hamburguesas dobles\n1 perro caliente\n2 cocas");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa Doble" && p.Quantity == 2);
+        result.Should().Contain(p => p.Name == "Perro Clasico" && p.Quantity == 1);
+        result.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 2);
+    }
+
+    [Fact]
+    public void ParseOrderText_MultiLineWithDelivery_ParsesItemsIgnoresDelivery()
+    {
+        var result = WebhookProcessor.ParseOrderText("3 hamburguesas clasicas\n2 papas\n1 coca cola\npickup");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa Clasica" && p.Quantity == 3);
+        result.Should().Contain(p => p.Name.Contains("Papas") && p.Quantity == 2);
+        result.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    // ── Word number integration ──
+
+    [Fact]
+    public void ParseOrderText_WordQuantities_ParsedCorrectly()
+    {
+        var result = WebhookProcessor.ParseOrderText("una hamburguesa doble\nuna papa grande\nsin cebolla");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa Doble" && p.Quantity == 1);
+        result.Should().Contain(p => p.Name == "Papas Grandes" && p.Quantity == 1);
+    }
+
+    [Fact]
+    public void ParseOrderText_MixedWordAndDigitQuantities()
+    {
+        var result = WebhookProcessor.ParseOrderText("dos hamburguesas, 1 perro, una coca");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa Clasica" && p.Quantity == 2);
+        result.Should().Contain(p => p.Name == "Perro Clasico" && p.Quantity == 1);
+        result.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    // ── Otra/otro handling ──
+
+    [Fact]
+    public void ParseOrderText_OtraConModifier_AddsSecondItem()
+    {
+        var result = WebhookProcessor.ParseOrderText("una hamburguesa doble sin cebolla\notra con extra queso");
+
+        result.Should().HaveCountGreaterOrEqualTo(1);
+        result.Should().Contain(p => p.Name == "Hamburguesa Doble");
+    }
+
+    // ── Observation extraction ──
+
+    [Fact]
+    public void ParseOrderText_ObservationAttachedToItem()
+    {
+        var result = WebhookProcessor.ParseOrderText("hamburguesa sin cebolla");
+
+        result.Should().ContainSingle();
+        result[0].Name.Should().Be("Hamburguesa Clasica");
+        result[0].Modifiers.Should().Contain("sin cebolla");
+    }
+
+    [Fact]
+    public void ParseOrderText_MultipleItemsWithObservation()
+    {
+        var result = WebhookProcessor.ParseOrderText("1 hamburguesa doble sin cebolla, 1 perro caliente con extra queso");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa Doble" && p.Modifiers != null && p.Modifiers.Contains("sin cebolla"));
+        result.Should().Contain(p => p.Name.Contains("Perro") && p.Modifiers != null && p.Modifiers.Contains("extra queso"));
+    }
+
+    // ── Delivery keyword detection ──
+
+    [Theory]
+    [InlineData("2 hamburguesas delivery", "delivery")]
+    [InlineData("2 hamburguesas a domicilio", "delivery")]
+    [InlineData("2 hamburguesas envio", "delivery")]
+    [InlineData("2 hamburguesas para retirar", "pickup")]
+    [InlineData("2 hamburguesas voy a buscar", "pickup")]
+    [InlineData("2 hamburguesas pickup", "pickup")]
+    public void TryParseQuickOrder_DeliveryKeywords_Detected(string input, string expectedDelivery)
+    {
+        WebhookProcessor.TryParseQuickOrder(input, out var items, out var delivery, out _);
+
+        items.Should().NotBeEmpty();
+        delivery.Should().Be(expectedDelivery);
+    }
+
+    // ── Venezuelan Spanish patterns ──
+
+    [Fact]
+    public void ParseOrderText_VenezuelanConversational()
+    {
+        var result = WebhookProcessor.ParseOrderText("dame 2 hamburguesas clasicas y una coca");
+
+        result.Should().Contain(p => p.Name == "Hamburguesa Clasica" && p.Quantity == 2);
+        result.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    [Fact]
+    public void ParseOrderText_ImplicitQuantity_DefaultsToOne()
+    {
+        var result = WebhookProcessor.ParseOrderText("hamburguesa");
+
+        result.Should().ContainSingle();
+        result[0].Name.Should().Be("Hamburguesa Clasica");
+        result[0].Quantity.Should().Be(1);
+    }
+
+    // ── Modifier regex: bien tostado ──
+
+    [Fact]
+    public void ExtractItemAndModifiers_BienTostado()
+    {
+        var item = WebhookProcessor.ExtractItemAndModifiers("hamburguesa bien tostada");
+        item.Should().NotBeNull();
+        item!.Modifiers.Should().Contain("bien tostada");
+    }
+
+    // ── Full quick-parse integration with word numbers ──
+
+    [Fact]
+    public async Task QuickParse_WordNumbers_ParsedCorrectly()
+    {
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "una hamburguesa doble y dos cocas delivery"),
+            _testBusiness);
+
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Doble" && i.Quantity == 1);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 2);
+        state.DeliveryType.Should().Be("delivery");
+    }
+
+    [Fact]
+    public async Task QuickParse_MultiLineNaturalOrder_ParsesAllItems()
+    {
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "1 perro caliente\n1 hamburguesa\ny una coca\npara delivery"),
+            _testBusiness);
+
+        state.Items.Should().Contain(i => i.Name == "Perro Clasico" && i.Quantity == 1);
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 1);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+        state.DeliveryType.Should().Be("delivery");
+    }
+
+    [Fact]
+    public async Task QuickParse_EnvioKeyword_DetectedAsDelivery()
+    {
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "2 hamburguesas para envio"),
+            _testBusiness);
+
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
+        state.DeliveryType.Should().Be("delivery");
+    }
+
     [Fact]
     public void ExtractItemAndModifiers_WithSinCebolla()
     {
