@@ -261,6 +261,97 @@ public class PaymentProofTests : IDisposable
         res.Content.Headers.ContentType!.MediaType.Should().Be("application/octet-stream");
     }
 
+    // ── Verified order still previewable ──
+
+    [Fact]
+    public async Task GetPaymentProof_VerifiedOrder_StillReturnsProof()
+    {
+        var (orderId, _) = await SeedOrderWithProof("wamid.verified-proof");
+
+        // Mark order as verified
+        using (var scope = _webApp.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var order = await db.Orders.FindAsync(orderId);
+            order!.PaymentVerifiedAtUtc = DateTime.UtcNow;
+            order.PaymentVerifiedBy = "test";
+            await db.SaveChangesAsync();
+        }
+
+        _whatsAppMock
+            .Setup(x => x.GetMediaAsync("wamid.verified-proof", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MediaDownloadResult(new byte[] { 0xFF, 0xD8 }, "image/jpeg"));
+
+        var req = WithAdmin(new HttpRequestMessage(HttpMethod.Get, $"/api/orders/{orderId}/payment-proof"));
+        var res = await _client.SendAsync(req);
+
+        res.StatusCode.Should().Be(HttpStatusCode.OK);
+        res.Content.Headers.ContentType!.MediaType.Should().Be("image/jpeg");
+    }
+
+    // ── Error body contains useful message ──
+
+    [Fact]
+    public async Task GetPaymentProof_502_ReturnsJsonErrorBody()
+    {
+        var (orderId, _) = await SeedOrderWithProof("wamid.err-body");
+
+        _whatsAppMock
+            .Setup(x => x.GetMediaAsync("wamid.err-body", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((MediaDownloadResult?)null);
+
+        var req = WithAdmin(new HttpRequestMessage(HttpMethod.Get, $"/api/orders/{orderId}/payment-proof"));
+        var res = await _client.SendAsync(req);
+
+        res.StatusCode.Should().Be((HttpStatusCode)502);
+        var body = await res.Content.ReadAsStringAsync();
+        body.Should().Contain("error");
+        body.Should().Contain("WhatsApp");
+    }
+
+    [Fact]
+    public async Task GetPaymentProof_404NoProof_ReturnsJsonErrorBody()
+    {
+        using var scope = _webApp.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var order = new Order
+        {
+            From = "5511000000001",
+            PhoneNumberId = "proof-phone-001",
+            DeliveryType = "pickup",
+            Status = "Pending",
+            PaymentProofMediaId = null // no proof
+        };
+        db.Orders.Add(order);
+        await db.SaveChangesAsync();
+
+        var req = WithAdmin(new HttpRequestMessage(HttpMethod.Get, $"/api/orders/{order.Id}/payment-proof"));
+        var res = await _client.SendAsync(req);
+
+        res.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var body = await res.Content.ReadAsStringAsync();
+        body.Should().Contain("error");
+    }
+
+    // ── WhatsApp throws exception => 500 with message (not crash) ──
+
+    [Fact]
+    public async Task GetPaymentProof_WhatsAppThrows_Returns500WithMessage()
+    {
+        var (orderId, _) = await SeedOrderWithProof("wamid.throw-media");
+
+        _whatsAppMock
+            .Setup(x => x.GetMediaAsync("wamid.throw-media", It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated failure"));
+
+        var req = WithAdmin(new HttpRequestMessage(HttpMethod.Get, $"/api/orders/{orderId}/payment-proof"));
+        var res = await _client.SendAsync(req);
+
+        res.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+        var body = await res.Content.ReadAsStringAsync();
+        body.Should().Contain("error");
+    }
+
     // ── Projection Tests ──
 
     [Fact]

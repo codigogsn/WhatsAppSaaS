@@ -1050,11 +1050,19 @@ async function showProofPreview(orderId){
   try {
     const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: adminHeaders() });
     if (!res.ok) {
-      const errText = res.status === 502
-        ? 'No se pudo obtener el comprobante de WhatsApp. El archivo puede haber expirado (los medios de WhatsApp expiran despues de 30 dias).'
+      // Try to parse JSON error body from the backend
+      let serverMsg = '';
+      try {
+        const errJson = await res.json();
+        serverMsg = errJson.error || '';
+      } catch(_){}
+      const errText = serverMsg
+        ? serverMsg
+        : res.status === 502 ? 'No se pudo descargar el comprobante desde WhatsApp. El archivo puede haber expirado.'
         : res.status === 401 ? 'No autorizado. Configura tu Admin Key.'
         : res.status === 404 ? 'No hay comprobante de pago asociado a este pedido.'
-        : 'Error obteniendo comprobante: ' + res.status;
+        : res.status === 500 ? 'Error interno del servidor. Intenta de nuevo en unos segundos.'
+        : 'Error obteniendo comprobante (HTTP ' + res.status + ')';
       content.innerHTML = '<div class="proof-error">' + esc(errText) + '</div>';
       return;
     }
@@ -1107,7 +1115,12 @@ async function rejectFromModal(){
 async function openProofNewTab(orderId){
   try {
     const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: adminHeaders() });
-    if (!res.ok) { alert('Error obteniendo comprobante: ' + res.status); return; }
+    if (!res.ok) {
+      let msg = 'Error obteniendo comprobante (HTTP ' + res.status + ')';
+      try { const j = await res.json(); if (j.error) msg = j.error; } catch(_){}
+      alert(msg);
+      return;
+    }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');

@@ -362,42 +362,74 @@ public sealed class OrdersController : ControllerBase
         if (!IsAdmin())
             return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
 
-        var order = await _context.Orders.AsNoTracking()
-            .Where(o => o.Id == id)
-            .Select(o => new { o.PaymentProofMediaId, o.BusinessId })
-            .SingleOrDefaultAsync(ct);
-
-        if (order is null)
-            return NotFound(new { error = "Order not found" });
-
-        if (string.IsNullOrWhiteSpace(order.PaymentProofMediaId))
-            return NotFound(new { error = "No payment proof on this order" });
-
-        // Tenant isolation: resolve business access token
-        string? bizToken = null;
-        if (order.BusinessId.HasValue)
+        try
         {
-            var biz = await _context.Businesses.AsNoTracking()
-                .Where(b => b.Id == order.BusinessId.Value && b.IsActive)
-                .Select(b => new { b.AccessToken })
-                .FirstOrDefaultAsync(ct);
-            bizToken = biz?.AccessToken;
+            var order = await _context.Orders.AsNoTracking()
+                .Where(o => o.Id == id)
+                .Select(o => new { o.PaymentProofMediaId, o.BusinessId })
+                .SingleOrDefaultAsync(ct);
+
+            if (order is null)
+                return NotFound(new { error = "Order not found" });
+
+            if (string.IsNullOrWhiteSpace(order.PaymentProofMediaId))
+                return NotFound(new { error = "No payment proof on this order" });
+
+            _logger.LogInformation(
+                "GetPaymentProof: orderId={OrderId}, businessId={BusinessId}, mediaId={MediaId}",
+                id, order.BusinessId, order.PaymentProofMediaId);
+
+            // Tenant isolation: resolve business access token
+            string? bizToken = null;
+            if (order.BusinessId.HasValue)
+            {
+                var biz = await _context.Businesses.AsNoTracking()
+                    .Where(b => b.Id == order.BusinessId.Value && b.IsActive)
+                    .Select(b => new { b.AccessToken })
+                    .FirstOrDefaultAsync(ct);
+                bizToken = biz?.AccessToken;
+
+                if (string.IsNullOrWhiteSpace(bizToken))
+                    _logger.LogWarning(
+                        "GetPaymentProof: no access token found for business {BusinessId} (order {OrderId}). Will fall back to env/appsettings token.",
+                        order.BusinessId, id);
+            }
+
+            var result = await _whatsAppClient.GetMediaAsync(order.PaymentProofMediaId, bizToken, ct);
+            if (result is null)
+            {
+                _logger.LogWarning(
+                    "GetPaymentProof: GetMediaAsync returned null for mediaId={MediaId}, orderId={OrderId}",
+                    order.PaymentProofMediaId, id);
+                return StatusCode(502, new { error = "No se pudo descargar el comprobante desde WhatsApp. El archivo puede haber expirado." });
+            }
+
+            _logger.LogInformation(
+                "GetPaymentProof: downloaded {Bytes} bytes, contentType={ContentType} for orderId={OrderId}",
+                result.Data.Length, result.ContentType, id);
+
+            // Only allow safe content types
+            var allowedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "image/jpeg", "image/png", "image/webp",
+                "application/pdf", "image/gif"
+            };
+            var contentType = allowedTypes.Contains(result.ContentType) ? result.ContentType : "application/octet-stream";
+
+            Response.Headers["Cache-Control"] = "private, max-age=300";
+            return File(result.Data, contentType);
         }
-
-        var result = await _whatsAppClient.GetMediaAsync(order.PaymentProofMediaId, bizToken, ct);
-        if (result is null)
-            return StatusCode(502, new { error = "Could not retrieve media from WhatsApp. The proof may have expired." });
-
-        // Only allow safe content types
-        var allowedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            "image/jpeg", "image/png", "image/webp",
-            "application/pdf", "image/gif"
-        };
-        var contentType = allowedTypes.Contains(result.ContentType) ? result.ContentType : "application/octet-stream";
-
-        Response.Headers["Cache-Control"] = "private, max-age=300";
-        return File(result.Data, contentType);
+            // Client disconnected — don't log as error
+            return StatusCode(499); // nginx-style "client closed request"
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "GetPaymentProof: unhandled exception for orderId={OrderId}", id);
+            return StatusCode(500, new { error = "Error interno al obtener el comprobante. Intenta de nuevo." });
+        }
     }
 
     private bool IsAdmin()

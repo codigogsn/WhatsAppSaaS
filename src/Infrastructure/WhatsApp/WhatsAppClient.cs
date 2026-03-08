@@ -115,7 +115,7 @@ public sealed class WhatsAppClient : IWhatsAppClient
 
     public async Task<MediaDownloadResult?> GetMediaAsync(string mediaId, string? accessToken = null, CancellationToken cancellationToken = default)
     {
-        // Resolve token
+        // Resolve token: parameter (per-business) > env var > appsettings
         var token = accessToken;
         if (string.IsNullOrWhiteSpace(token))
             token = Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN")
@@ -124,57 +124,91 @@ public sealed class WhatsAppClient : IWhatsAppClient
             token = _options.AccessToken;
         if (string.IsNullOrWhiteSpace(token) || token == "your-access-token-here")
         {
-            _logger.LogWarning("GetMediaAsync skipped: no valid AccessToken configured.");
+            _logger.LogWarning("GetMediaAsync skipped for {MediaId}: no valid AccessToken. " +
+                "Checked: parameter={ParamEmpty}, env WHATSAPP_ACCESS_TOKEN={EnvWa}, META_ACCESS_TOKEN={EnvMeta}, appsettings={Appsettings}",
+                mediaId,
+                string.IsNullOrWhiteSpace(accessToken),
+                Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN") is not null,
+                Environment.GetEnvironmentVariable("META_ACCESS_TOKEN") is not null,
+                !string.IsNullOrWhiteSpace(_options.AccessToken));
             return null;
         }
 
         try
         {
-            // Step 1: Get media URL from Graph API
+            // Step 1: Get media metadata (URL) from Graph API
             var metaUrl = $"https://graph.facebook.com/{_options.ApiVersion}/{mediaId}";
+            _logger.LogDebug("GetMediaAsync step1: fetching metadata from {Url} for {MediaId}", metaUrl, mediaId);
+
             using var metaReq = new HttpRequestMessage(HttpMethod.Get, metaUrl);
             metaReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
             using var metaRes = await _httpClient.SendAsync(metaReq, cancellationToken);
             if (!metaRes.IsSuccessStatusCode)
             {
-                _logger.LogWarning("GetMediaAsync: metadata request failed for {MediaId}, status {Status}",
-                    mediaId, (int)metaRes.StatusCode);
+                var errBody = await metaRes.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning(
+                    "GetMediaAsync step1 failed: metadata request for {MediaId} returned {Status}. Body: {Body}",
+                    mediaId, (int)metaRes.StatusCode, errBody);
                 return null;
             }
 
             var metaJson = await metaRes.Content.ReadFromJsonAsync<JsonElement>(cancellationToken);
             if (!metaJson.TryGetProperty("url", out var urlProp))
             {
-                _logger.LogWarning("GetMediaAsync: no 'url' in metadata for {MediaId}", mediaId);
+                _logger.LogWarning("GetMediaAsync step1: no 'url' in metadata response for {MediaId}. Keys: {Keys}",
+                    mediaId, string.Join(", ", metaJson.EnumerateObject().Select(p => p.Name)));
                 return null;
             }
             var downloadUrl = urlProp.GetString();
-            if (string.IsNullOrWhiteSpace(downloadUrl)) return null;
+            if (string.IsNullOrWhiteSpace(downloadUrl))
+            {
+                _logger.LogWarning("GetMediaAsync step1: 'url' property is empty for {MediaId}", mediaId);
+                return null;
+            }
+
+            _logger.LogDebug("GetMediaAsync step2: downloading binary from {Url} for {MediaId}", downloadUrl, mediaId);
 
             // Step 2: Download binary from the media URL
+            // Use a NEW HttpClient request without the default Accept: application/json
+            // to avoid WhatsApp CDN rejecting binary download requests
             using var dlReq = new HttpRequestMessage(HttpMethod.Get, downloadUrl);
             dlReq.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            dlReq.Headers.Accept.Clear();
+            dlReq.Headers.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("*/*"));
 
             using var dlRes = await _httpClient.SendAsync(dlReq, cancellationToken);
             if (!dlRes.IsSuccessStatusCode)
             {
-                _logger.LogWarning("GetMediaAsync: download failed for {MediaId}, status {Status}",
-                    mediaId, (int)dlRes.StatusCode);
+                var errBody = await dlRes.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogWarning(
+                    "GetMediaAsync step2 failed: binary download for {MediaId} returned {Status}. Body: {Body}",
+                    mediaId, (int)dlRes.StatusCode, errBody);
                 return null;
             }
 
             var contentType = dlRes.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
             var data = await dlRes.Content.ReadAsByteArrayAsync(cancellationToken);
 
-            _logger.LogInformation("GetMediaAsync: downloaded {Bytes} bytes for {MediaId}, type {ContentType}",
+            _logger.LogInformation(
+                "GetMediaAsync: success — downloaded {Bytes} bytes for {MediaId}, contentType={ContentType}",
                 data.Length, mediaId, contentType);
 
             return new MediaDownloadResult(data, contentType);
         }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "GetMediaAsync HTTP error for {MediaId}", mediaId);
+            return null;
+        }
+        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+        {
+            _logger.LogError(ex, "GetMediaAsync timeout for {MediaId} (30s limit)", mediaId);
+            return null;
+        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "GetMediaAsync failed for {MediaId}", mediaId);
+            _logger.LogError(ex, "GetMediaAsync unexpected error for {MediaId}", mediaId);
             return null;
         }
     }
