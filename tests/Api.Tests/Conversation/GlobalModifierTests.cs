@@ -48,7 +48,7 @@ public class GlobalModifierTests
             .Setup(x => x.SaveAsync(It.IsAny<string>(), It.IsAny<ConversationFields>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        _testBusiness = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Mi Restaurante");
+        _testBusiness = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Mi Restaurante", MenuPdfUrl: "https://test.example.com/menu-demo.pdf");
 
         _sut = new WebhookProcessor(
             _aiParserMock.Object,

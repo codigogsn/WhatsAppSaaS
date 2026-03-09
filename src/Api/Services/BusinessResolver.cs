@@ -24,10 +24,21 @@ public class BusinessResolver : IBusinessResolver
         _db = db;
 
         // Build menu PDF URL from PublicBaseUrl config or PUBLIC_BASE_URL env var
-        var baseUrl = whatsAppOptions?.Value?.PublicBaseUrl
-                      ?? Environment.GetEnvironmentVariable("PUBLIC_BASE_URL");
+        var configBase = whatsAppOptions?.Value?.PublicBaseUrl;
+        var envBase = Environment.GetEnvironmentVariable("PUBLIC_BASE_URL");
+        var baseUrl = configBase ?? envBase;
+        Log.Information("MENU PDF CONFIG — PublicBaseUrl(config)={ConfigBase} PUBLIC_BASE_URL(env)={EnvBase} resolved={Resolved}",
+            configBase ?? "(null)", envBase ?? "(null)", baseUrl ?? "(null)");
         if (!string.IsNullOrWhiteSpace(baseUrl))
+        {
             _menuPdfUrl = baseUrl.TrimEnd('/') + "/menu-demo.pdf";
+            Log.Information("MENU PDF URL resolved: {MenuPdfUrl}", _menuPdfUrl);
+        }
+        else
+        {
+            Log.Error("MENU PDF URL NOT CONFIGURED — set PUBLIC_BASE_URL env var or WhatsApp:PublicBaseUrl in appsettings. " +
+                       "The bot will NOT be able to send the PDF menu.");
+        }
     }
 
     public async Task<BusinessContext?> ResolveByPhoneNumberIdAsync(string? phoneNumberId, CancellationToken ct = default)

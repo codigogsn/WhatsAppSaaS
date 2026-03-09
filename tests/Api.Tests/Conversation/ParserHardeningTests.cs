@@ -51,7 +51,7 @@ public class ParserHardeningTests
             .Setup(x => x.SaveAsync(It.IsAny<string>(), It.IsAny<ConversationFields>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        _testBusiness = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Mi Restaurante");
+        _testBusiness = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Mi Restaurante", MenuPdfUrl: "https://test.example.com/menu-demo.pdf");
 
         _sut = new WebhookProcessor(
             _aiParserMock.Object,
@@ -544,12 +544,12 @@ public class ParserHardeningTests
             Times.Exactly(3),
             "first message in fresh conversation should trigger full greeting sequence");
         state.MenuSent.Should().BeTrue();
-        // The 3rd message should be the standard menu prompt, not the continuation
+        // The 3rd message should be the PDF menu prompt, not the continuation
         var thirdMsg = (OutgoingMessage)_whatsAppClientMock.Invocations
             .Where(i => i.Method.Name == "SendTextMessageAsync")
             .ElementAt(2).Arguments[0];
-        thirdMsg.Body.Should().Contain("\u00bfQu\u00e9 deseas ordenar?",
-            "fresh conversation prompt should use the standard order prompt");
+        thirdMsg.Body.Should().Contain("Envíame tu pedido",
+            "fresh conversation prompt should use the PDF menu prompt");
     }
 
     // ═══════════════════════════════════════════════════════════

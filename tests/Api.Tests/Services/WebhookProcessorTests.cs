@@ -46,7 +46,7 @@ public class WebhookProcessorTests
             .Setup(x => x.SaveAsync(It.IsAny<string>(), It.IsAny<ConversationFields>(), It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
 
-        _testBusiness = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Mi Restaurante");
+        _testBusiness = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Mi Restaurante", MenuPdfUrl: "https://test.example.com/menu-demo.pdf");
 
         _sut = new WebhookProcessor(
             _aiParserMock.Object,
@@ -247,14 +247,13 @@ public class WebhookProcessorTests
         sentMessages[0].Body.Should().Contain("bienvenido");
         sentMessages[0].Body.Should().Contain("Mi Restaurante");
 
-        // Message 2: Menu
-        sentMessages[1].Body.Should().Contain("MEN\u00da");
-        sentMessages[1].Body.Should().Contain("Hamburguesa");
-        sentMessages[1].Body.Should().Contain("Coca Cola");
-        sentMessages[1].Body.Should().Contain("Papas");
+        // Message 2: PDF menu document
+        sentMessages[1].DocumentUrl.Should().NotBeNullOrWhiteSpace("menu should be sent as PDF document");
+        sentMessages[1].DocumentFilename.Should().Be("menu.pdf");
+        sentMessages[1].Body.Should().Contain("Menú");
 
         // Message 3: Prompt
-        sentMessages[2].Body.Should().Contain("Qu\u00e9 deseas ordenar");
+        sentMessages[2].Body.Should().Contain("Envíame tu pedido");
     }
 
     [Fact]
@@ -266,7 +265,7 @@ public class WebhookProcessorTests
             .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
             .ReturnsAsync(true);
 
-        var biz = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Burger Palace");
+        var biz = new BusinessContext(Guid.NewGuid(), "123456789", "test-token", "Burger Palace", MenuPdfUrl: "https://test.example.com/menu-demo.pdf");
         var payload = CreateTextMessagePayload("5511999999999", "buenas tardes");
 
         await _sut.ProcessAsync(payload, biz);
@@ -635,10 +634,10 @@ public class WebhookProcessorTests
             x => x.ParseAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
 
-        // Should send greeting sequence (3 messages including menu)
+        // Should send greeting sequence (3 messages including PDF menu)
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(
-                It.Is<OutgoingMessage>(m => m.Body.Contains("MEN\u00da")),
+                It.Is<OutgoingMessage>(m => m.DocumentUrl != null && m.DocumentUrl.Contains("menu")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -663,10 +662,10 @@ public class WebhookProcessorTests
 
         await _sut.ProcessAsync(payload, _testBusiness);
 
-        // Should send menu since MenuSent was reset
+        // Should send PDF menu since MenuSent was reset
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(
-                It.Is<OutgoingMessage>(m => m.Body.Contains("MEN\u00da")),
+                It.Is<OutgoingMessage>(m => m.DocumentUrl != null && m.DocumentUrl.Contains("menu")),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -743,10 +742,10 @@ public class WebhookProcessorTests
         var payload = CreateTextMessagePayload("5511999999999", "hola que tal");
         await _sut.ProcessAsync(payload, _testBusiness);
 
-        sentMessages.Should().HaveCount(3, "should send welcome + menu + prompt");
+        sentMessages.Should().HaveCount(3, "should send welcome + menu PDF + prompt");
         sentMessages[0].Body.Should().Contain("bienvenido");
-        sentMessages[1].Body.Should().Contain("MEN\u00da");
-        sentMessages[2].Body.Should().Contain("Qu\u00e9 deseas ordenar");
+        sentMessages[1].DocumentUrl.Should().NotBeNullOrWhiteSpace("menu should be sent as PDF");
+        sentMessages[2].Body.Should().Contain("Envíame tu pedido");
 
         // State must be reset
         staleState.Items.Should().BeEmpty("stale items should be cleared");
@@ -771,9 +770,9 @@ public class WebhookProcessorTests
         var payload = CreateTextMessagePayload("5511999999999", "quiero hacer un pedido");
         await _sut.ProcessAsync(payload, _testBusiness);
 
-        sentMessages.Should().HaveCount(3, "should send welcome + menu + prompt");
+        sentMessages.Should().HaveCount(3, "should send welcome + menu PDF + prompt");
         sentMessages[0].Body.Should().Contain("bienvenido");
-        sentMessages[1].Body.Should().Contain("MEN\u00da");
+        sentMessages[1].DocumentUrl.Should().NotBeNullOrWhiteSpace("menu should be sent as PDF");
 
         // Must NOT say "Sigue llenando la planilla"
         sentMessages.Should().NotContain(m => m.Body.Contains("planilla"));
@@ -796,9 +795,9 @@ public class WebhookProcessorTests
         var payload = CreateTextMessagePayload("5511999999999", "me mandas el menu?");
         await _sut.ProcessAsync(payload, _testBusiness);
 
-        sentMessages.Should().HaveCount(3, "should send welcome + menu + prompt");
-        sentMessages[1].Body.Should().Contain("MEN\u00da");
-        sentMessages[1].Body.Should().Contain("Hamburguesa");
+        sentMessages.Should().HaveCount(3, "should send welcome + menu PDF + prompt");
+        sentMessages[1].DocumentUrl.Should().NotBeNullOrWhiteSpace("menu should be sent as PDF");
+        sentMessages[1].DocumentFilename.Should().Be("menu.pdf");
     }
 
     [Theory]
@@ -831,8 +830,8 @@ public class WebhookProcessorTests
 
         sentMessages.Should().HaveCount(3, $"'{input}' should reset and send 3 fresh messages");
         sentMessages[0].Body.Should().Contain("bienvenido", $"'{input}' should trigger welcome");
-        sentMessages[1].Body.Should().Contain("MEN\u00da", $"'{input}' should trigger menu");
-        sentMessages[2].Body.Should().Contain("Qu\u00e9 deseas ordenar", $"'{input}' should trigger prompt");
+        sentMessages[1].DocumentUrl.Should().NotBeNullOrWhiteSpace($"'{input}' should trigger PDF menu");
+        sentMessages[2].Body.Should().Contain("Envíame tu pedido", $"'{input}' should trigger prompt");
 
         // Must NOT contain stale checkout messages
         sentMessages.Should().NotContain(m => m.Body.Contains("planilla"), $"'{input}' should not trigger stale checkout");
@@ -3030,7 +3029,7 @@ public class WebhookProcessorTests
         // Has main + side, but no drink → should suggest drink to complete combo
 
         var testBizBurger = new BusinessContext(Guid.NewGuid(), "123456789", "test-token",
-            "Test Burger", RestaurantType: "burger");
+            "Test Burger", RestaurantType: "burger", MenuPdfUrl: "https://test.example.com/menu-demo.pdf");
 
         var (msg, item) = _sut.BuildComboSuggestion(state, testBizBurger.RestaurantType);
 

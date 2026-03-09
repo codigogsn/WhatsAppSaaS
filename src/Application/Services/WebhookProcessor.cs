@@ -941,10 +941,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
 
-        // Message 2: Menu — send as PDF document if URL is available, otherwise fallback to text
-        string promptText;
-        if (!string.IsNullOrWhiteSpace(biz.MenuPdfUrl))
+        // Message 2: Menu — always send as PDF document (no text fallback)
+        if (string.IsNullOrWhiteSpace(biz.MenuPdfUrl))
         {
+            _logger.LogError("MENU PDF URL IS MISSING — MenuPdfUrl is null/empty for business {BusinessId} ({BusinessName}). " +
+                              "Set PUBLIC_BASE_URL or WhatsApp:PublicBaseUrl so the bot can send the PDF menu. " +
+                              "Skipping menu send entirely.", biz.BusinessId, businessName);
+        }
+        else
+        {
+            _logger.LogInformation("MENU PDF sending document — MenuPdfUrl={MenuPdfUrl} business={BusinessId}",
+                biz.MenuPdfUrl, biz.BusinessId);
             await SendAsync(new OutgoingMessage
             {
                 To = to,
@@ -954,27 +961,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 DocumentUrl = biz.MenuPdfUrl,
                 DocumentFilename = "menu.pdf"
             }, biz.BusinessId, conversationId, ct);
-            promptText = Msg.MenuPdfPrompt;
-        }
-        else
-        {
-            // Fallback: send text menu when no PDF URL is configured
-            var menuBody = BuildMenuMessage();
-            await SendAsync(new OutgoingMessage
-            {
-                To = to,
-                Body = menuBody,
-                PhoneNumberId = phoneNumberId,
-                AccessToken = biz.AccessToken
-            }, biz.BusinessId, conversationId, ct);
-            promptText = Msg.MenuPrompt;
         }
 
-        // Message 3: Prompt
+        // Message 3: Prompt (always sent, even if PDF was missing)
         await SendAsync(new OutgoingMessage
         {
             To = to,
-            Body = promptText,
+            Body = Msg.MenuPdfPrompt,
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);

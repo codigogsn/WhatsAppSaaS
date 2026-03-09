@@ -473,7 +473,7 @@
       <input id="take" type="number" value="50" min="1" max="200" style="width:60px;" />
 
       <button class="primary" onclick="load()">Cargar</button>
-      <button id="btnAuto" onclick="startAutoRefresh()">Auto 5s</button>
+      <button id="btnAuto" onclick="startAutoRefresh()">Auto 10s</button>
       <button onclick="stopAutoRefresh()">Stop</button>
 
       <button onclick="downloadOrdersCsv()">CSV Orders</button>
@@ -929,7 +929,7 @@ async function resolveHandoff(conversationId){
 function startAutoRefresh() {
   stopAutoRefresh();
   _autoRefreshActive = true;
-  console.log('[AUTOREFRESH] started — interval=5s');
+  console.log('[AUTOREFRESH] started — interval=10s');
   load();
   timer = setInterval(function autoTick() {
     console.log('[AUTOREFRESH] tick', new Date().toLocaleTimeString());
@@ -938,7 +938,7 @@ function startAutoRefresh() {
       return;
     }
     load();
-  }, 5000);
+  }, 10000);
   document.getElementById('btnAuto').textContent = 'Auto ●';
   document.getElementById('btnAuto').style.color = '#2e7d32';
 }
@@ -949,7 +949,7 @@ function stopAutoRefresh() {
   }
   _autoRefreshActive = false;
   const btn = document.getElementById('btnAuto');
-  if (btn) { btn.textContent = 'Auto 5s'; btn.style.color = ''; }
+  if (btn) { btn.textContent = 'Auto 10s'; btn.style.color = ''; }
 }
 
 // ── Load ──
@@ -1003,6 +1003,17 @@ async function load() {
   setTodayKpis(data);
 
   console.log(`${tag} rendering ${data.length} orders to DOM`);
+
+  // ── Capture UI state before re-render ──
+  const expandedIds = new Set();
+  document.querySelectorAll('.detail-row.open').forEach(el => {
+    const oid = el.id.replace('detail-', '');
+    if (oid) expandedIds.add(oid);
+  });
+  const proofOverlay = document.getElementById('proofOverlay');
+  const savedProofOrderId = (proofOverlay && proofOverlay.classList.contains('open')) ? _proofOrderId : null;
+  const orderIds = new Set(data.map(o => o.id));
+
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
 
@@ -1193,6 +1204,17 @@ async function load() {
       </td>
     `;
     tbody.appendChild(detailTr);
+  }
+
+  // ── Restore UI state after re-render ──
+  for (const eid of expandedIds) {
+    if (orderIds.has(eid)) {
+      const detail = document.getElementById('detail-' + eid);
+      if (detail) detail.classList.add('open');
+    }
+  }
+  if (savedProofOrderId && orderIds.has(savedProofOrderId)) {
+    showProofPreview(savedProofOrderId);
   }
 
   const now = new Date().toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
