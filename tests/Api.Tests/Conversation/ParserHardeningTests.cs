@@ -481,6 +481,8 @@ public class ParserHardeningTests
             .First(i => i.Method.Name == "SendTextMessageAsync").Arguments[0];
         sentBody.Body.Should().StartWith("Perfecto",
             "continuation prompt should use natural language, not repeat the menu prompt");
+        sentBody.Body.Should().NotContain("\u00bfQu\u00e9 deseas ordenar?",
+            "must NOT repeat the initial order prompt");
     }
 
     [Fact]
@@ -502,6 +504,7 @@ public class ParserHardeningTests
         var sentBody = (OutgoingMessage)_whatsAppClientMock.Invocations
             .First(i => i.Method.Name == "SendTextMessageAsync").Arguments[0];
         sentBody.Body.Should().StartWith("Perfecto");
+        sentBody.Body.Should().NotContain("\u00bfQu\u00e9 deseas ordenar?");
     }
 
     [Fact]
@@ -523,6 +526,7 @@ public class ParserHardeningTests
         var sentBody = (OutgoingMessage)_whatsAppClientMock.Invocations
             .First(i => i.Method.Name == "SendTextMessageAsync").Arguments[0];
         sentBody.Body.Should().StartWith("Perfecto");
+        sentBody.Body.Should().NotContain("\u00bfQu\u00e9 deseas ordenar?");
     }
 
     [Fact]
@@ -541,6 +545,12 @@ public class ParserHardeningTests
             Times.Exactly(3),
             "first message in fresh conversation should trigger full greeting sequence");
         state.MenuSent.Should().BeTrue();
+        // The 3rd message should be the standard menu prompt, not the continuation
+        var thirdMsg = (OutgoingMessage)_whatsAppClientMock.Invocations
+            .Where(i => i.Method.Name == "SendTextMessageAsync")
+            .ElementAt(2).Arguments[0];
+        thirdMsg.Body.Should().Contain("\u00bfQu\u00e9 deseas ordenar?",
+            "fresh conversation prompt should use the standard order prompt");
     }
 
     // ═══════════════════════════════════════════════════════════
