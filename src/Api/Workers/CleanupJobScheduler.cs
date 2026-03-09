@@ -44,7 +44,7 @@ public sealed class CleanupJobScheduler : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        var jobTypes = new[] { "CleanupConversations", "CleanupCompletedJobs", "CleanupAbandonedOrders" };
+        var jobTypes = new[] { "CleanupConversations", "CleanupCompletedJobs", "CleanupAbandonedOrders", "FetchBcvRates" };
 
         foreach (var jobType in jobTypes)
         {

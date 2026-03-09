@@ -259,7 +259,7 @@ internal static class Msg
 
     // ── Order summary with prices (shown before checkout form) ──
 
-    internal static string OrderSummaryWithTotal(IReadOnlyList<ConversationItemEntry> items)
+    internal static string OrderSummaryWithTotal(IReadOnlyList<ConversationItemEntry> items, ResolvedRate? bcvRate = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("\ud83e\uddfe *RESUMEN DE TU PEDIDO*");
@@ -281,7 +281,16 @@ internal static class Msg
 
         sb.AppendLine();
         if (total > 0)
+        {
             sb.AppendLine($"*TOTAL: ${total:0.00}*");
+
+            if (bcvRate is not null && bcvRate.Rate > 0)
+            {
+                var bsTotal = total * bcvRate.Rate;
+                var staleTag = bcvRate.IsStale ? " (tasa anterior)" : "";
+                sb.AppendLine($"\ud83c\uddfb\ud83c\uddea Ref. BCV {bcvRate.CurrencyLabel}: Bs. {bsTotal:N2}{staleTag}");
+            }
+        }
 
         return sb.ToString().TrimEnd();
     }
@@ -295,7 +304,8 @@ internal static class Msg
         string? specialInstructions,
         string address,
         string paymentText,
-        string deliveryType)
+        string deliveryType,
+        ResolvedRate? bcvRate = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("\u2705 *PEDIDO CONFIRMADO*");
@@ -333,6 +343,13 @@ internal static class Msg
         {
             sb.AppendLine();
             sb.AppendLine($"\ud83d\udcb0 *TOTAL A PAGAR: ${total:0.00}*");
+
+            if (bcvRate is not null && bcvRate.Rate > 0)
+            {
+                var bsTotal = total * bcvRate.Rate;
+                var staleTag = bcvRate.IsStale ? " (tasa anterior)" : "";
+                sb.AppendLine($"\ud83c\uddfb\ud83c\uddea Ref. BCV {bcvRate.CurrencyLabel}: Bs. {bsTotal:N2}{staleTag}");
+            }
         }
 
         // Estimated preparation time

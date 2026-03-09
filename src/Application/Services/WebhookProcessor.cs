@@ -30,6 +30,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly IConversationStateStore _stateStore;
     private readonly IMenuRepository? _menuRepository;
     private readonly INotificationService? _notificationService;
+    private readonly IExchangeRateProvider? _exchangeRateProvider;
     private readonly ILogger<WebhookProcessor> _logger;
     private readonly PaymentMobileOptions _paymentMobile;
 
@@ -41,7 +42,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         ILogger<WebhookProcessor> logger,
         PaymentMobileOptions? paymentMobile = null,
         IMenuRepository? menuRepository = null,
-        INotificationService? notificationService = null)
+        INotificationService? notificationService = null,
+        IExchangeRateProvider? exchangeRateProvider = null)
     {
         _aiParser = aiParser;
         _whatsAppClient = whatsAppClient;
@@ -49,6 +51,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         _stateStore = stateStore;
         _menuRepository = menuRepository;
         _notificationService = notificationService;
+        _exchangeRateProvider = exchangeRateProvider;
         _logger = logger;
         _paymentMobile = paymentMobile ?? new PaymentMobileOptions();
     }
@@ -1202,6 +1205,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
 
+        // Resolve BCV rate for Bs equivalent display (never blocks ordering)
+        ResolvedRate? bcvRate = null;
+        try
+        {
+            if (_exchangeRateProvider is not null)
+                bcvRate = await _exchangeRateProvider.GetRateAsync(businessContext.CurrencyReference, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve exchange rate for receipt — continuing without Bs conversion");
+        }
+
         var receipt = Msg.BuildReceipt(
             orderNumber,
             state.CustomerName!,
@@ -1211,7 +1226,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
             state.SpecialInstructions,
             state.Address!,
             Msg.PaymentMethodText(state.PaymentMethod),
-            state.DeliveryType!);
+            state.DeliveryType!,
+            bcvRate);
 
         state.ResetAfterConfirm();
         return receipt;

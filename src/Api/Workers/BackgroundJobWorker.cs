@@ -130,6 +130,10 @@ public sealed class BackgroundJobWorker : BackgroundService
                 await ExecuteCleanupAbandonedOrdersAsync(sp, ct);
                 break;
 
+            case "FetchBcvRates":
+                await ExecuteFetchBcvRatesAsync(sp, ct);
+                break;
+
             default:
                 _logger.LogWarning("Unknown job type: {JobType}", job.JobType);
                 break;
@@ -200,6 +204,18 @@ public sealed class BackgroundJobWorker : BackgroundService
             await db.SaveChangesAsync(ct);
             _logger.LogInformation("Cancelled {Count} abandoned orders older than 24h", abandoned.Count);
         }
+    }
+
+    private async Task ExecuteFetchBcvRatesAsync(IServiceProvider sp, CancellationToken ct)
+    {
+        var bcvService = sp.GetRequiredService<IBcvRateService>();
+        var result = await bcvService.FetchAndPersistTodayAsync(ct);
+
+        if (result is null)
+            throw new InvalidOperationException("BCV rate fetch returned null — will retry");
+
+        _logger.LogInformation("BCV rates fetched — USD={Usd} EUR={Eur} date={Date}",
+            result.UsdRate, result.EurRate, result.RateDate.ToString("yyyy-MM-dd"));
     }
 
     public sealed class NotificationPayload

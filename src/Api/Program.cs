@@ -18,6 +18,7 @@ using Serilog;
 using WhatsAppSaaS.Api.Extensions;
 using WhatsAppSaaS.Api.Services;
 using WhatsAppSaaS.Application.Validators;
+using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Infrastructure.Extensions;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -251,6 +252,23 @@ try
 
     if (!EF.IsDesignTime)
     {
+        // Best-effort: fetch today's BCV rate on startup so it's available immediately
+        try
+        {
+            using var startupScope = app.Services.CreateScope();
+            var bcvService = startupScope.ServiceProvider.GetRequiredService<IBcvRateService>();
+            var rate = await bcvService.FetchAndPersistTodayAsync();
+            if (rate is not null)
+                Log.Information("STARTUP BCV rate loaded — USD={Usd} EUR={Eur} date={Date}",
+                    rate.UsdRate, rate.EurRate, rate.RateDate.ToString("yyyy-MM-dd"));
+            else
+                Log.Warning("STARTUP BCV rate fetch returned null — will retry via background job");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "STARTUP BCV rate fetch failed — will retry via background job");
+        }
+
         app.Run();
     }
 }
@@ -515,6 +533,13 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     // ── BackgroundJobs table ──
     ExecSql(conn, """CREATE TABLE IF NOT EXISTS "BackgroundJobs" ("Id" uuid NOT NULL PRIMARY KEY, "JobType" varchar(100) NOT NULL, "PayloadJson" text NOT NULL DEFAULT '{}', "Status" varchar(20) NOT NULL DEFAULT 'Pending', "RetryCount" integer NOT NULL DEFAULT 0, "MaxRetries" integer NOT NULL DEFAULT 3, "LastError" varchar(2000), "ScheduledAtUtc" timestamp NOT NULL DEFAULT now(), "LockedAtUtc" timestamp, "CompletedAtUtc" timestamp, "BusinessId" uuid)""");
     ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_BackgroundJobs_Status_ScheduledAtUtc" ON "BackgroundJobs" ("Status", "ScheduledAtUtc")""");
+
+    // ── ExchangeRates table ──
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "ExchangeRates" ("Id" uuid NOT NULL PRIMARY KEY, "RateDate" timestamp NOT NULL, "UsdRate" numeric(12,2) NOT NULL, "EurRate" numeric(12,2) NOT NULL, "Source" varchar(50) NOT NULL DEFAULT 'bcv', "FetchedAtUtc" timestamp NOT NULL DEFAULT now())""");
+    ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_ExchangeRates_RateDate" ON "ExchangeRates" ("RateDate")""");
+
+    // ── CurrencyReference column on Businesses ──
+    ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "CurrencyReference" varchar(20)""");
 
     // ── Boolean column repair ──
     string[] boolRepairs =

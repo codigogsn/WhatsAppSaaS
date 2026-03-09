@@ -58,6 +58,13 @@ public static class ServiceCollectionExtensions
         // ── Admin Analytics (✅ FIX runtime 500) ─────────
         services.AddScoped<IAdminAnalyticsService, AdminAnalyticsService>();
 
+        // ── BCV Exchange Rate ─────────────────────────────
+        services.AddHttpClient<IBcvRateService, BcvRateService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddScoped<IExchangeRateProvider, ExchangeRateProvider>();
+
         return services;
     }
 

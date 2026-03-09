@@ -119,7 +119,7 @@ public class BusinessResolver : IBusinessResolver
             SELECT "Id", "PhoneNumberId", "AccessToken", "Name",
                    "PaymentMobileBank", "PaymentMobileId", "PaymentMobilePhone",
                    "Greeting", "Schedule", "Address", "LogoUrl", "NotificationPhone",
-                   "RestaurantType"
+                   "RestaurantType", "CurrencyReference"
             FROM "Businesses"
             WHERE "PhoneNumberId" = @pid AND "IsActive" = true
             LIMIT 1
@@ -153,10 +153,11 @@ public class BusinessResolver : IBusinessResolver
         var logoUrl = reader.IsDBNull(10) ? null : reader.GetString(10);
         var notificationPhone = reader.IsDBNull(11) ? null : reader.GetString(11);
         var restaurantType = reader.IsDBNull(12) ? null : reader.GetString(12);
+        var currencyReference = reader.IsDBNull(13) ? null : reader.GetString(13);
 
         return new BusinessContext(bizId, bizPhone, bizToken, bizName,
             greeting, schedule, address, logoUrl, pmBank, pmId, pmPhone, notificationPhone, restaurantType,
-            _menuPdfUrl);
+            _menuPdfUrl, currencyReference);
     }
 
     public static string? EnvResolve(params string[] keys)

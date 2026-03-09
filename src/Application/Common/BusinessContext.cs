@@ -14,4 +14,5 @@ public sealed record BusinessContext(
     string? PaymentMobilePhone = null,
     string? NotificationPhone = null,
     string? RestaurantType = null,
-    string? MenuPdfUrl = null);
+    string? MenuPdfUrl = null,
+    string? CurrencyReference = null);

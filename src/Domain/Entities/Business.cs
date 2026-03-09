@@ -33,6 +33,9 @@ public class Business
     // Restaurant vertical template type (burger, pizza, sushi, arepa, cafe)
     public string? RestaurantType { get; set; }
 
+    // Exchange rate reference: "BCV_USD", "BCV_EUR", or null/NONE (no conversion)
+    public string? CurrencyReference { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

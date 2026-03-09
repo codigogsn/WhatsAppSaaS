@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
     public DbSet<MenuItemAlias> MenuItemAliases => Set<MenuItemAlias>();
     public DbSet<BusinessUser> BusinessUsers => Set<BusinessUser>();
     public DbSet<BackgroundJob> BackgroundJobs => Set<BackgroundJob>();
+    public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -157,6 +158,9 @@ public class AppDbContext : DbContext
             // Restaurant type template
             b.Property(x => x.RestaurantType).HasMaxLength(50);
 
+            // Exchange rate reference
+            b.Property(x => x.CurrencyReference).HasMaxLength(20);
+
             // Notification
             b.Property(x => x.NotificationPhone).HasMaxLength(50);
 
@@ -276,6 +280,18 @@ public class AppDbContext : DbContext
             b.Property(x => x.CreatedAtUtc).IsRequired();
 
             b.HasIndex(x => new { x.ConversationId, x.MessageId }).IsUnique();
+        });
+
+        modelBuilder.Entity<ExchangeRate>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.RateDate).IsRequired();
+            b.Property(x => x.UsdRate).HasPrecision(12, 2).IsRequired();
+            b.Property(x => x.EurRate).HasPrecision(12, 2).IsRequired();
+            b.Property(x => x.Source).HasMaxLength(50).IsRequired();
+            b.Property(x => x.FetchedAtUtc).IsRequired();
+
+            b.HasIndex(x => x.RateDate).IsUnique();
         });
     }
 }
