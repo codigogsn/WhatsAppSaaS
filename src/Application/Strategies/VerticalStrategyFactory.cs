@@ -5,13 +5,15 @@ namespace WhatsAppSaaS.Application.Strategies;
 public sealed class VerticalStrategyFactory : IVerticalStrategyFactory
 {
     private static readonly RestaurantStrategy Restaurant = new();
+    private static readonly FashionStrategy Fashion = new();
 
     public IVerticalStrategy GetStrategy(string? verticalType)
     {
         return verticalType switch
         {
             "restaurant" => Restaurant,
-            _ => Restaurant // safe default — all existing businesses are restaurants
+            "fashion_brand" => Fashion,
+            _ => Restaurant // safe default
         };
     }
 }

@@ -547,4 +547,99 @@ internal static class Msg
             "zelle" => "ZELLE (pendiente verificaci\u00f3n)",
             _ => "EFECTIVO"
         };
+
+    // ── Fashion vertical ──
+
+    internal static string FashionOrderSummary(
+        string product, string? size, string? color, int quantity, decimal unitPrice)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("\ud83d\udecd\ufe0f *RESUMEN DE TU PEDIDO*");
+        sb.AppendLine();
+        sb.Append($"  {quantity}x {product}");
+        var variants = new List<string>();
+        if (!string.IsNullOrWhiteSpace(size)) variants.Add($"Talla: {size}");
+        if (!string.IsNullOrWhiteSpace(color)) variants.Add($"Color: {color}");
+        if (variants.Count > 0) sb.Append($" ({string.Join(", ", variants)})");
+        if (unitPrice > 0)
+        {
+            var lineTotal = unitPrice * quantity;
+            sb.Append($"  ${unitPrice:0.00} c/u = ${lineTotal:0.00}");
+        }
+        sb.AppendLine();
+        if (unitPrice > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"*TOTAL: ${unitPrice * quantity:0.00}*");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    internal static string FashionFulfillmentPrompt
+        => "\u00bfC\u00f3mo deseas recibir tu pedido?";
+
+    internal static string FashionCheckoutForm
+        => "\ud83d\udcdd *DATOS PARA TU PEDIDO*\n\n"
+         + "\ud83d\udc64 *Nombre:*\n"
+         + "\ud83d\udcf1 *Tel\u00e9fono:*\n"
+         + "\ud83c\udfe1 *Direcci\u00f3n de env\u00edo:*\n\n"
+         + "Responde con tus datos y luego escribe *CONFIRMAR*.";
+
+    internal static string FashionCheckoutFormPickup
+        => "\ud83d\udcdd *DATOS PARA TU PEDIDO*\n\n"
+         + "\ud83d\udc64 *Nombre:*\n"
+         + "\ud83d\udcf1 *Tel\u00e9fono:*\n\n"
+         + "Responde con tus datos y luego escribe *CONFIRMAR*.";
+
+    internal static string FashionReceipt(
+        string orderNumber,
+        string customerName,
+        string customerPhone,
+        string product, string? size, string? color, int quantity,
+        decimal unitPrice,
+        string fulfillmentType,
+        string? address,
+        string paymentText,
+        ResolvedRate? bcvRate = null)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("\u2705 *PEDIDO CONFIRMADO*");
+        sb.AppendLine($"\ud83e\uddfe Pedido: #{orderNumber}");
+        sb.AppendLine();
+        sb.AppendLine($"\ud83d\udc64 Nombre: {customerName}");
+        sb.AppendLine($"\ud83d\udcf1 Tel\u00e9fono: {customerPhone}");
+        sb.AppendLine();
+
+        sb.Append($"  {quantity}x {product}");
+        var variants = new List<string>();
+        if (!string.IsNullOrWhiteSpace(size)) variants.Add($"Talla: {size}");
+        if (!string.IsNullOrWhiteSpace(color)) variants.Add($"Color: {color}");
+        if (variants.Count > 0) sb.Append($" ({string.Join(", ", variants)})");
+        if (unitPrice > 0) sb.Append($"  ${unitPrice * quantity:0.00}");
+        sb.AppendLine();
+
+        var total = unitPrice * quantity;
+        if (total > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"\ud83d\udcb0 *TOTAL A PAGAR: ${total:0.00}*");
+
+            if (bcvRate is not null && bcvRate.Rate > 0)
+            {
+                var bsTotal = total * bcvRate.Rate;
+                var staleTag = bcvRate.IsStale ? " (tasa anterior)" : "";
+                sb.AppendLine($"\ud83c\uddfb\ud83c\uddea Ref. BCV {bcvRate.CurrencyLabel}: Bs. {bsTotal:N2}{staleTag}");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(address))
+            sb.AppendLine($"\ud83c\udfe1 Direcci\u00f3n: {address}");
+        sb.AppendLine($"\ud83d\udcb5 Pago: {paymentText}");
+        sb.AppendLine($"\ud83d\udce6 {(fulfillmentType == "shipping" ? "Env\u00edo a domicilio" : "Retiro en tienda")}");
+
+        sb.AppendLine();
+        sb.Append("Gracias por tu compra \ud83d\ude4f");
+
+        return sb.ToString();
+    }
 }

@@ -289,6 +289,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // ── Fashion vertical: handles its own flow ──
+                    if (_verticalStrategy.HandlesOwnFlow)
+                    {
+                        await ProcessFashionMessageAsync(
+                            state, rawText, t, message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
                     // A-obs) Observation YES/NO gate response
                     if (state.ExtrasOffered && !state.ObservationPromptSent && !state.ObservationAnswered)
                     {
@@ -1302,6 +1311,355 @@ public sealed class WebhookProcessor : IWebhookProcessor
     }
 
     // ──────────────────────────────────────────
+    // Fashion vertical flow
+    // ──────────────────────────────────────────
+
+    internal sealed record FashionItem(string Product, string? Size, string? Color, int Quantity);
+
+    internal static FashionItem? TryParseFashionOrder(string text)
+    {
+        // Parse structured format:
+        //   Product: Hoodie Shadow
+        //   Size: M
+        //   Color: Black
+        //   Quantity: 2
+        string? product = null, size = null, color = null;
+        int quantity = 1;
+
+        foreach (var line in text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.StartsWith("Product:", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("Producto:", StringComparison.OrdinalIgnoreCase))
+                product = line[(line.IndexOf(':') + 1)..].Trim();
+            else if (line.StartsWith("Size:", StringComparison.OrdinalIgnoreCase) ||
+                     line.StartsWith("Talla:", StringComparison.OrdinalIgnoreCase))
+                size = line[(line.IndexOf(':') + 1)..].Trim();
+            else if (line.StartsWith("Color:", StringComparison.OrdinalIgnoreCase))
+                color = line[(line.IndexOf(':') + 1)..].Trim();
+            else if (line.StartsWith("Quantity:", StringComparison.OrdinalIgnoreCase) ||
+                     line.StartsWith("Cantidad:", StringComparison.OrdinalIgnoreCase))
+            {
+                var qStr = line[(line.IndexOf(':') + 1)..].Trim();
+                if (int.TryParse(qStr, out var q) && q > 0) quantity = q;
+            }
+        }
+
+        return product is not null ? new FashionItem(product, size, color, quantity) : null;
+    }
+
+    private async Task ProcessFashionMessageAsync(
+        ConversationFields state,
+        string rawText,
+        string normalizedText,
+        string from,
+        string phoneNumberId,
+        BusinessContext businessContext,
+        string conversationId,
+        CancellationToken ct)
+    {
+        var bizId = businessContext.BusinessId;
+
+        // ── CONFIRMAR ──
+        if (IsConfirmCommand(normalizedText))
+        {
+            if (state.Items.Count == 0)
+            {
+                await SendReply(Msg.EmptyOrder);
+                return;
+            }
+
+            // If no fulfillment type yet, ask
+            if (string.IsNullOrWhiteSpace(state.DeliveryType))
+            {
+                var opts = _verticalStrategy.FulfillmentOptions;
+                await SendAsync(new OutgoingMessage
+                {
+                    To = from,
+                    Body = Msg.FashionFulfillmentPrompt,
+                    Buttons = opts.Select(o => new ReplyButton(o.Id, o.Label)).ToList(),
+                    PhoneNumberId = phoneNumberId,
+                    AccessToken = businessContext.AccessToken
+                }, bizId, conversationId, ct);
+                return;
+            }
+
+            // If no payment method yet, ask
+            if (string.IsNullOrWhiteSpace(state.PaymentMethod))
+            {
+                await SendAsync(new OutgoingMessage
+                {
+                    To = from,
+                    Body = Msg.PaymentMethodPrompt,
+                    Buttons = Msg.PaymentButtons,
+                    PhoneNumberId = phoneNumberId,
+                    AccessToken = businessContext.AccessToken
+                }, bizId, conversationId, ct);
+                return;
+            }
+
+            // If checkout form not sent yet, send it
+            if (!state.CheckoutFormSent)
+            {
+                state.CheckoutFormSent = true;
+                var formMsg = state.DeliveryType == "shipping"
+                    ? Msg.FashionCheckoutForm
+                    : Msg.FashionCheckoutFormPickup;
+                await SendReply(formMsg);
+                return;
+            }
+
+            // Try to finalize
+            var missing = new List<string>();
+            if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("• \ud83d\udc64 Nombre:");
+            if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("• \ud83d\udcf1 Teléfono:");
+            if (state.DeliveryType == "shipping" && string.IsNullOrWhiteSpace(state.Address))
+                missing.Add("• \ud83c\udfe1 Dirección de envío:");
+
+            if (missing.Count > 0)
+            {
+                await SendReply(Msg.MissingFields(missing));
+                return;
+            }
+
+            // ── Finalize fashion order ──
+            var item = state.Items[0];
+            var order = new Order
+            {
+                BusinessId = bizId,
+                From = from,
+                PhoneNumberId = phoneNumberId,
+                DeliveryType = state.DeliveryType!,
+                CreatedAtUtc = DateTime.UtcNow,
+                CustomerName = state.CustomerName,
+                CustomerPhone = NormalizeToE164(state.CustomerPhone) ?? state.CustomerPhone,
+                Address = state.Address,
+                PaymentMethod = state.PaymentMethod,
+                SpecialInstructions = item.Modifiers, // stores size/color
+                CheckoutCompleted = true,
+                CheckoutCompletedAtUtc = DateTime.UtcNow,
+                CheckoutFormSent = true,
+                Items = state.Items.Select(i => new WhatsAppSaaS.Domain.Entities.OrderItem
+                {
+                    Name = i.Name,
+                    Quantity = i.Quantity,
+                    UnitPrice = i.UnitPrice,
+                    LineTotal = i.UnitPrice * i.Quantity
+                }).ToList()
+            };
+
+            order.SubtotalAmount = order.Items.Sum(i => i.LineTotal ?? 0);
+            order.TotalAmount = order.SubtotalAmount;
+            await _orderRepository.AddOrderAsync(order, ct);
+
+            var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
+            var receipt = Msg.FashionReceipt(
+                orderNumber,
+                state.CustomerName!,
+                order.CustomerPhone!,
+                item.Name,
+                ExtractVariant(item.Modifiers, "Talla"),
+                ExtractVariant(item.Modifiers, "Color"),
+                item.Quantity,
+                item.UnitPrice,
+                state.DeliveryType!,
+                state.Address,
+                Msg.PaymentMethodText(state.PaymentMethod),
+                _bcvRate);
+
+            await SendReply(receipt);
+
+            // Notify staff
+            if (_notificationService is not null)
+            {
+                var total = order.TotalAmount?.ToString("0.00") ?? "0.00";
+                await _notificationService.NotifyOrderConfirmedAsync(
+                    businessContext, state.CustomerName!, $"{item.Quantity}x {item.Name}", $"${total}", ct);
+            }
+
+            state.ResetAfterConfirm();
+            return;
+        }
+
+        // ── Fulfillment selection ──
+        if (state.Items.Count > 0 && string.IsNullOrWhiteSpace(state.DeliveryType))
+        {
+            var ft = NormalizeFashionFulfillment(normalizedText);
+            if (ft is not null)
+            {
+                state.DeliveryType = ft;
+                // Ask payment
+                await SendAsync(new OutgoingMessage
+                {
+                    To = from,
+                    Body = Msg.PaymentMethodPrompt,
+                    Buttons = Msg.PaymentButtons,
+                    PhoneNumberId = phoneNumberId,
+                    AccessToken = businessContext.AccessToken
+                }, bizId, conversationId, ct);
+                return;
+            }
+        }
+
+        // ── Payment method selection ──
+        if (state.Items.Count > 0 && !string.IsNullOrWhiteSpace(state.DeliveryType)
+            && string.IsNullOrWhiteSpace(state.PaymentMethod))
+        {
+            var pm = NormalizePaymentMethod(normalizedText);
+            if (pm is not null)
+            {
+                state.PaymentMethod = pm;
+
+                // Send pago movil details if applicable
+                if (pm == "pago_movil")
+                    await SendPagoMovilDetailsAsync(from, phoneNumberId, businessContext, conversationId, state.Items, ct);
+
+                // Send checkout form
+                state.CheckoutFormSent = true;
+                var formMsg = state.DeliveryType == "shipping"
+                    ? Msg.FashionCheckoutForm
+                    : Msg.FashionCheckoutFormPickup;
+                await SendReply(formMsg);
+                return;
+            }
+        }
+
+        // ── Checkout form data ──
+        if (state.CheckoutFormSent && state.Items.Count > 0)
+        {
+            // Try to extract name/phone/address from the text
+            if (TryParseFashionCheckoutData(rawText, state))
+            {
+                await SendReply(Msg.CheckoutDataReceived);
+                return;
+            }
+        }
+
+        // ── Greeting / new order ──
+        if (IsGreeting(normalizedText) || IsRestartIntent(normalizedText))
+        {
+            state.ResetAfterConfirm();
+            var greeting = _verticalStrategy.GetGreeting(businessContext.BusinessName);
+            await SendReply(greeting);
+            return;
+        }
+
+        // ── Try parsing structured fashion order ──
+        var fashionItem = TryParseFashionOrder(rawText);
+        if (fashionItem is not null)
+        {
+            state.Items.Clear();
+            var modifiers = BuildFashionModifiers(fashionItem.Size, fashionItem.Color);
+            state.Items.Add(new ConversationItemEntry
+            {
+                Name = fashionItem.Product,
+                Quantity = fashionItem.Quantity,
+                Modifiers = modifiers,
+                UnitPrice = 0m // price resolved from catalog in future
+            });
+
+            // Show summary + fulfillment options
+            var summary = Msg.FashionOrderSummary(
+                fashionItem.Product, fashionItem.Size, fashionItem.Color, fashionItem.Quantity, 0m);
+
+            await SendReply(summary);
+
+            var opts = _verticalStrategy.FulfillmentOptions;
+            await SendAsync(new OutgoingMessage
+            {
+                To = from,
+                Body = Msg.FashionFulfillmentPrompt,
+                Buttons = opts.Select(o => new ReplyButton(o.Id, o.Label)).ToList(),
+                PhoneNumberId = phoneNumberId,
+                AccessToken = businessContext.AccessToken
+            }, bizId, conversationId, ct);
+            return;
+        }
+
+        // ── Fallback ──
+        await SendReply(_verticalStrategy.GetGreeting(businessContext.BusinessName));
+        return;
+
+        // Local helper to reduce boilerplate
+        async Task SendReply(string body) => await SendAsync(new OutgoingMessage
+        {
+            To = from, Body = body, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+        }, bizId, conversationId, ct);
+    }
+
+    private static string? NormalizeFashionFulfillment(string t)
+    {
+        if (t.Contains("envio") || t.Contains("envío") || t.Contains("shipping") || t.Contains("domicilio"))
+            return "shipping";
+        if (t.Contains("retiro") || t.Contains("pickup") || t.Contains("tienda") || t.Contains("recoger"))
+            return "store_pickup";
+        return null;
+    }
+
+    private static string BuildFashionModifiers(string? size, string? color)
+    {
+        var parts = new List<string>();
+        if (!string.IsNullOrWhiteSpace(size)) parts.Add($"Talla: {size}");
+        if (!string.IsNullOrWhiteSpace(color)) parts.Add($"Color: {color}");
+        return string.Join(", ", parts);
+    }
+
+    private static string? ExtractVariant(string? modifiers, string key)
+    {
+        if (string.IsNullOrWhiteSpace(modifiers)) return null;
+        foreach (var part in modifiers.Split(',', StringSplitOptions.TrimEntries))
+        {
+            if (part.StartsWith(key + ":", StringComparison.OrdinalIgnoreCase))
+                return part[(key.Length + 1)..].Trim();
+        }
+        return null;
+    }
+
+    private static bool TryParseFashionCheckoutData(string text, ConversationFields state)
+    {
+        var parsed = false;
+        foreach (var line in text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.StartsWith("Nombre:", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("Name:", StringComparison.OrdinalIgnoreCase))
+            {
+                state.CustomerName = line[(line.IndexOf(':') + 1)..].Trim();
+                parsed = true;
+            }
+            else if (line.StartsWith("Teléfono:", StringComparison.OrdinalIgnoreCase) ||
+                     line.StartsWith("Telefono:", StringComparison.OrdinalIgnoreCase) ||
+                     line.StartsWith("Tel:", StringComparison.OrdinalIgnoreCase) ||
+                     line.StartsWith("Phone:", StringComparison.OrdinalIgnoreCase))
+            {
+                state.CustomerPhone = line[(line.IndexOf(':') + 1)..].Trim();
+                parsed = true;
+            }
+            else if (line.StartsWith("Dirección:", StringComparison.OrdinalIgnoreCase) ||
+                     line.StartsWith("Direccion:", StringComparison.OrdinalIgnoreCase) ||
+                     line.StartsWith("Address:", StringComparison.OrdinalIgnoreCase))
+            {
+                state.Address = line[(line.IndexOf(':') + 1)..].Trim();
+                parsed = true;
+            }
+        }
+
+        // Fallback: if only one line and it looks like a name (no colon), treat as name
+        if (!parsed)
+        {
+            var lines = text.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+            if (lines.Length >= 2)
+            {
+                // Two+ lines: Name / Phone / Address
+                state.CustomerName = lines[0];
+                state.CustomerPhone = lines[1];
+                if (lines.Length >= 3) state.Address = lines[2];
+                parsed = true;
+            }
+        }
+
+        return parsed;
+    }
+
+    // ──────────────────────────────────────────
     // Send helper — never silent on failure
     // ──────────────────────────────────────────
 
@@ -1504,6 +1862,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
             "btn_cancelar"   => "cancelar",
             "btn_delivery"   => "delivery",
             "btn_pickup"     => "pickup",
+            "btn_shipping"      => "envío",
+            "btn_store_pickup"  => "retiro en tienda",
             "btn_efectivo"   => "efectivo",
             "btn_pago_movil" => "pago movil",
             "btn_zelle"      => "zelle",

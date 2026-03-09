@@ -1,4 +1,5 @@
 using WhatsAppSaaS.Application.Interfaces;
+using WhatsAppSaaS.Application.Services;
 
 namespace WhatsAppSaaS.Application.Strategies;
 
@@ -12,4 +13,17 @@ public sealed class RestaurantStrategy : IVerticalStrategy
 
     public bool RequiresGps(string? fulfillmentType)
         => fulfillmentType == "delivery";
+
+    public bool HandlesOwnFlow => false;
+
+    public (string Id, string Label)[] FulfillmentOptions =>
+    [
+        ("btn_delivery", "Delivery"),
+        ("btn_pickup", "Pickup")
+    ];
+
+    public string CheckoutFormMessage => Msg.CheckoutForm;
+
+    public string GetGreeting(string businessName)
+        => Msg.DefaultGreeting(businessName);
 }
