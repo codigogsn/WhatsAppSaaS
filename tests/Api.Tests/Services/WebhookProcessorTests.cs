@@ -283,9 +283,11 @@ public class WebhookProcessorTests
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
         state.DeliveryType = "delivery";
+        state.ExtrasOffered = true;
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
-        state.OrderConfirmed = true; // must confirm order before checkout form appears
+        state.OrderConfirmed = true;
+        state.PaymentMethod = "efectivo";
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -294,8 +296,6 @@ public class WebhookProcessorTests
         reply.Should().Contain("C\u00e9dula:");
         reply.Should().Contain("Tel\u00e9fono:");
         reply.Should().Contain("Direcci\u00f3n:");
-        reply.Should().Contain("Pago (PAGO M\u00d3VIL");
-        reply.Should().Contain("ZELLE):");
         reply.Should().Contain("Ubicaci\u00f3n GPS:");
         reply.Should().Contain("OBLIGATORIO");
         reply.Should().Contain("CONFIRMAR");
@@ -914,9 +914,11 @@ public class WebhookProcessorTests
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
         state.DeliveryType = "delivery";
+        state.ExtrasOffered = true;
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
-        state.OrderConfirmed = true; // must confirm before checkout form
+        state.OrderConfirmed = true;
+        state.PaymentMethod = "efectivo";
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -930,6 +932,9 @@ public class WebhookProcessorTests
     {
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
         // No delivery type set — should prompt
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
@@ -1250,17 +1255,17 @@ public class WebhookProcessorTests
     // ══════════════════════════════════════════════
 
     [Fact]
-    public void BuildOrderReply_AfterDeliveryType_ShowsObservationPrompt()
+    public void BuildOrderReply_AfterItems_ShowsExtrasQuestion()
     {
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
-        state.DeliveryType = "delivery";
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        reply.Should().Contain("observaci\u00f3n especial");
+        // New flow: items → extras question (before delivery)
+        reply.Should().Contain("extras");
         reply.Should().Contain("NO");
-        state.ObservationPromptSent.Should().BeTrue();
+        state.ExtrasOffered.Should().BeTrue();
     }
 
     [Fact]
@@ -2392,7 +2397,7 @@ public class WebhookProcessorTests
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        // Step 1: Order
+        // Step 1: Order with inline delivery
         await _sut.ProcessAsync(
             CreateTextMessagePayload("5511999999999", "2 hamburguesas delivery"),
             _testBusiness);
@@ -2400,8 +2405,8 @@ public class WebhookProcessorTests
         state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
         state.DeliveryType.Should().Be("delivery");
 
-        // Observation prompt should have been sent
-        state.ObservationPromptSent.Should().BeTrue();
+        // Extras question should have been shown (new flow: extras before confirmation)
+        state.ExtrasOffered.Should().BeTrue();
     }
 
     [Fact]
@@ -2533,19 +2538,18 @@ public class WebhookProcessorTests
     }
 
     [Fact]
-    public void BuildOrderReplyFromState_NoInlineObservation_ShowsPrompt()
+    public void BuildOrderReplyFromState_NoExtrasOffered_ShowsExtrasQuestion()
     {
-        var state = new ConversationFields
-        {
-            DeliveryType = "delivery"
-        };
+        var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        // Should show observation prompt
-        reply.Should().Contain("observaci\u00f3n");
-        state.ObservationPromptSent.Should().BeTrue();
+        // Should show extras YES/NO question
+        reply.Should().Contain("extras");
+        reply.Should().Contain("S\u00cd");
+        reply.Should().Contain("NO");
+        state.ExtrasOffered.Should().BeTrue();
     }
 
     // ──────────────────────────────────────────
@@ -3219,16 +3223,30 @@ public class WebhookProcessorTests
     // ── BUG 2 regression: payment template format ──
 
     [Fact]
-    public void CheckoutForm_PaymentField_HasOptionsInLabel()
+    public void CheckoutForm_PaymentNotInForm_SeparateStep()
     {
         var form = Msg.CheckoutForm;
 
-        // Options should be in the label (parenthetical), not after colon as values
-        form.Should().Contain("Pago (PAGO M");
-        form.Should().Contain("ZELLE):");
+        // Payment is now a separate step — should NOT be in checkout form
+        form.Should().NotContain("Pago (PAGO M", "payment is asked in a separate step");
+        form.Should().NotContain("ZELLE):", "payment is asked in a separate step");
 
-        // The old format had options as colon-values that got parsed as payment text
-        form.Should().NotContain("Pago:* EFECTIVO", "options must not appear after colon");
+        // Checkout form should still have the other required fields
+        form.Should().Contain("Nombre:");
+        form.Should().Contain("C\u00e9dula:");
+        form.Should().Contain("Tel\u00e9fono:");
+        form.Should().Contain("Direcci\u00f3n:");
+    }
+
+    [Fact]
+    public void PaymentMethodPrompt_HasAllOptions()
+    {
+        var prompt = Msg.PaymentMethodPrompt;
+
+        prompt.Should().Contain("pagar");
+        prompt.Should().Contain("efectivo");
+        prompt.Should().Contain("pago m\u00f3vil");
+        prompt.Should().Contain("zelle");
     }
 
     // ── BUG 3 regression: order quantity aggregation ──
@@ -3317,10 +3335,10 @@ public class WebhookProcessorTests
         burger!.Quantity.Should().Be(2);
     }
 
-    // ── Full flow regression: order → delivery → observation → checkout ──
+    // ── Full flow regression: order → extras → confirm → delivery → payment ──
 
     [Fact]
-    public async Task FullFlow_OrderThenDelivery_AdvancesCorrectly()
+    public async Task FullFlow_OrderThenExtrasToDelivery_AdvancesCorrectly()
     {
         var sentMessages = new List<OutgoingMessage>();
         _whatsAppClientMock
@@ -3333,31 +3351,42 @@ public class WebhookProcessorTests
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        // Step 1: Order items
+        // Step 1: Order items → extras question
         await _sut.ProcessAsync(
             CreateTextMessagePayload("5511999999999", "quiero 1 hamburguesa"),
             _testBusiness);
 
         state.Items.Should().NotBeEmpty("items should be parsed");
+        state.ExtrasOffered.Should().BeTrue("extras question should be shown after items");
 
-        // Step 2: Answer delivery type
-        sentMessages.Clear();
-        await _sut.ProcessAsync(
-            CreateTextMessagePayload("5511999999999", "delivery"),
-            _testBusiness);
-
-        state.DeliveryType.Should().Be("delivery");
-        state.Items.Should().NotBeEmpty("items must survive delivery answer");
-
-        // Step 3: Answer observation
+        // Step 2: Skip extras → confirmation gate
         sentMessages.Clear();
         await _sut.ProcessAsync(
             CreateTextMessagePayload("5511999999999", "no"),
             _testBusiness);
 
         state.ObservationAnswered.Should().BeTrue();
-        // Confirmation gate: after observation, user sees confirmation prompt (not checkout form yet)
-        state.OrderConfirmed.Should().BeFalse("confirmation prompt should be shown, not checkout form");
+        state.OrderConfirmed.Should().BeFalse("confirmation prompt should be shown");
+        sentMessages.Last().Body.Should().Contain("CONFIRMAR");
+
+        // Step 3: Confirm → delivery step
+        sentMessages.Clear();
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "confirmar"),
+            _testBusiness);
+
+        state.OrderConfirmed.Should().BeTrue();
+        sentMessages.Last().Body.Should().Contain("delivery");
+        sentMessages.Last().Body.Should().Contain("pick up");
+
+        // Step 4: Answer delivery → payment step
+        sentMessages.Clear();
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "delivery"),
+            _testBusiness);
+
+        state.DeliveryType.Should().Be("delivery");
+        sentMessages.Last().Body.Should().Contain("pagar");
     }
 
     // ── Payment proof post-confirm regression tests ──
@@ -3510,10 +3539,12 @@ public class WebhookProcessorTests
     {
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
-        state.DeliveryType = "delivery";
+        state.ExtrasOffered = true;
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
         state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "efectivo";
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -3522,7 +3553,7 @@ public class WebhookProcessorTests
     }
 
     [Fact]
-    public async Task Confirmar_AtConfirmationGate_ShowsCheckoutForm()
+    public async Task Confirmar_AtConfirmationGate_ShowsDeliveryStep()
     {
         var sentMessages = new List<OutgoingMessage>();
         _whatsAppClientMock
@@ -3532,10 +3563,10 @@ public class WebhookProcessorTests
 
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
-        state.DeliveryType = "delivery";
+        state.ExtrasOffered = true;
         state.ObservationPromptSent = true;
         state.ObservationAnswered = true;
-        // OrderConfirmed = false, CheckoutFormSent = false
+        // OrderConfirmed = false — confirmation gate
 
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -3544,8 +3575,9 @@ public class WebhookProcessorTests
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "confirmar"), _testBusiness);
 
         state.OrderConfirmed.Should().BeTrue();
-        state.CheckoutFormSent.Should().BeTrue();
-        sentMessages.Last().Body.Should().Contain("Nombre:");
+        // After confirmation, next step is delivery (not checkout form)
+        sentMessages.Last().Body.Should().Contain("delivery");
+        sentMessages.Last().Body.Should().Contain("pick up");
     }
 
     [Fact]

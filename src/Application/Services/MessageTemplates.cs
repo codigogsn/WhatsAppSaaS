@@ -125,6 +125,21 @@ internal static class Msg
     internal static string PickupOrDelivery
         => "\u00bfC\u00f3mo lo quieres?\n\n\ud83d\ude97 *delivery* \u2014 te lo llevamos\n\ud83c\udfe0 *pick up* \u2014 lo recoges en tienda";
 
+    internal static string ExtrasQuestion
+        => "\u00bfQuieres agregar extras?\n\n"
+         + "Responde con una opci\u00f3n:\n\n"
+         + "\u2795 *S\u00cd* \u2014 agregar extras\n"
+         + "\u27a1\ufe0f *NO* \u2014 continuar";
+
+    internal static string ExtrasFormat
+        => "Perfecto. Escribe los extras as\u00ed, un producto por l\u00ednea.\n\n"
+         + "_Formato:_\n"
+         + "_producto: extra_\n\n"
+         + "_Ejemplo:_\n"
+         + "_hamburguesa bbq: extra tocineta_\n"
+         + "_hamburguesa doble: extra huevo_\n"
+         + "_hamburguesa cl\u00e1sica: extra queso_";
+
     internal static string ObservationPrompt
         => "\u270d\ufe0f Si tu pedido tiene una *observaci\u00f3n especial*, escr\u00edbela ahora.\n\n"
          + "_Ejemplo:_\n"
@@ -140,10 +155,19 @@ internal static class Msg
     // ── Order confirmation gate ──
 
     internal static string ConfirmOrderPrompt
-        => "Responde:\n"
-         + "\u2705 *CONFIRMAR* \u2014 para proceder con tus datos\n"
-         + "\u270f\ufe0f *EDITAR* \u2014 para modificar tu pedido\n"
-         + "\u274c *CANCELAR* \u2014 para empezar de nuevo";
+        => "\u00bfQu\u00e9 deseas hacer?\n\n"
+         + "Responde con una opci\u00f3n:\n\n"
+         + "\u2705 *CONFIRMAR*\n"
+         + "\u270f\ufe0f *EDITAR PEDIDO*\n"
+         + "\u274c *CANCELAR*";
+
+    // ── Payment method ──
+
+    internal static string PaymentMethodPrompt
+        => "\u00bfC\u00f3mo deseas pagar?\n\n"
+         + "\ud83d\udcb5 *efectivo*\n"
+         + "\ud83d\udcf1 *pago m\u00f3vil*\n"
+         + "\ud83d\udcb3 *zelle*";
 
     // ── Checkout form ──
 
@@ -153,7 +177,6 @@ internal static class Msg
          + "\ud83e\udeaa *C\u00e9dula:*\n"
          + "\ud83d\udcf1 *Tel\u00e9fono:*\n"
          + "\ud83c\udfe1 *Direcci\u00f3n:*\n"
-         + "\ud83d\udcb5 *Pago (PAGO M\u00d3VIL / EFECTIVO / DIVISAS / ZELLE):*\n"
          + "\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n"
          + "\u2705 *OBLIGATORIO*\n\n"
          + "Puedes responder copiando y pegando esta planilla\n"

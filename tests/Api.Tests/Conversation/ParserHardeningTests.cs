@@ -618,6 +618,171 @@ public class ParserHardeningTests
     }
 
     // ═══════════════════════════════════════════════════════════
+    //   I) GUIDED ORDERING FLOW — cashier-style steps
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task GuidedFlow_ExtrasYes_ShowsFormatInstructions()
+    {
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // Step 1: Order items → extras question
+        await _sut.ProcessAsync(MakePayload("1 hamburguesa"), _testBusiness);
+        state.Items.Should().NotBeEmpty();
+        state.ExtrasOffered.Should().BeTrue();
+        sentMessages.Last().Body.Should().Contain("extras");
+
+        // Step 2: Say YES → format instructions
+        sentMessages.Clear();
+        await _sut.ProcessAsync(MakePayload("s\u00ed"), _testBusiness);
+
+        state.ObservationPromptSent.Should().BeTrue("'sí' should trigger extras format");
+        sentMessages.Last().Body.Should().Contain("producto: extra",
+            "should show the per-item extras format");
+    }
+
+    [Fact]
+    public async Task GuidedFlow_ExtrasNo_SkipsToConfirmation()
+    {
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // Order → extras question → NO → confirmation
+        await _sut.ProcessAsync(MakePayload("1 hamburguesa"), _testBusiness);
+        sentMessages.Clear();
+        await _sut.ProcessAsync(MakePayload("no"), _testBusiness);
+
+        state.ObservationAnswered.Should().BeTrue();
+        sentMessages.Last().Body.Should().Contain("CONFIRMAR");
+        sentMessages.Last().Body.Should().Contain("RESUMEN");
+    }
+
+    [Fact]
+    public async Task GuidedFlow_ExtrasFormatParsed_ThenConfirmation()
+    {
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // Order → YES → send extras → confirmation
+        await _sut.ProcessAsync(MakePayload("1 hamburguesa bbq"), _testBusiness);
+        await _sut.ProcessAsync(MakePayload("s\u00ed"), _testBusiness);
+
+        sentMessages.Clear();
+        await _sut.ProcessAsync(MakePayload("hamburguesa bbq: extra tocineta"), _testBusiness);
+
+        state.ObservationAnswered.Should().BeTrue();
+        // After extras, should show confirmation gate
+        sentMessages.Last().Body.Should().Contain("CONFIRMAR");
+    }
+
+    [Fact]
+    public async Task GuidedFlow_ConfirmThenDelivery()
+    {
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // Order → NO extras → CONFIRMAR → delivery prompt
+        await _sut.ProcessAsync(MakePayload("1 hamburguesa"), _testBusiness);
+        await _sut.ProcessAsync(MakePayload("no"), _testBusiness);
+
+        sentMessages.Clear();
+        await _sut.ProcessAsync(MakePayload("confirmar"), _testBusiness);
+
+        state.OrderConfirmed.Should().BeTrue();
+        sentMessages.Last().Body.Should().Contain("delivery");
+        sentMessages.Last().Body.Should().Contain("pick up");
+    }
+
+    [Fact]
+    public async Task GuidedFlow_DeliveryThenPayment()
+    {
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // Full flow to payment
+        await _sut.ProcessAsync(MakePayload("1 hamburguesa"), _testBusiness);
+        await _sut.ProcessAsync(MakePayload("no"), _testBusiness);
+        await _sut.ProcessAsync(MakePayload("confirmar"), _testBusiness);
+
+        sentMessages.Clear();
+        await _sut.ProcessAsync(MakePayload("delivery"), _testBusiness);
+
+        state.DeliveryType.Should().Be("delivery");
+        sentMessages.Last().Body.Should().Contain("pagar");
+        sentMessages.Last().Body.Should().Contain("efectivo");
+        sentMessages.Last().Body.Should().Contain("zelle");
+    }
+
+    [Fact]
+    public async Task GuidedFlow_PaymentThenCheckout()
+    {
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // Full flow to checkout form
+        await _sut.ProcessAsync(MakePayload("1 hamburguesa"), _testBusiness);
+        await _sut.ProcessAsync(MakePayload("no"), _testBusiness);
+        await _sut.ProcessAsync(MakePayload("confirmar"), _testBusiness);
+        await _sut.ProcessAsync(MakePayload("pickup"), _testBusiness);
+
+        sentMessages.Clear();
+        await _sut.ProcessAsync(MakePayload("efectivo"), _testBusiness);
+
+        state.PaymentMethod.Should().Be("efectivo");
+        state.CheckoutFormSent.Should().BeTrue();
+        sentMessages.Last().Body.Should().Contain("Nombre:");
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //   Helpers
     // ═══════════════════════════════════════════════════════════
 

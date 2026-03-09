@@ -32,6 +32,7 @@ public sealed class ConversationFields
 
     public string? SpecialInstructions { get; set; }
     public bool OrderConfirmed { get; set; }
+    public bool ExtrasOffered { get; set; }
     public bool ObservationPromptSent { get; set; }
     public bool ObservationAnswered { get; set; }
     public bool HumanHandoffRequested { get; set; }
@@ -74,6 +75,7 @@ public sealed class ConversationFields
         // they allow post-confirm proof capture for pago_movil/divisas orders.
         SpecialInstructions = null;
         OrderConfirmed = false;
+        ExtrasOffered = false;
         ObservationPromptSent = false;
         ObservationAnswered = false;
         HumanHandoffRequested = false;

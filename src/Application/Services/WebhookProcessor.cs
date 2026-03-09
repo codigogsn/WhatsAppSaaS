@@ -217,7 +217,50 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // A0) Observation answer capture
+                    // A-extras) Extras YES/NO gate response
+                    if (state.ExtrasOffered && !state.ObservationPromptSent && !state.ObservationAnswered)
+                    {
+                        if (IsSuggestionAcceptance(t))
+                        {
+                            // User wants extras — show format instructions
+                            state.ObservationPromptSent = true;
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.ExtrasFormat,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        if (IsNoObservation(t))
+                        {
+                            // User skips extras — advance to confirmation
+                            state.ObservationAnswered = true;
+                            var nextReply = BuildOrderReplyFromState(state);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = nextReply,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        // User sent something else — try parsing as extras directly
+                        // (fall through to A0-style handling)
+                        state.ObservationPromptSent = true;
+                    }
+
+                    // A0) Observation/extras answer capture
                     if (state.ObservationPromptSent && !state.ObservationAnswered)
                     {
                         state.ObservationAnswered = true;
@@ -253,6 +296,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // A-edit) EDITAR — re-show order for modifications
                     if (IsEditCommand(t) && state.Items.Count > 0)
                     {
+                        state.ExtrasOffered = false;
                         state.ObservationPromptSent = false;
                         state.ObservationAnswered = false;
                         state.OrderConfirmed = false;
@@ -287,9 +331,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // A) Confirmar
                     if (IsConfirmCommand(t))
                     {
-                        // Pre-checkout confirmation gate: set OrderConfirmed and show checkout form
+                        // Pre-checkout confirmation gate: set OrderConfirmed, then ask delivery/payment
                         if (state.Items.Count > 0 && !state.OrderConfirmed && !state.CheckoutFormSent
-                            && state.ObservationAnswered && !string.IsNullOrWhiteSpace(state.DeliveryType))
+                            && state.ObservationAnswered)
                         {
                             state.OrderConfirmed = true;
                             var gateReply = BuildOrderReplyFromState(state);
@@ -648,10 +692,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 }
                             }
 
+                            var payReply = BuildOrderReplyFromState(state);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = Msg.CheckoutDataReceived,
+                                Body = payReply,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -982,26 +1027,31 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (state.Items.Count == 0)
             return Msg.WhatToOrder;
 
-        if (string.IsNullOrWhiteSpace(state.DeliveryType))
-            return Msg.PickupOrDelivery;
-
-        // Observation prompt — after items+delivery, before checkout form
-        // Skip if observation was already answered inline (e.g., "sin cebolla" in order text)
-        if (!state.ObservationPromptSent && !state.ObservationAnswered)
+        // Extras step — YES/NO gate before confirmation
+        if (!state.ExtrasOffered && !state.ObservationAnswered)
         {
-            state.ObservationPromptSent = true;
+            state.ExtrasOffered = true;
 
+            // If parser already detected inline observations, show them instead of generic question
             if (!string.IsNullOrWhiteSpace(state.SpecialInstructions))
                 return Msg.ObservationDetected(state.SpecialInstructions);
 
-            return Msg.ObservationPrompt;
+            return Msg.ExtrasQuestion;
         }
 
-        // Confirmation gate: show summary + ask CONFIRMAR/EDITAR/CANCELAR before checkout
+        // Confirmation gate: show summary + CONFIRMAR/EDITAR/CANCELAR
         if (!state.OrderConfirmed)
         {
             return Msg.OrderSummaryWithTotal(state.Items) + "\n\n" + Msg.ConfirmOrderPrompt;
         }
+
+        // Delivery step — after confirmation
+        if (string.IsNullOrWhiteSpace(state.DeliveryType))
+            return Msg.PickupOrDelivery;
+
+        // Payment method — after delivery
+        if (string.IsNullOrWhiteSpace(state.PaymentMethod))
+            return Msg.PaymentMethodPrompt;
 
         if (!state.CheckoutFormSent)
         {
