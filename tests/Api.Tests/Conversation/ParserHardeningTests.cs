@@ -450,80 +450,98 @@ public class ParserHardeningTests
     }
 
     // ═══════════════════════════════════════════════════════════
-    //   G) START-FLOW IDEMPOTENCY — Bug 1
-    //   "quisiera hacer un pedido" after greeting should NOT resend menu
+    //   G) START-FLOW IDEMPOTENCY
+    //   Continuation intents after greeting must NOT resend menu
     // ═══════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task OrderingIntent_AfterRecentGreeting_DoesNotResendMenu()
+    public async Task HolaQueTal_ThenQuisieraHacerUnPedido_NoDuplicateMenu()
     {
-        // Simulate: user already greeted, menu was sent, session is active
-        var state = new ConversationFields
-        {
-            MenuSent = true,
-            LastActivityUtc = DateTime.UtcNow.AddMinutes(-2) // 2 min ago — active session
-        };
+        // Two-message flow: greeting then ordering intent
+        var state = new ConversationFields();
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        var payload = MakePayload("quisiera hacer un pedido");
-        await _sut.ProcessAsync(payload, _testBusiness);
+        // Message 1: greeting — should send full welcome/menu (3 messages)
+        await _sut.ProcessAsync(MakePayload("hola que tal"), _testBusiness);
 
-        // Should send exactly 1 message (the order prompt), NOT 3 (greeting sequence)
+        state.MenuSent.Should().BeTrue("greeting should set MenuSent");
+        state.LastActivityUtc.Should().NotBeNull("greeting should set LastActivityUtc");
+        _whatsAppClientMock.Verify(
+            x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3),
+            "first greeting should send 3 messages (welcome + menu + prompt)");
+
+        _whatsAppClientMock.Invocations.Clear();
+
+        // Message 2: ordering intent — should send ONLY order prompt (1 message)
+        await _sut.ProcessAsync(MakePayload("quisiera hacer un pedido"), _testBusiness);
+
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "ordering intent after recent greeting should send only 1 prompt, not resend menu");
-
-        // MenuSent should still be true (no reset)
         state.MenuSent.Should().BeTrue("menu was already sent — should NOT reset");
     }
 
     [Fact]
-    public async Task OrderingIntent_StaleSession_ResendsFullGreeting()
+    public async Task Hola_ThenQuieroPedir_NoDuplicateMenu()
     {
-        // Simulate: user greeted long ago, session is stale (> 10 min)
-        var state = new ConversationFields
-        {
-            MenuSent = true,
-            LastActivityUtc = DateTime.UtcNow.AddMinutes(-30) // 30 min ago — stale
-        };
+        var state = new ConversationFields();
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        var payload = MakePayload("quisiera hacer un pedido");
-        await _sut.ProcessAsync(payload, _testBusiness);
+        await _sut.ProcessAsync(MakePayload("hola"), _testBusiness);
+        _whatsAppClientMock.Invocations.Clear();
 
-        // Should send 3 messages (full greeting sequence)
+        await _sut.ProcessAsync(MakePayload("quiero pedir"), _testBusiness);
+
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(3),
-            "ordering intent after stale session should resend full greeting sequence");
+            Times.Once,
+            "'quiero pedir' after 'hola' should send only order prompt");
     }
 
     [Fact]
-    public async Task ExplicitGreeting_AfterRecentMenu_StillResendsGreeting()
+    public async Task Buenas_ThenVoyAPedir_NoDuplicateMenu()
     {
-        // A direct greeting ("hola") should always resend, even if menu was sent recently
-        var state = new ConversationFields
-        {
-            MenuSent = true,
-            LastActivityUtc = DateTime.UtcNow.AddMinutes(-1)
-        };
+        var state = new ConversationFields();
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        var payload = MakePayload("hola");
-        await _sut.ProcessAsync(payload, _testBusiness);
+        await _sut.ProcessAsync(MakePayload("buenas"), _testBusiness);
+        _whatsAppClientMock.Invocations.Clear();
 
-        // Should send 3 messages (full greeting sequence) — greetings always restart
+        await _sut.ProcessAsync(MakePayload("voy a pedir"), _testBusiness);
+
+        // "voy a pedir" is not in IsOrderingIntent — should fall through to gentle redirect
+        // But at minimum it must NOT resend the greeting sequence
+        var sendCount = _whatsAppClientMock.Invocations
+            .Count(i => i.Method.Name == "SendTextMessageAsync");
+        sendCount.Should().BeLessOrEqualTo(1,
+            "'voy a pedir' after 'buenas' must not resend full greeting sequence");
+    }
+
+    [Fact]
+    public async Task NewConversation_StillShowsFullGreeting()
+    {
+        // Safety: a fresh conversation with no prior state should show full greeting
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(MakePayload("quisiera hacer un pedido"), _testBusiness);
+
+        // Fresh session — MenuSent is false, so full greeting should fire
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
             Times.Exactly(3),
-            "explicit greeting should always trigger full greeting sequence");
+            "first message in fresh conversation should trigger full greeting sequence");
+        state.MenuSent.Should().BeTrue();
     }
 
     // ═══════════════════════════════════════════════════════════

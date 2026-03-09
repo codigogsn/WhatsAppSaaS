@@ -391,6 +391,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
+                        state.LastActivityUtc = DateTime.UtcNow;
 
                         await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
 
