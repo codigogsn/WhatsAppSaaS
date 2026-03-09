@@ -129,7 +129,25 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // 2) Media: payment evidence
+                    // 2a) Handle interactive button replies — normalize to text
+                    //     MUST come before the media handler which skips non-text types
+                    if (message.Type == "interactive"
+                        && message.Interactive?.ButtonReply is { } btnReply)
+                    {
+                        var btnText = MapButtonIdToText(btnReply.Id)
+                                      ?? btnReply.Title;
+                        if (!string.IsNullOrWhiteSpace(btnText))
+                        {
+                            message.Text ??= new WebhookText();
+                            message.Text.Body = btnText;
+                            message.Type = "text"; // treat as text from here on
+                            _logger.LogInformation(
+                                "Interactive button mapped: id={ButtonId} title={Title} → text={MappedText}",
+                                btnReply.Id, btnReply.Title, btnText);
+                        }
+                    }
+
+                    // 2b) Media: payment evidence
                     //    Accept proof image when: explicitly requested, OR payment method
                     //    is pago_movil/divisas and we have items (even if not formally requested),
                     //    OR order was confirmed but proof is still pending (post-confirm capture)
@@ -171,14 +189,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
-                    }
-
-                    // Handle interactive button replies — treat tapped button title as text
-                    if (message.Type == "interactive"
-                        && message.Interactive?.ButtonReply?.Title is { Length: > 0 } btnTitle)
-                    {
-                        message.Text ??= new WebhookText();
-                        message.Text.Body = btnTitle;
                     }
 
                     if (string.IsNullOrWhiteSpace(message.Text?.Body)) continue;
@@ -1387,6 +1397,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
            || t.Contains("empanada")
            || t.Contains("agrega")
            || t.Contains("agregar");
+
+    /// <summary>
+    /// Maps WhatsApp reply button IDs to the equivalent text the state machine expects.
+    /// Returns null for unknown IDs (falls back to button title).
+    /// </summary>
+    internal static string? MapButtonIdToText(string? buttonId)
+        => buttonId switch
+        {
+            "btn_extras_si"  => "si",
+            "btn_extras_no"  => "no",
+            "btn_confirmar"  => "confirmar",
+            "btn_editar"     => "editar",
+            "btn_cancelar"   => "cancelar",
+            "btn_delivery"   => "delivery",
+            "btn_pickup"     => "pickup",
+            "btn_efectivo"   => "efectivo",
+            "btn_pago_movil" => "pago movil",
+            "btn_zelle"      => "zelle",
+            _ => null
+        };
 
     private static string? NormalizeDeliveryType(string? input)
     {

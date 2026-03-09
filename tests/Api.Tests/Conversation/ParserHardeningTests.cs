@@ -935,4 +935,238 @@ public class ParserHardeningTests
         items[0].Quantity.Should().Be(expectedQty);
         items[0].Modifiers.Should().Contain(expectedModifier);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //   INTERACTIVE BUTTON REPLIES — end-to-end flow tests
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void MapButtonIdToText_AllButtonsMapCorrectly()
+    {
+        WebhookProcessor.MapButtonIdToText("btn_extras_si").Should().Be("si");
+        WebhookProcessor.MapButtonIdToText("btn_extras_no").Should().Be("no");
+        WebhookProcessor.MapButtonIdToText("btn_confirmar").Should().Be("confirmar");
+        WebhookProcessor.MapButtonIdToText("btn_editar").Should().Be("editar");
+        WebhookProcessor.MapButtonIdToText("btn_cancelar").Should().Be("cancelar");
+        WebhookProcessor.MapButtonIdToText("btn_delivery").Should().Be("delivery");
+        WebhookProcessor.MapButtonIdToText("btn_pickup").Should().Be("pickup");
+        WebhookProcessor.MapButtonIdToText("btn_efectivo").Should().Be("efectivo");
+        WebhookProcessor.MapButtonIdToText("btn_pago_movil").Should().Be("pago movil");
+        WebhookProcessor.MapButtonIdToText("btn_zelle").Should().Be("zelle");
+        WebhookProcessor.MapButtonIdToText("unknown_btn").Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExtrasButton_Yes_AdvancesToExtrasFormat()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true; // extras question was sent
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_extras_si", "Sí"), _testBusiness);
+
+        state.ObservationPromptSent.Should().BeTrue("tapping Sí should advance to extras format");
+        _whatsAppClientMock.Verify(x => x.SendTextMessageAsync(
+            It.Is<OutgoingMessage>(m => m.Body.Contains("Formato exacto")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ExtrasButton_No_AdvancesToConfirmation()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_extras_no", "No"), _testBusiness);
+
+        state.ObservationAnswered.Should().BeTrue("tapping No should skip extras");
+        _whatsAppClientMock.Verify(x => x.SendTextMessageAsync(
+            It.Is<OutgoingMessage>(m => m.Body.Contains("RESUMEN DE TU PEDIDO")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ConfirmButton_AdvancesToDeliveryStep()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_confirmar", "Confirmar"), _testBusiness);
+
+        state.OrderConfirmed.Should().BeTrue("tapping Confirmar should confirm the order");
+        _whatsAppClientMock.Verify(x => x.SendTextMessageAsync(
+            It.Is<OutgoingMessage>(m => m.Buttons != null && m.Buttons.Any(b => b.Id == "btn_delivery")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task EditButton_ReturnsToEditFlow()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_editar", "Editar pedido"), _testBusiness);
+
+        state.OrderConfirmed.Should().BeFalse("tapping Editar should reset confirmation");
+        state.ExtrasOffered.Should().BeFalse("edit should reset extras flow");
+    }
+
+    [Fact]
+    public async Task CancelButton_ResetsFlow()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_cancelar", "Cancelar"), _testBusiness);
+
+        state.Items.Should().BeEmpty("tapping Cancelar should clear the order");
+    }
+
+    [Fact]
+    public async Task DeliveryButton_AdvancesToPayment()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_delivery", "Delivery"), _testBusiness);
+
+        state.DeliveryType.Should().Be("delivery");
+        _whatsAppClientMock.Verify(x => x.SendTextMessageAsync(
+            It.Is<OutgoingMessage>(m => m.Buttons != null && m.Buttons.Any(b => b.Id == "btn_efectivo")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PickupButton_AdvancesToPayment()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_pickup", "Pickup"), _testBusiness);
+
+        state.DeliveryType.Should().Be("pickup");
+        _whatsAppClientMock.Verify(x => x.SendTextMessageAsync(
+            It.Is<OutgoingMessage>(m => m.Buttons != null && m.Buttons.Any(b => b.Id == "btn_efectivo")),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task PaymentButton_Efectivo_AdvancesToCheckout()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_efectivo", "Efectivo"), _testBusiness);
+
+        state.PaymentMethod.Should().Be("efectivo");
+        state.CheckoutFormSent.Should().BeTrue("should advance to checkout form");
+    }
+
+    [Fact]
+    public async Task PaymentButton_PagoMovil_AdvancesToCheckout()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_pago_movil", "Pago móvil"), _testBusiness);
+
+        state.PaymentMethod.Should().Be("pago_movil");
+    }
+
+    [Fact]
+    public async Task PaymentButton_Zelle_AdvancesToCheckout()
+    {
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        SetupState(state);
+
+        await _sut.ProcessAsync(MakeButtonPayload("btn_zelle", "Zelle"), _testBusiness);
+
+        state.PaymentMethod.Should().Be("zelle");
+    }
+
+    // ── Helpers ──
+
+    private void SetupState(ConversationFields state)
+    {
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+    }
+
+    private static WebhookPayload MakeButtonPayload(string buttonId, string buttonTitle) => new()
+    {
+        Entry =
+        [
+            new WebhookEntry
+            {
+                Changes =
+                [
+                    new WebhookChange
+                    {
+                        Value = new WebhookChangeValue
+                        {
+                            Metadata = new WebhookMetadata
+                            {
+                                PhoneNumberId = "123456789"
+                            },
+                            Messages =
+                            [
+                                new WebhookMessage
+                                {
+                                    Id = $"wamid.btn-{Interlocked.Increment(ref _msgCounter)}",
+                                    From = "5511999999999",
+                                    Type = "interactive",
+                                    Timestamp = "1234567890",
+                                    Interactive = new WebhookInteractive
+                                    {
+                                        Type = "button_reply",
+                                        ButtonReply = new WebhookButtonReply
+                                        {
+                                            Id = buttonId,
+                                            Title = buttonTitle
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                ]
+            }
+        ]
+    };
 }
