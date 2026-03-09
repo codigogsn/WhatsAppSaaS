@@ -316,8 +316,6 @@ public class WebhookProcessorTests
         reply.Body.Should().Contain("C\u00e9dula:");
         reply.Body.Should().Contain("Tel\u00e9fono:");
         reply.Body.Should().Contain("Direcci\u00f3n:");
-        reply.Body.Should().Contain("Ubicaci\u00f3n GPS:");
-        reply.Body.Should().Contain("OBLIGATORIO");
         reply.Body.Should().Contain("CONFIRMAR");
     }
 

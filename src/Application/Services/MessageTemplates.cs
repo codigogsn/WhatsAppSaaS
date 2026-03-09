@@ -177,13 +177,11 @@ internal static class Msg
     // ── Checkout form ──
 
     internal static string CheckoutForm
-        => "Para finalizar env\u00edanos:\n\n"
+        => "\ud83d\udcdd *DATOS PARA DELIVERY*\n\n"
          + "\ud83d\udc64 *Nombre:*\n"
          + "\ud83e\udeaa *C\u00e9dula:*\n"
          + "\ud83d\udcf1 *Tel\u00e9fono:*\n"
-         + "\ud83c\udfe1 *Direcci\u00f3n:*\n"
-         + "\ud83d\udccd *Ubicaci\u00f3n GPS:* (manda el pin)\n"
-         + "\u2705 *OBLIGATORIO*\n\n"
+         + "\ud83c\udfe1 *Direcci\u00f3n:*\n\n"
          + "Puedes responder copiando y pegando esta planilla\n"
          + "o enviando los datos en l\u00edneas separadas.\n\n"
          + "Luego escribe *CONFIRMAR*.";
