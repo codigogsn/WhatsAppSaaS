@@ -292,13 +292,13 @@ public class WebhookProcessorTests
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
         // Premium emoji labels
-        reply.Should().Contain("Nombre:");
-        reply.Should().Contain("C\u00e9dula:");
-        reply.Should().Contain("Tel\u00e9fono:");
-        reply.Should().Contain("Direcci\u00f3n:");
-        reply.Should().Contain("Ubicaci\u00f3n GPS:");
-        reply.Should().Contain("OBLIGATORIO");
-        reply.Should().Contain("CONFIRMAR");
+        reply.Body.Should().Contain("Nombre:");
+        reply.Body.Should().Contain("C\u00e9dula:");
+        reply.Body.Should().Contain("Tel\u00e9fono:");
+        reply.Body.Should().Contain("Direcci\u00f3n:");
+        reply.Body.Should().Contain("Ubicaci\u00f3n GPS:");
+        reply.Body.Should().Contain("OBLIGATORIO");
+        reply.Body.Should().Contain("CONFIRMAR");
     }
 
     [Fact]
@@ -923,8 +923,8 @@ public class WebhookProcessorTests
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
         // Must contain 🪪 (U+1FAAA = ID card), NOT 🪭 (U+1FAAD = fan)
-        reply.Should().Contain("\ud83e\udeaa", "should use ID card emoji for C\u00e9dula");
-        reply.Should().NotContain("\ud83e\udead", "should NOT use fan emoji");
+        reply.Body.Should().Contain("\ud83e\udeaa", "should use ID card emoji for C\u00e9dula");
+        reply.Body.Should().NotContain("\ud83e\udead", "should NOT use fan emoji");
     }
 
     [Fact]
@@ -938,8 +938,10 @@ public class WebhookProcessorTests
         // No delivery type set — should prompt
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
-        reply.Should().Contain("pick up");
-        reply.Should().Contain("delivery");
+        reply.Body.Should().Contain("lo quieres");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Delivery");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Pickup");
     }
 
     // ── "quiero hacer un nuevo pedido" must also reset (user should NOT need "NUEVO") ──
@@ -1263,8 +1265,10 @@ public class WebhookProcessorTests
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
         // New flow: items → extras question (before delivery)
-        reply.Should().Contain("extras");
-        reply.Should().Contain("NO");
+        reply.Body.Should().Contain("extras");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Sí");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("No");
         state.ExtrasOffered.Should().BeTrue();
     }
 
@@ -1278,8 +1282,8 @@ public class WebhookProcessorTests
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        reply.Should().Contain("sin cebolla");
-        reply.Should().Contain("Observaci\u00f3n detectada");
+        reply.Body.Should().Contain("sin cebolla");
+        reply.Body.Should().Contain("Observaci\u00f3n detectada");
     }
 
     [Fact]
@@ -1294,10 +1298,10 @@ public class WebhookProcessorTests
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        string? sentBody = null;
+        OutgoingMessage? sentMsg = null;
         _whatsAppClientMock
             .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
-            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentBody = msg.Body)
+            .Callback<OutgoingMessage, CancellationToken>((msg, _) => sentMsg = msg)
             .ReturnsAsync(true);
 
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "no"), _testBusiness);
@@ -1305,9 +1309,12 @@ public class WebhookProcessorTests
         state.ObservationAnswered.Should().BeTrue();
         state.SpecialInstructions.Should().BeNull();
         // Should show confirmation prompt (not checkout form — that comes after CONFIRMAR)
-        sentBody.Should().Contain("RESUMEN DE TU PEDIDO");
-        sentBody.Should().Contain("CONFIRMAR");
-        sentBody.Should().Contain("EDITAR");
+        sentMsg.Should().NotBeNull();
+        sentMsg!.Body.Should().Contain("RESUMEN DE TU PEDIDO");
+        sentMsg.Body.Should().Contain("deseas hacer");
+        sentMsg.Buttons.Should().NotBeNull();
+        sentMsg.Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
+        sentMsg.Buttons!.Select(b => b.Title).Should().Contain("Editar pedido");
     }
 
     [Fact]
@@ -1846,11 +1853,13 @@ public class WebhookProcessorTests
         // Trigger via quick order that reaches BuildOrderReplyFromState
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "1 hamburguesa delivery"), _testBusiness);
 
-        var confirmPrompt = sentMessages.FirstOrDefault(m => m.Body.Contains("CONFIRMAR"));
+        var confirmPrompt = sentMessages.FirstOrDefault(m => m.Body.Contains("RESUMEN DE TU PEDIDO"));
         confirmPrompt.Should().NotBeNull();
-        confirmPrompt!.Body.Should().Contain("RESUMEN DE TU PEDIDO");
-        confirmPrompt.Body.Should().Contain("EDITAR");
-        confirmPrompt.Body.Should().Contain("CANCELAR");
+        confirmPrompt!.Body.Should().Contain("deseas hacer");
+        confirmPrompt.Buttons.Should().NotBeNull();
+        confirmPrompt.Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
+        confirmPrompt.Buttons!.Select(b => b.Title).Should().Contain("Editar pedido");
+        confirmPrompt.Buttons!.Select(b => b.Title).Should().Contain("Cancelar");
         confirmPrompt.Body.Should().NotContain("Nombre:"); // checkout form should NOT appear yet
     }
 
@@ -2531,9 +2540,11 @@ public class WebhookProcessorTests
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
         // Should skip observation prompt and show confirmation prompt
-        reply.Should().NotContain("observaci\u00f3n");
-        reply.Should().Contain("CONFIRMAR");
-        reply.Should().Contain("EDITAR");
+        reply.Body.Should().NotContain("observaci\u00f3n");
+        reply.Body.Should().Contain("deseas hacer");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Editar pedido");
         state.OrderConfirmed.Should().BeFalse("confirmation gate not yet passed");
     }
 
@@ -2546,9 +2557,10 @@ public class WebhookProcessorTests
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
         // Should show extras YES/NO question
-        reply.Should().Contain("extras");
-        reply.Should().Contain("S\u00cd");
-        reply.Should().Contain("NO");
+        reply.Body.Should().Contain("extras");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Sí");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("No");
         state.ExtrasOffered.Should().BeTrue();
     }
 
@@ -2920,8 +2932,8 @@ public class WebhookProcessorTests
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        reply.Should().NotContain("pickup");
-        reply.Should().NotContain("delivery");
+        reply.Body.Should().NotContain("pickup");
+        reply.Body.Should().NotContain("delivery");
     }
 
     // ══════════════════════════════════════════════
@@ -3242,11 +3254,14 @@ public class WebhookProcessorTests
     public void PaymentMethodPrompt_HasAllOptions()
     {
         var prompt = Msg.PaymentMethodPrompt;
-
         prompt.Should().Contain("pagar");
-        prompt.Should().Contain("efectivo");
-        prompt.Should().Contain("pago m\u00f3vil");
-        prompt.Should().Contain("zelle");
+
+        // Options are now in buttons, not inline text
+        var buttons = Msg.PaymentButtons;
+        buttons.Should().HaveCount(3);
+        buttons.Select(b => b.Title).Should().Contain("Efectivo");
+        buttons.Select(b => b.Title).Should().Contain("Pago móvil");
+        buttons.Select(b => b.Title).Should().Contain("Zelle");
     }
 
     // ── BUG 3 regression: order quantity aggregation ──
@@ -3367,7 +3382,9 @@ public class WebhookProcessorTests
 
         state.ObservationAnswered.Should().BeTrue();
         state.OrderConfirmed.Should().BeFalse("confirmation prompt should be shown");
-        sentMessages.Last().Body.Should().Contain("CONFIRMAR");
+        sentMessages.Last().Body.Should().Contain("deseas hacer");
+        sentMessages.Last().Buttons.Should().NotBeNull();
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
 
         // Step 3: Confirm → delivery step
         sentMessages.Clear();
@@ -3376,8 +3393,10 @@ public class WebhookProcessorTests
             _testBusiness);
 
         state.OrderConfirmed.Should().BeTrue();
-        sentMessages.Last().Body.Should().Contain("delivery");
-        sentMessages.Last().Body.Should().Contain("pick up");
+        sentMessages.Last().Body.Should().Contain("lo quieres");
+        sentMessages.Last().Buttons.Should().NotBeNull();
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Delivery");
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Pickup");
 
         // Step 4: Answer delivery → payment step
         sentMessages.Clear();
@@ -3527,11 +3546,13 @@ public class WebhookProcessorTests
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        reply.Should().Contain("RESUMEN DE TU PEDIDO");
-        reply.Should().Contain("CONFIRMAR");
-        reply.Should().Contain("EDITAR");
-        reply.Should().Contain("CANCELAR");
-        reply.Should().NotContain("Nombre:"); // checkout form NOT yet
+        reply.Body.Should().Contain("RESUMEN DE TU PEDIDO");
+        reply.Body.Should().Contain("deseas hacer");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Editar pedido");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Cancelar");
+        reply.Body.Should().NotContain("Nombre:"); // checkout form NOT yet
     }
 
     [Fact]
@@ -3548,7 +3569,7 @@ public class WebhookProcessorTests
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        reply.Should().Contain("Nombre:");
+        reply.Body.Should().Contain("Nombre:");
         state.CheckoutFormSent.Should().BeTrue();
     }
 
@@ -3576,8 +3597,10 @@ public class WebhookProcessorTests
 
         state.OrderConfirmed.Should().BeTrue();
         // After confirmation, next step is delivery (not checkout form)
-        sentMessages.Last().Body.Should().Contain("delivery");
-        sentMessages.Last().Body.Should().Contain("pick up");
+        sentMessages.Last().Body.Should().Contain("lo quieres");
+        sentMessages.Last().Buttons.Should().NotBeNull();
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Delivery");
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Pickup");
     }
 
     [Fact]

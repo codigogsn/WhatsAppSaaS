@@ -97,6 +97,27 @@ public sealed class WebhookMessage
 
     [JsonPropertyName("document")]
     public WebhookMedia? Document { get; set; }
+
+    [JsonPropertyName("interactive")]
+    public WebhookInteractive? Interactive { get; set; }
+}
+
+public sealed class WebhookInteractive
+{
+    [JsonPropertyName("type")]
+    public string Type { get; set; } = string.Empty;
+
+    [JsonPropertyName("button_reply")]
+    public WebhookButtonReply? ButtonReply { get; set; }
+}
+
+public sealed class WebhookButtonReply
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
 }
 
 public sealed class WebhookMedia

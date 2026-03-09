@@ -62,11 +62,35 @@ public sealed class WhatsAppClient : IWhatsAppClient
 
         var url = $"https://graph.facebook.com/{_options.ApiVersion}/{phoneNumberId}/messages";
 
-        var request = new SendMessageRequest
+        // Build payload: interactive buttons if present, otherwise plain text
+        SendMessageRequest request;
+        if (message.Buttons is { Count: > 0 })
         {
-            To = message.To,
-            Text = new SendMessageText { Body = message.Body }
-        };
+            request = new SendMessageRequest
+            {
+                To = message.To,
+                Type = "interactive",
+                Interactive = new SendInteractivePayload
+                {
+                    Body = new SendInteractiveBody { Text = message.Body },
+                    Action = new SendInteractiveAction
+                    {
+                        Buttons = message.Buttons.Select(b => new SendInteractiveButton
+                        {
+                            Reply = new SendInteractiveReply { Id = b.Id, Title = b.Title }
+                        }).ToList()
+                    }
+                }
+            };
+        }
+        else
+        {
+            request = new SendMessageRequest
+            {
+                To = message.To,
+                Text = new SendMessageText { Body = message.Body }
+            };
+        }
 
         _logger.LogDebug("Sending message to {To} via phone {PhoneNumberId}", message.To, phoneNumberId);
 

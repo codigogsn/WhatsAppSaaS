@@ -14,6 +14,14 @@ using WhatsAppSaaS.Domain.Entities;
 
 namespace WhatsAppSaaS.Application.Services;
 
+/// <summary>
+/// A bot reply containing body text and optional WhatsApp reply buttons.
+/// </summary>
+internal readonly record struct BotReply(string Body, List<ReplyButton>? Buttons = null)
+{
+    public static implicit operator BotReply(string body) => new(body);
+}
+
 public sealed class WebhookProcessor : IWebhookProcessor
 {
     private readonly IAiParser _aiParser;
@@ -165,6 +173,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // Handle interactive button replies — treat tapped button title as text
+                    if (message.Type == "interactive"
+                        && message.Interactive?.ButtonReply?.Title is { Length: > 0 } btnTitle)
+                    {
+                        message.Text ??= new WebhookText();
+                        message.Text.Body = btnTitle;
+                    }
+
                     if (string.IsNullOrWhiteSpace(message.Text?.Body)) continue;
 
                     var rawText = message.Text.Body;
@@ -245,7 +261,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = nextReply,
+                                Body = nextReply.Body,
+                                Buttons = nextReply.Buttons,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -284,7 +301,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = obsReply,
+                            Body = obsReply.Body,
+                            Buttons = obsReply.Buttons,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -341,7 +359,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = gateReply,
+                                Body = gateReply.Body,
+                                Buttons = gateReply.Buttons,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -524,7 +543,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = deliveryReply,
+                                Body = deliveryReply.Body,
+                                Buttons = deliveryReply.Buttons,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -696,7 +716,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = payReply,
+                                Body = payReply.Body,
+                                Buttons = payReply.Buttons,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -789,7 +810,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = safeReply,
+                                Body = safeReply.Body,
+                                Buttons = safeReply.Buttons,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -840,7 +862,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = quickReply,
+                            Body = quickReply.Body,
+                            Buttons = quickReply.Buttons,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -869,7 +892,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     await SendAsync(new OutgoingMessage
                     {
                         To = message.From,
-                        Body = reply,
+                        Body = reply.Body,
+                        Buttons = reply.Buttons,
                         PhoneNumberId = phoneNumberId,
                         AccessToken = businessContext.AccessToken
                     }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -987,7 +1011,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return null;
     }
 
-    private string BuildReply(
+    private BotReply BuildReply(
         RestaurantIntent intent,
         AiParseResult parsed,
         ConversationFields state)
@@ -1005,7 +1029,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         };
     }
 
-    private string BuildOrderReply(AiParseResult parsed, ConversationFields state)
+    private BotReply BuildOrderReply(AiParseResult parsed, ConversationFields state)
     {
         if (parsed.Args?.Order != null)
         {
@@ -1022,7 +1046,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return BuildOrderReplyFromState(state);
     }
 
-    internal static string BuildOrderReplyFromState(ConversationFields state)
+    internal static BotReply BuildOrderReplyFromState(ConversationFields state)
     {
         if (state.Items.Count == 0)
             return Msg.WhatToOrder;
@@ -1036,22 +1060,24 @@ public sealed class WebhookProcessor : IWebhookProcessor
             if (!string.IsNullOrWhiteSpace(state.SpecialInstructions))
                 return Msg.ObservationDetected(state.SpecialInstructions);
 
-            return Msg.ExtrasQuestion;
+            return new BotReply(Msg.ExtrasQuestion, Msg.ExtrasButtons);
         }
 
         // Confirmation gate: show summary + CONFIRMAR/EDITAR/CANCELAR
         if (!state.OrderConfirmed)
         {
-            return Msg.OrderSummaryWithTotal(state.Items) + "\n\n" + Msg.ConfirmOrderPrompt;
+            return new BotReply(
+                Msg.OrderSummaryWithTotal(state.Items) + "\n\n" + Msg.ConfirmOrderPrompt,
+                Msg.ConfirmButtons);
         }
 
         // Delivery step — after confirmation
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
-            return Msg.PickupOrDelivery;
+            return new BotReply(Msg.PickupOrDelivery, Msg.DeliveryButtons);
 
         // Payment method — after delivery
         if (string.IsNullOrWhiteSpace(state.PaymentMethod))
-            return Msg.PaymentMethodPrompt;
+            return new BotReply(Msg.PaymentMethodPrompt, Msg.PaymentButtons);
 
         if (!state.CheckoutFormSent)
         {
@@ -3034,14 +3060,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
         string? modifiers = null;
         var itemText = t;
 
-        // Check for modifier phrases
+        // Check for modifier phrases (supports both "item extra X" and "item: extra X")
         var modMatch = Regex.Match(t,
-            @"\s+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|mitad\s+.+|bien\s+(?:cocid|asad|hech|tostad).+|al\s+punto|termino\s+\w+|doble\s+\w+)$",
+            @"[\s:]+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|mitad\s+.+|bien\s+(?:cocid|asad|hech|tostad).+|al\s+punto|termino\s+\w+|doble\s+\w+)$",
             RegexOptions.IgnoreCase);
         if (modMatch.Success)
         {
-            modifiers = modMatch.Value.Trim();
-            itemText = t[..modMatch.Index].Trim();
+            modifiers = modMatch.Groups[1].Value.Trim();
+            itemText = t[..modMatch.Index].TrimEnd(':', ' ').Trim();
         }
 
         // Strip trailing noise

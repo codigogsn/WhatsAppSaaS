@@ -647,11 +647,11 @@ public class VenezuelanOrderingStressTests
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
         // 5*8.50 + 3*4.50 + 4*1.50 + 2*4.50 = 42.50 + 13.50 + 6.00 + 9.00 = 71.00
-        reply.Should().Contain("TOTAL: $71.00");
-        reply.Should().Contain("5x Hamburguesa Doble");
-        reply.Should().Contain("3x Papas Grandes");
-        reply.Should().Contain("4x Coca Cola");
-        reply.Should().Contain("2x Perro Clasico");
+        reply.Body.Should().Contain("TOTAL: $71.00");
+        reply.Body.Should().Contain("5x Hamburguesa Doble");
+        reply.Body.Should().Contain("3x Papas Grandes");
+        reply.Body.Should().Contain("4x Coca Cola");
+        reply.Body.Should().Contain("2x Perro Clasico");
     }
 
     [Fact]
@@ -717,9 +717,11 @@ public class VenezuelanOrderingStressTests
         // Step 3: Should see confirmation prompt with CONFIRMAR/EDITAR/CANCELAR
         var confirmMsg = sentMessages.LastOrDefault();
         confirmMsg.Should().NotBeNull();
-        confirmMsg!.Body.Should().Contain("CONFIRMAR");
-        confirmMsg.Body.Should().Contain("EDITAR");
-        confirmMsg.Body.Should().Contain("CANCELAR");
+        confirmMsg!.Body.Should().Contain("deseas hacer");
+        confirmMsg.Buttons.Should().NotBeNull();
+        confirmMsg.Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
+        confirmMsg.Buttons!.Select(b => b.Title).Should().Contain("Editar pedido");
+        confirmMsg.Buttons!.Select(b => b.Title).Should().Contain("Cancelar");
     }
 
     [Fact]
@@ -931,9 +933,14 @@ public class VenezuelanOrderingStressTests
     public void Edge_ConfirmationPrompt_ContainsAllOptions()
     {
         var prompt = Msg_Static.ConfirmOrderPrompt;
-        prompt.Should().Contain("CONFIRMAR");
-        prompt.Should().Contain("EDITAR");
-        prompt.Should().Contain("CANCELAR");
+        prompt.Should().Contain("deseas hacer");
+
+        // Options are now in buttons
+        var buttons = Msg_Static.ConfirmButtons;
+        buttons.Should().HaveCount(3);
+        buttons.Select(b => b.Title).Should().Contain("Confirmar");
+        buttons.Select(b => b.Title).Should().Contain("Editar pedido");
+        buttons.Select(b => b.Title).Should().Contain("Cancelar");
     }
 
     [Fact]
@@ -1055,6 +1062,9 @@ public class VenezuelanOrderingStressTests
 
         public static string ConfirmOrderPrompt
             => WhatsAppSaaS.Application.Services.Msg.ConfirmOrderPrompt;
+
+        public static List<ReplyButton> ConfirmButtons
+            => WhatsAppSaaS.Application.Services.Msg.ConfirmButtons;
 
         public static string GentleRedirect
             => WhatsAppSaaS.Application.Services.Msg.GentleRedirect;

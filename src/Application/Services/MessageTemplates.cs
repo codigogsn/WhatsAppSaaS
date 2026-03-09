@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using WhatsAppSaaS.Application.Interfaces;
+using WhatsAppSaaS.Domain.Entities;
 
 namespace WhatsAppSaaS.Application.Services;
 
@@ -22,8 +23,7 @@ internal static class Msg
          + "_Ejemplo:_\n"
          + "_2 hamburguesas cl\u00e1sicas_\n"
          + "_1 papa mediana_\n"
-         + "_2 Coca Cola_\n"
-         + "_delivery_\n\n"
+         + "_2 Coca Cola_\n\n"
          + "_Escribe un producto por l\u00ednea_";
 
     // ── Menu ──
@@ -110,35 +110,44 @@ internal static class Msg
          + "_Ejemplo:_\n"
          + "_2 hamburguesas cl\u00e1sicas_\n"
          + "_1 papa mediana_\n"
-         + "_2 Coca Cola_\n"
-         + "_delivery_";
+         + "_2 Coca Cola_\n\n"
+         + "_Escribe un producto por l\u00ednea_";
 
     internal static string ContinueOrder
         => "Perfecto, escr\u00edbeme tu pedido.\n\n"
          + "_Ejemplo:_\n"
          + "_2 hamburguesas cl\u00e1sicas_\n"
          + "_1 papa mediana_\n"
-         + "_2 Coca Cola_\n"
-         + "_delivery_\n\n"
+         + "_2 Coca Cola_\n\n"
          + "_Escribe un producto por l\u00ednea_";
 
     internal static string PickupOrDelivery
-        => "\u00bfC\u00f3mo lo quieres?\n\n\ud83d\ude97 *delivery* \u2014 te lo llevamos\n\ud83c\udfe0 *pick up* \u2014 lo recoges en tienda";
+        => "\u00bfC\u00f3mo lo quieres?";
+
+    internal static readonly List<ReplyButton> DeliveryButtons = new()
+    {
+        new("btn_delivery", "Delivery"),
+        new("btn_pickup", "Pickup")
+    };
 
     internal static string ExtrasQuestion
-        => "\u00bfQuieres agregar extras?\n\n"
-         + "Responde con una opci\u00f3n:\n\n"
-         + "\u2795 *S\u00cd* \u2014 agregar extras\n"
-         + "\u27a1\ufe0f *NO* \u2014 continuar";
+        => "\u00bfQuieres agregar extras?";
+
+    internal static readonly List<ReplyButton> ExtrasButtons = new()
+    {
+        new("btn_extras_si", "S\u00ed"),
+        new("btn_extras_no", "No")
+    };
 
     internal static string ExtrasFormat
-        => "Perfecto. Escribe los extras as\u00ed, un producto por l\u00ednea.\n\n"
-         + "_Formato:_\n"
-         + "_producto: extra_\n\n"
+        => "Perfecto. Escribe los extras as\u00ed, una l\u00ednea por producto.\n\n"
+         + "_Formato exacto:_\n"
+         + "_cantidad + producto + : + extra_\n\n"
          + "_Ejemplo:_\n"
-         + "_hamburguesa bbq: extra tocineta_\n"
-         + "_hamburguesa doble: extra huevo_\n"
-         + "_hamburguesa cl\u00e1sica: extra queso_";
+         + "_2 hamburguesas cl\u00e1sicas: extra queso_\n"
+         + "_1 hamburguesa doble: extra huevo_\n"
+         + "_1 hamburguesa bbq: extra tocineta_\n\n"
+         + "_Si no usas este formato exacto, el sistema puede no interpretar bien el extra._";
 
     internal static string ObservationPrompt
         => "\u270d\ufe0f Si tu pedido tiene una *observaci\u00f3n especial*, escr\u00edbela ahora.\n\n"
@@ -155,19 +164,26 @@ internal static class Msg
     // ── Order confirmation gate ──
 
     internal static string ConfirmOrderPrompt
-        => "\u00bfQu\u00e9 deseas hacer?\n\n"
-         + "Responde con una opci\u00f3n:\n\n"
-         + "\u2705 *CONFIRMAR*\n"
-         + "\u270f\ufe0f *EDITAR PEDIDO*\n"
-         + "\u274c *CANCELAR*";
+        => "\u00bfQu\u00e9 deseas hacer?";
+
+    internal static readonly List<ReplyButton> ConfirmButtons = new()
+    {
+        new("btn_confirmar", "Confirmar"),
+        new("btn_editar", "Editar pedido"),
+        new("btn_cancelar", "Cancelar")
+    };
 
     // ── Payment method ──
 
     internal static string PaymentMethodPrompt
-        => "\u00bfC\u00f3mo deseas pagar?\n\n"
-         + "\ud83d\udcb5 *efectivo*\n"
-         + "\ud83d\udcf1 *pago m\u00f3vil*\n"
-         + "\ud83d\udcb3 *zelle*";
+        => "\u00bfC\u00f3mo deseas pagar?";
+
+    internal static readonly List<ReplyButton> PaymentButtons = new()
+    {
+        new("btn_efectivo", "Efectivo"),
+        new("btn_pago_movil", "Pago m\u00f3vil"),
+        new("btn_zelle", "Zelle")
+    };
 
     // ── Checkout form ──
 
@@ -456,7 +472,8 @@ internal static class Msg
          + "_Ejemplo:_\n"
          + "_2 hamburguesas cl\u00e1sicas_\n"
          + "_1 papa mediana_\n"
-         + "_delivery_";
+         + "_2 Coca Cola_\n\n"
+         + "_Escribe un producto por l\u00ednea_";
 
     internal static string GentleRedirectWithOrder(IReadOnlyList<ConversationItemEntry> items)
     {

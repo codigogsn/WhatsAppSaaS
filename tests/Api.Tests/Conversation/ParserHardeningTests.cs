@@ -646,7 +646,7 @@ public class ParserHardeningTests
         await _sut.ProcessAsync(MakePayload("s\u00ed"), _testBusiness);
 
         state.ObservationPromptSent.Should().BeTrue("'sí' should trigger extras format");
-        sentMessages.Last().Body.Should().Contain("producto: extra",
+        sentMessages.Last().Body.Should().Contain("cantidad + producto + : + extra",
             "should show the per-item extras format");
     }
 
@@ -670,8 +670,10 @@ public class ParserHardeningTests
         await _sut.ProcessAsync(MakePayload("no"), _testBusiness);
 
         state.ObservationAnswered.Should().BeTrue();
-        sentMessages.Last().Body.Should().Contain("CONFIRMAR");
         sentMessages.Last().Body.Should().Contain("RESUMEN");
+        sentMessages.Last().Body.Should().Contain("deseas hacer");
+        sentMessages.Last().Buttons.Should().NotBeNull();
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
     }
 
     [Fact]
@@ -697,7 +699,9 @@ public class ParserHardeningTests
 
         state.ObservationAnswered.Should().BeTrue();
         // After extras, should show confirmation gate
-        sentMessages.Last().Body.Should().Contain("CONFIRMAR");
+        sentMessages.Last().Body.Should().Contain("deseas hacer");
+        sentMessages.Last().Buttons.Should().NotBeNull();
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
     }
 
     [Fact]
@@ -722,8 +726,10 @@ public class ParserHardeningTests
         await _sut.ProcessAsync(MakePayload("confirmar"), _testBusiness);
 
         state.OrderConfirmed.Should().BeTrue();
-        sentMessages.Last().Body.Should().Contain("delivery");
-        sentMessages.Last().Body.Should().Contain("pick up");
+        sentMessages.Last().Body.Should().Contain("lo quieres");
+        sentMessages.Last().Buttons.Should().NotBeNull();
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Delivery");
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Pickup");
     }
 
     [Fact]
@@ -750,8 +756,9 @@ public class ParserHardeningTests
 
         state.DeliveryType.Should().Be("delivery");
         sentMessages.Last().Body.Should().Contain("pagar");
-        sentMessages.Last().Body.Should().Contain("efectivo");
-        sentMessages.Last().Body.Should().Contain("zelle");
+        sentMessages.Last().Buttons.Should().NotBeNull();
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Efectivo");
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Zelle");
     }
 
     [Fact]
@@ -819,4 +826,113 @@ public class ParserHardeningTests
             }
         ]
     };
+
+    // ── GOAL 2: No "delivery" in order examples ──
+
+    [Fact]
+    public void WhatToOrder_DoesNotContainDelivery()
+    {
+        Msg.WhatToOrder.Should().NotContain("delivery", because: "delivery/pickup is asked in a separate step");
+    }
+
+    [Fact]
+    public void ContinueOrder_DoesNotContainDelivery()
+    {
+        Msg.ContinueOrder.Should().NotContain("delivery", because: "delivery/pickup is asked in a separate step");
+    }
+
+    [Fact]
+    public void MenuPrompt_DoesNotContainDelivery()
+    {
+        Msg.MenuPrompt.Should().NotContain("delivery", because: "delivery/pickup is asked in a separate step");
+    }
+
+    // ── GOAL 1: Real reply buttons are sent ──
+
+    [Fact]
+    public void ExtrasStep_HasReplyButtons()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        reply.Body.Should().Contain("extras");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons!.Should().HaveCount(2);
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Sí");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("No");
+    }
+
+    [Fact]
+    public void ConfirmationStep_HasReplyButtons()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        reply.Body.Should().Contain("RESUMEN DE TU PEDIDO");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons!.Should().HaveCount(3);
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Editar pedido");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Cancelar");
+    }
+
+    [Fact]
+    public void DeliveryStep_HasReplyButtons()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        reply.Body.Should().Contain("quieres");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons!.Should().HaveCount(2);
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Delivery");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Pickup");
+    }
+
+    [Fact]
+    public void PaymentStep_HasReplyButtons()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        reply.Body.Should().Contain("pagar");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons!.Should().HaveCount(3);
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Efectivo");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Pago móvil");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("Zelle");
+    }
+
+    // ── GOAL 3/4: Extras colon format parses correctly ──
+
+    [Theory]
+    [InlineData("2 hamburguesas clásicas: extra queso", "Hamburguesa Clasica", 2, "extra queso")]
+    [InlineData("1 hamburguesa doble: extra huevo", "Hamburguesa Doble", 1, "extra huevo")]
+    [InlineData("1 hamburguesa bbq: extra tocineta", "Hamburguesa BBQ", 1, "extra tocineta")]
+    public void ExtrasColonFormat_ParsesCorrectly(string input, string expectedName, int expectedQty, string expectedModifier)
+    {
+        var items = WebhookProcessor.ParseOrderText(input);
+
+        items.Should().HaveCount(1);
+        items[0].Name.Should().Be(expectedName);
+        items[0].Quantity.Should().Be(expectedQty);
+        items[0].Modifiers.Should().Contain(expectedModifier);
+    }
 }
