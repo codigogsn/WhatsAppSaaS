@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
@@ -336,6 +337,9 @@ public sealed class OrdersController : ControllerBase
         order.PaymentProofSubmittedAtUtc = null;
         await _context.SaveChangesAsync();
 
+        // Clear cached proof file
+        DeleteProofCache(id);
+
         // Notify customer
         if (!string.IsNullOrWhiteSpace(order.From) && !string.IsNullOrWhiteSpace(order.PhoneNumberId))
         {
@@ -377,6 +381,15 @@ public sealed class OrdersController : ControllerBase
             if (string.IsNullOrWhiteSpace(order.PaymentProofMediaId))
                 return NotFound(new { error = "No payment proof on this order" });
 
+            // ── Local cache: serve from disk if previously downloaded ──
+            var (cachedData, cachedType) = await ReadProofCacheAsync(id, ct);
+            if (cachedData is not null)
+            {
+                _logger.LogDebug("GetPaymentProof: serving from cache for orderId={OrderId}", id);
+                Response.Headers["Cache-Control"] = "private, max-age=300";
+                return File(cachedData, SafeContentType(cachedType!));
+            }
+
             _logger.LogInformation(
                 "GetPaymentProof: orderId={OrderId}, businessId={BusinessId}, mediaId={MediaId}",
                 id, order.BusinessId, order.PaymentProofMediaId);
@@ -385,11 +398,20 @@ public sealed class OrdersController : ControllerBase
             string? bizToken = null;
             if (order.BusinessId.HasValue)
             {
-                var biz = await _context.Businesses.AsNoTracking()
-                    .Where(b => b.Id == order.BusinessId.Value && b.IsActive)
-                    .Select(b => new { b.AccessToken })
-                    .FirstOrDefaultAsync(ct);
-                bizToken = biz?.AccessToken;
+                try
+                {
+                    var biz = await _context.Businesses.AsNoTracking()
+                        .Where(b => b.Id == order.BusinessId.Value && b.IsActive)
+                        .Select(b => new { b.AccessToken })
+                        .FirstOrDefaultAsync(ct);
+                    bizToken = biz?.AccessToken;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "GetPaymentProof: failed to look up business {BusinessId} for order {OrderId}. Falling back to env/appsettings token.",
+                        order.BusinessId, id);
+                }
 
                 if (string.IsNullOrWhiteSpace(bizToken))
                     _logger.LogWarning(
@@ -410,21 +432,16 @@ public sealed class OrdersController : ControllerBase
                 "GetPaymentProof: downloaded {Bytes} bytes, contentType={ContentType} for orderId={OrderId}",
                 result.Data.Length, result.ContentType, id);
 
-            // Only allow safe content types
-            var allowedTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                "image/jpeg", "image/png", "image/webp",
-                "application/pdf", "image/gif"
-            };
-            var contentType = allowedTypes.Contains(result.ContentType) ? result.ContentType : "application/octet-stream";
+            // Cache locally for future requests
+            await WriteProofCacheAsync(id, result.Data, result.ContentType, ct);
 
+            var contentType = SafeContentType(result.ContentType);
             Response.Headers["Cache-Control"] = "private, max-age=300";
             return File(result.Data, contentType);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            // Client disconnected — don't log as error
-            return StatusCode(499); // nginx-style "client closed request"
+            return StatusCode(499);
         }
         catch (Exception ex)
         {
@@ -433,6 +450,74 @@ public sealed class OrdersController : ControllerBase
             return StatusCode(500, new { error = "Error interno al obtener el comprobante. Intenta de nuevo." });
         }
     }
+
+    // ── Proof file cache helpers ──
+
+    private static readonly string ProofCacheDir =
+        Path.Combine(AppContext.BaseDirectory, "data", "proofs");
+
+    private static string ProofBinPath(Guid orderId) =>
+        Path.Combine(ProofCacheDir, orderId.ToString("N") + ".bin");
+
+    private static string ProofTypePath(Guid orderId) =>
+        Path.Combine(ProofCacheDir, orderId.ToString("N") + ".type");
+
+    private static async Task<(byte[]? data, string? contentType)> ReadProofCacheAsync(Guid orderId, CancellationToken ct)
+    {
+        var binPath = ProofBinPath(orderId);
+        var typePath = ProofTypePath(orderId);
+        if (!System.IO.File.Exists(binPath) || !System.IO.File.Exists(typePath))
+            return (null, null);
+        try
+        {
+            var data = await System.IO.File.ReadAllBytesAsync(binPath, ct);
+            var contentType = (await System.IO.File.ReadAllTextAsync(typePath, ct)).Trim();
+            if (data.Length == 0 || string.IsNullOrWhiteSpace(contentType))
+                return (null, null);
+            return (data, contentType);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    private async Task WriteProofCacheAsync(Guid orderId, byte[] data, string contentType, CancellationToken ct)
+    {
+        try
+        {
+            Directory.CreateDirectory(ProofCacheDir);
+            await System.IO.File.WriteAllBytesAsync(ProofBinPath(orderId), data, ct);
+            await System.IO.File.WriteAllTextAsync(ProofTypePath(orderId), contentType, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to cache proof for orderId={OrderId}", orderId);
+        }
+    }
+
+    private void DeleteProofCache(Guid orderId)
+    {
+        try
+        {
+            var bin = ProofBinPath(orderId);
+            var type = ProofTypePath(orderId);
+            if (System.IO.File.Exists(bin)) System.IO.File.Delete(bin);
+            if (System.IO.File.Exists(type)) System.IO.File.Delete(type);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to delete cached proof for orderId={OrderId}", orderId);
+        }
+    }
+
+    private static readonly HashSet<string> AllowedProofTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg", "image/png", "image/webp", "application/pdf", "image/gif"
+    };
+
+    private static string SafeContentType(string ct) =>
+        AllowedProofTypes.Contains(ct) ? ct : "application/octet-stream";
 
     private bool IsAdmin()
     {
