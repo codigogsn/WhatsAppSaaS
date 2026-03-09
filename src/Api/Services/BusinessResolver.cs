@@ -70,13 +70,16 @@ public class BusinessResolver : IBusinessResolver
         var adminKey = EnvResolve("WHATSAPP_ADMIN_KEY", "ADMIN_KEY", "WhatsApp__AdminKey") ?? "";
         var bizName = EnvResolve("WHATSAPP_BUSINESS_NAME", "WhatsApp__BusinessName") ?? "Default Business";
 
+        var currRef = EnvResolve("WHATSAPP_CURRENCY_REF", "WhatsApp__CurrencyReference") ?? "BCV_USD";
+
         var biz = new Business
         {
             Name = bizName,
             PhoneNumberId = id,
             AccessToken = accessToken,
             AdminKey = adminKey,
-            IsActive = true
+            IsActive = true,
+            CurrencyReference = currRef
         };
 
         _db.Businesses.Add(biz);

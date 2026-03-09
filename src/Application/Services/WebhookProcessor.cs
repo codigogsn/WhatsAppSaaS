@@ -61,6 +61,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Per-request active menu (loaded from DB or fallback to demo)
     private MenuEntry[]? _activeMenu;
 
+    // Per-request BCV rate (resolved once, reused for summaries + receipt)
+    private ResolvedRate? _bcvRate;
+
     public async Task ProcessAsync(WebhookPayload payload, BusinessContext businessContext, CancellationToken cancellationToken = default)
     {
         if (payload?.Entry is null) return;
@@ -68,6 +71,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Load business menu from DB; fallback to demo catalog
         _activeMenu = await LoadBusinessMenuAsync(businessContext.BusinessId, cancellationToken);
         ActiveCatalog = _activeMenu;
+
+        // Resolve BCV rate once per request (never blocks processing)
+        try
+        {
+            if (_exchangeRateProvider is not null)
+                _bcvRate = await _exchangeRateProvider.GetRateAsync(businessContext.CurrencyReference, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve exchange rate — continuing without Bs conversion");
+        }
 
         foreach (var entry in payload.Entry)
         {
@@ -270,7 +284,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         {
                             // User skips observation — advance to confirmation
                             state.ObservationAnswered = true;
-                            var nextReply = BuildOrderReplyFromState(state);
+                            var nextReply = BuildOrderReplyFromState(state, _bcvRate);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -304,7 +318,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         }
 
                         // Now continue to order confirmation gate
-                        var obsReply = BuildOrderReplyFromState(state);
+                        var obsReply = BuildOrderReplyFromState(state, _bcvRate);
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -331,7 +345,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = Msg.OrderSummaryWithTotal(state.Items) + "\n\n" + Msg.WhatToOrder,
+                            Body = Msg.OrderSummaryWithTotal(state.Items, _bcvRate) + "\n\n" + Msg.WhatToOrder,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -362,7 +376,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             && state.ObservationAnswered)
                         {
                             state.OrderConfirmed = true;
-                            var gateReply = BuildOrderReplyFromState(state);
+                            var gateReply = BuildOrderReplyFromState(state, _bcvRate);
 
                             await SendAsync(new OutgoingMessage
                             {
@@ -546,7 +560,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         if (standaloneDelivery != null)
                         {
                             state.DeliveryType = standaloneDelivery;
-                            var deliveryReply = BuildOrderReplyFromState(state);
+                            var deliveryReply = BuildOrderReplyFromState(state, _bcvRate);
 
                             await SendAsync(new OutgoingMessage
                             {
@@ -720,7 +734,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 }
                             }
 
-                            var payReply = BuildOrderReplyFromState(state);
+                            var payReply = BuildOrderReplyFromState(state, _bcvRate);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -814,7 +828,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         var catalog = ActiveCatalog ?? MenuCatalog;
                         if (TryApplyGlobalModifier(state, rawText, catalog))
                         {
-                            var safeReply = BuildOrderReplyFromState(state);
+                            var safeReply = BuildOrderReplyFromState(state, _bcvRate);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -865,7 +879,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             state.ObservationAnswered = true;
                         }
 
-                        var quickReply = BuildOrderReplyFromState(state);
+                        var quickReply = BuildOrderReplyFromState(state, _bcvRate);
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -1067,10 +1081,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 state.DeliveryType = NormalizeDeliveryType(parsed.Args.Order.DeliveryType);
         }
 
-        return BuildOrderReplyFromState(state);
+        return BuildOrderReplyFromState(state, _bcvRate);
     }
 
-    internal static BotReply BuildOrderReplyFromState(ConversationFields state)
+    internal static BotReply BuildOrderReplyFromState(ConversationFields state, ResolvedRate? bcvRate = null)
     {
         if (state.Items.Count == 0)
             return Msg.WhatToOrder;
@@ -1086,7 +1100,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (!state.OrderConfirmed)
         {
             return new BotReply(
-                Msg.OrderSummaryWithTotal(state.Items) + "\n\n" + Msg.ConfirmOrderPrompt,
+                Msg.OrderSummaryWithTotal(state.Items, bcvRate) + "\n\n" + Msg.ConfirmOrderPrompt,
                 Msg.ConfirmButtons);
         }
 
@@ -1205,18 +1219,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
 
-        // Resolve BCV rate for Bs equivalent display (never blocks ordering)
-        ResolvedRate? bcvRate = null;
-        try
-        {
-            if (_exchangeRateProvider is not null)
-                bcvRate = await _exchangeRateProvider.GetRateAsync(businessContext.CurrencyReference, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to resolve exchange rate for receipt — continuing without Bs conversion");
-        }
-
         var receipt = Msg.BuildReceipt(
             orderNumber,
             state.CustomerName!,
@@ -1227,7 +1229,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             state.Address!,
             Msg.PaymentMethodText(state.PaymentMethod),
             state.DeliveryType!,
-            bcvRate);
+            _bcvRate);
 
         state.ResetAfterConfirm();
         return receipt;

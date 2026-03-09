@@ -540,6 +540,8 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
 
     // ── CurrencyReference column on Businesses ──
     ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "CurrencyReference" varchar(20)""");
+    // Default existing businesses with NULL CurrencyReference to BCV_USD
+    ExecSql(conn, """UPDATE "Businesses" SET "CurrencyReference" = 'BCV_USD' WHERE "CurrencyReference" IS NULL""");
 
     // ── Boolean column repair ──
     string[] boolRepairs =

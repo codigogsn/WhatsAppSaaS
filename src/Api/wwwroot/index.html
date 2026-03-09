@@ -606,6 +606,16 @@ function updateBizAdminButton(){
   }
 }
 
+// ── BCV exchange rate (fetched once per refresh cycle) ──
+let _bcvRate = null; // { usdRate, eurRate, rateDate, isStale, available }
+async function loadExchangeRate(){
+  try {
+    const res = await fetch('/api/admin/exchange-rates/current', { cache: 'no-store' });
+    if (res.ok) _bcvRate = await res.json();
+    else _bcvRate = null;
+  } catch { _bcvRate = null; }
+}
+
 async function loadBusinesses(){
   const key = getAdminKey();
   const sel = document.getElementById('businessSelect');
@@ -980,7 +990,7 @@ async function load() {
   console.log(`${tag} load() starting — url=/api/orders?${qs.toString()}`);
 
   document.getElementById('msg').textContent = 'Cargando...';
-  await Promise.all([loadSummary(), loadHandoffs()]);
+  await Promise.all([loadSummary(), loadHandoffs(), loadExchangeRate()]);
 
   const isHandoffFilter = status === 'NeedsHuman';
   const fetchUrl = '/api/orders?' + qs.toString().replace('status=NeedsHuman','');
@@ -1045,7 +1055,7 @@ async function load() {
       <td style="max-width:250px;">
         <span class="small">${esc(itemsSummary).slice(0,80)}${itemsSummary.length > 80 ? '...' : ''}</span>
       </td>
-      <td style="white-space:nowrap;">${o.totalAmount != null ? fmtMoney(o.totalAmount) : '-'}</td>
+      <td style="white-space:nowrap;">$${o.totalAmount != null ? fmtMoney(o.totalAmount) : '-'}${_bcvRate && _bcvRate.available && o.totalAmount ? '<br/><span style="font-size:11px;color:#1b5e20;">Bs.' + fmtMoney(o.totalAmount * _bcvRate.usdRate) + '</span>' : ''}</td>
       <td>${hasObs ? '<span class="obs-tag">OBS</span>' : ''}</td>
       <td>
         <div class="status-actions">
@@ -1117,6 +1127,12 @@ async function load() {
             <div class="detail-section-content">
               <div class="order-subtotal"><span>Subtotal</span><span>$${fmtMoney(o.subtotalAmount)}</span></div>
               <div class="order-total-row"><span style="font-size:14px; font-weight:600;">Total</span><span class="order-total">$${fmtMoney(o.totalAmount)}</span></div>
+              ${_bcvRate && _bcvRate.available && o.totalAmount ? (() => {
+                const bsTotal = o.totalAmount * _bcvRate.usdRate;
+                const staleTag = _bcvRate.isStale ? ' <span style="color:#e65100;font-size:11px;">(tasa anterior)</span>' : '';
+                return '<div style="margin-top:4px;font-size:13px;color:#1b5e20;font-weight:600;">' +
+                  '\ud83c\uddfb\ud83c\uddea Ref. BCV USD: Bs. ' + fmtMoney(bsTotal) + staleTag + '</div>';
+              })() : ''}
             </div>
           </div>
 
