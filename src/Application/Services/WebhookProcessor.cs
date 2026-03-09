@@ -719,7 +719,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                                     if (payMethod == "pago_movil")
                                     {
-                                        await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+                                        await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, state.Items, cancellationToken);
                                     }
                                     else
                                     {
@@ -773,7 +773,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                                 if (state.PaymentMethod == "pago_movil")
                                 {
-                                    await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+                                    await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, state.Items, cancellationToken);
                                 }
                                 else
                                 {
@@ -1010,7 +1010,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // ──────────────────────────────────────────
 
     private async Task SendPagoMovilDetailsAsync(
-        string to, string phoneNumberId, BusinessContext biz, string conversationId, CancellationToken ct)
+        string to, string phoneNumberId, BusinessContext biz, string conversationId,
+        IReadOnlyList<ConversationItemEntry> items, CancellationToken ct)
     {
         // Per-business config → global options → env vars → placeholder
         var bank = FirstNonEmpty(biz.PaymentMobileBank, _paymentMobile.Bank,
@@ -1020,11 +1021,20 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var phone = FirstNonEmpty(biz.PaymentMobilePhone, _paymentMobile.Phone,
             Environment.GetEnvironmentVariable("PAYMENT_MOBILE_PHONE")) ?? "(no configurado)";
 
+        // Compute Bs amount from already-resolved BCV rate
+        string? bsAmount = null;
+        if (_bcvRate is not null && _bcvRate.Rate > 0)
+        {
+            var total = items.Sum(i => i.UnitPrice * i.Quantity);
+            if (total > 0)
+                bsAmount = (total * _bcvRate.Rate).ToString("N2");
+        }
+
         // Message 1: Payment details
         await SendAsync(new OutgoingMessage
         {
             To = to,
-            Body = Msg.PagoMovilDetails(bank, payId, phone),
+            Body = Msg.PagoMovilDetails(bank, payId, phone, bsAmount),
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);

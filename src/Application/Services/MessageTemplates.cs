@@ -214,11 +214,12 @@ internal static class Msg
     internal static string PaymentProofReceived
         => "\u2705 Comprobante recibido. Tu pago qued\u00f3 pendiente de verificaci\u00f3n.";
 
-    internal static string PagoMovilDetails(string bank, string id, string phone)
+    internal static string PagoMovilDetails(string bank, string id, string phone, string? bsAmount = null)
         => $"\ud83d\udcb3 *DATOS PARA PAGO M\u00d3VIL*\n\n"
          + $"\u2022 *Banco:* {bank}\n"
          + $"\u2022 *C.I./RIF:* {id}\n"
-         + $"\u2022 *Tel\u00e9fono:* {phone}";
+         + $"\u2022 *Tel\u00e9fono:* {phone}"
+         + (bsAmount is not null ? $"\n\u2022 *Monto:* Bs. {bsAmount}" : "");
 
     internal static string PagoMovilProofRequest
         => "Env\u00eda el *comprobante* (foto del pago) \ud83d\udcf8";
