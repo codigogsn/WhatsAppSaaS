@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using WhatsAppSaaS.Application.Common;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Application.Services;
+using WhatsAppSaaS.Application.Strategies;
 using WhatsAppSaaS.Infrastructure.Ai;
 using WhatsAppSaaS.Infrastructure.Persistence;
 using WhatsAppSaaS.Infrastructure.Repositories;
@@ -70,6 +71,7 @@ public static class ServiceCollectionExtensions
 
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
+        services.AddSingleton<IVerticalStrategyFactory, VerticalStrategyFactory>();
         services.AddScoped<IBotService, BotService>();
         services.AddScoped<INotificationService, NotificationService>();
         services.AddScoped<IWebhookProcessor, WebhookProcessor>();

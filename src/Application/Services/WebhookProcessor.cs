@@ -31,6 +31,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly IMenuRepository? _menuRepository;
     private readonly INotificationService? _notificationService;
     private readonly IExchangeRateProvider? _exchangeRateProvider;
+    private readonly IVerticalStrategyFactory _verticalStrategyFactory;
     private readonly ILogger<WebhookProcessor> _logger;
     private readonly PaymentMobileOptions _paymentMobile;
 
@@ -43,7 +44,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         PaymentMobileOptions? paymentMobile = null,
         IMenuRepository? menuRepository = null,
         INotificationService? notificationService = null,
-        IExchangeRateProvider? exchangeRateProvider = null)
+        IExchangeRateProvider? exchangeRateProvider = null,
+        IVerticalStrategyFactory? verticalStrategyFactory = null)
     {
         _aiParser = aiParser;
         _whatsAppClient = whatsAppClient;
@@ -52,6 +54,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         _menuRepository = menuRepository;
         _notificationService = notificationService;
         _exchangeRateProvider = exchangeRateProvider;
+        _verticalStrategyFactory = verticalStrategyFactory ?? new Application.Strategies.VerticalStrategyFactory();
         _logger = logger;
         _paymentMobile = paymentMobile ?? new PaymentMobileOptions();
     }
@@ -64,9 +67,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Per-request BCV rate (resolved once, reused for summaries + receipt)
     private ResolvedRate? _bcvRate;
 
+    // Per-request vertical strategy (resolved from business config)
+    private IVerticalStrategy _verticalStrategy = null!;
+
     public async Task ProcessAsync(WebhookPayload payload, BusinessContext businessContext, CancellationToken cancellationToken = default)
     {
         if (payload?.Entry is null) return;
+
+        // Resolve vertical strategy for this business
+        _verticalStrategy = _verticalStrategyFactory.GetStrategy(businessContext.VerticalType);
 
         // Load business menu from DB; fallback to demo catalog
         _activeMenu = await LoadBusinessMenuAsync(businessContext.BusinessId, cancellationToken);
@@ -1177,8 +1186,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
         if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("\u2022 \ud83d\udcb5 Pago:");
 
-        // For delivery orders: GPS is required but requested separately after text fields are confirmed
-        if (!state.GpsPinReceived && state.DeliveryType == "delivery")
+        // GPS requirement is vertical-specific (e.g. restaurant delivery needs it, pickup doesn't)
+        if (!state.GpsPinReceived && _verticalStrategy.RequiresGps(state.DeliveryType))
         {
             // If text fields are all filled, transition to GPS request stage
             if (missing.Count == 0)

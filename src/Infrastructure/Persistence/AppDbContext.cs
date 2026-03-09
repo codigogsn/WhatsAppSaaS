@@ -161,6 +161,9 @@ public class AppDbContext : DbContext
             // Exchange rate reference
             b.Property(x => x.CurrencyReference).HasMaxLength(20);
 
+            // Business vertical type
+            b.Property(x => x.VerticalType).HasMaxLength(30).HasDefaultValue("restaurant");
+
             // Notification
             b.Property(x => x.NotificationPhone).HasMaxLength(50);
 

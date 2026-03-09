@@ -36,6 +36,9 @@ public class Business
     // Exchange rate reference: "BCV_USD", "BCV_EUR", or null/NONE (no conversion)
     public string? CurrencyReference { get; set; }
 
+    // Business vertical: "restaurant", "fashion", etc. (defaults to "restaurant")
+    public string VerticalType { get; set; } = "restaurant";
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

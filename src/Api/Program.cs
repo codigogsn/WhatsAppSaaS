@@ -543,6 +543,10 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     // Default existing businesses with NULL CurrencyReference to BCV_USD
     ExecSql(conn, """UPDATE "Businesses" SET "CurrencyReference" = 'BCV_USD' WHERE "CurrencyReference" IS NULL""");
 
+    // ── VerticalType column on Businesses ──
+    ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "VerticalType" varchar(30) DEFAULT 'restaurant'""");
+    ExecSql(conn, """UPDATE "Businesses" SET "VerticalType" = 'restaurant' WHERE "VerticalType" IS NULL""");
+
     // ── Boolean column repair ──
     string[] boolRepairs =
     [
