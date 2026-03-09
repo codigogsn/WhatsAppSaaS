@@ -77,7 +77,7 @@ public class AutoOnboardingTests : IDisposable
         root.GetProperty("templateName").GetString().Should().Be("Hamburguesas");
 
         var cats = root.GetProperty("defaultCategories");
-        cats.GetArrayLength().Should().Be(7);
+        cats.GetArrayLength().Should().Be(6);
         var catNames = Enumerable.Range(0, cats.GetArrayLength())
             .Select(i => cats[i].GetString()).ToList();
         catNames.Should().Contain("Hamburguesas");
@@ -85,7 +85,6 @@ public class AutoOnboardingTests : IDisposable
         catNames.Should().Contain("Papas");
         catNames.Should().Contain("Bebidas");
         catNames.Should().Contain("Combos");
-        catNames.Should().Contain("Extras");
         catNames.Should().Contain("Salsas");
 
         // Verify items actually in DB
@@ -93,7 +92,7 @@ public class AutoOnboardingTests : IDisposable
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var bizId = Guid.Parse(root.GetProperty("id").GetString()!);
         var dbCats = await db.MenuCategories.Where(c => c.BusinessId == bizId).ToListAsync();
-        dbCats.Should().HaveCount(7);
+        dbCats.Should().HaveCount(6);
         var dbItems = await db.MenuItems.Where(i => i.Category!.BusinessId == bizId).ToListAsync();
         dbItems.Count.Should().BeGreaterThan(25); // burger template has 31 items
     }
@@ -122,7 +121,7 @@ public class AutoOnboardingTests : IDisposable
         var cats = root.GetProperty("defaultCategories");
         var catNames = Enumerable.Range(0, cats.GetArrayLength())
             .Select(i => cats[i].GetString()).ToList();
-        catNames.Should().BeEquivalentTo(["Combos", "Bebidas", "Extras"]);
+        catNames.Should().BeEquivalentTo(["Combos", "Bebidas"]);
     }
 
     // 3. Re-running seed does not duplicate items
@@ -169,7 +168,7 @@ public class AutoOnboardingTests : IDisposable
             var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
             var id = Guid.Parse(bizId);
             var catCount = await db.MenuCategories.CountAsync(c => c.BusinessId == id);
-            catCount.Should().Be(4); // pizza has 4 categories
+            catCount.Should().Be(3); // pizza has 3 categories
         }
     }
 
@@ -203,11 +202,11 @@ public class AutoOnboardingTests : IDisposable
 
         var body = JsonDocument.Parse(await res.Content.ReadAsStringAsync());
         var root = body.RootElement;
-        root.GetProperty("totalItems").GetInt32().Should().Be(31);
+        root.GetProperty("totalItems").GetInt32().Should().Be(27);
         root.GetProperty("name").GetString().Should().Be("Hamburguesas");
 
         var cats = root.GetProperty("categories");
-        cats.GetArrayLength().Should().Be(7);
+        cats.GetArrayLength().Should().Be(6);
     }
 
     [Fact]
@@ -219,10 +218,10 @@ public class AutoOnboardingTests : IDisposable
 
     // 5. Seed categories match template
     [Theory]
-    [InlineData("burger", new[] { "Hamburguesas", "Perros Calientes", "Papas", "Bebidas", "Combos", "Extras", "Salsas" })]
-    [InlineData("pizza", new[] { "Pizzas", "Pastas", "Bebidas", "Extras" })]
-    [InlineData("sushi", new[] { "Rolls", "Nigiri", "Bebidas", "Extras" })]
-    [InlineData("arepa", new[] { "Arepas", "Empanadas", "Bebidas", "Extras" })]
+    [InlineData("burger", new[] { "Hamburguesas", "Perros Calientes", "Papas", "Bebidas", "Combos", "Salsas" })]
+    [InlineData("pizza", new[] { "Pizzas", "Pastas", "Bebidas" })]
+    [InlineData("sushi", new[] { "Rolls", "Nigiri", "Bebidas" })]
+    [InlineData("arepa", new[] { "Arepas", "Empanadas", "Bebidas" })]
     [InlineData("cafe", new[] { "Cafes", "Postres", "Snacks", "Bebidas Frias" })]
     public async Task Create_WithType_SeedsCorrectCategories(string type, string[] expectedCats)
     {

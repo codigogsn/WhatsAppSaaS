@@ -60,8 +60,8 @@ public class ParserHardeningTests
             _stateStoreMock.Object,
             new Mock<ILogger<WebhookProcessor>>().Object);
 
-        // Set active catalog for static helper access
-        WebhookProcessor.ActiveCatalog = WebhookProcessor.MenuCatalog;
+        // Set active catalog for static helper access (include extras for modifier tests)
+        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -199,7 +199,7 @@ public class ParserHardeningTests
     }
 
     [Fact]
-    public async Task Modifier_ExtraQuesoEnHamburguesas_AppliedCorrectly()
+    public async Task Modifier_SinCebollaEnHamburguesas_AppliedCorrectly()
     {
         // Setup: order already has 2 hamburguesas clasicas
         var state = new ConversationFields
@@ -216,17 +216,16 @@ public class ParserHardeningTests
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        var payload = MakePayload("extra queso en las 2 hamburguesas");
+        var payload = MakePayload("sin cebolla en las 2 hamburguesas");
         await _sut.ProcessAsync(payload, _testBusiness);
 
         // Modifier should be applied to the hamburguesas
         var hamburguesas = state.Items.FirstOrDefault(i => i.Name == "Hamburguesa Clasica");
         hamburguesas.Should().NotBeNull();
-        hamburguesas!.Modifiers.Should().Contain("extra queso");
-        // Price should increase by $1.00 per unit (Extra Queso = $1.00)
-        hamburguesas.UnitPrice.Should().Be(7.50m, "6.50 base + 1.00 extra queso = 7.50");
-        // Should NOT create a separate Malta or other beverage
-        state.Items.Should().NotContain(i => i.Name == "Malta");
+        hamburguesas!.Modifiers.Should().Contain("sin cebolla");
+        // "sin" modifiers have $0 price impact
+        hamburguesas.UnitPrice.Should().Be(6.50m, "sin modifier should not change price");
+        // Should NOT create a separate item
         state.Items.Should().HaveCount(1, "modifier should not create new item");
     }
 
@@ -324,7 +323,7 @@ public class ParserHardeningTests
     }
 
     [Fact]
-    public async Task Correction_NoAgregasteExtraQueso_AppliedToExistingItems()
+    public async Task Correction_NoAgregasteSinCebolla_AppliedToExistingItems()
     {
         var state = new ConversationFields
         {
@@ -340,12 +339,12 @@ public class ParserHardeningTests
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        var payload = MakePayload("no agregaste el extra de queso");
+        var payload = MakePayload("sin cebolla en las hamburguesas");
         await _sut.ProcessAsync(payload, _testBusiness);
 
         state.Items.Should().HaveCount(1);
-        state.Items[0].Modifiers.Should().Contain("extra queso");
-        state.Items[0].UnitPrice.Should().Be(7.50m, "6.50 + 1.00 extra queso");
+        state.Items[0].Modifiers.Should().Contain("sin cebolla");
+        state.Items[0].UnitPrice.Should().Be(6.50m, "sin modifier should not change price");
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -622,7 +621,7 @@ public class ParserHardeningTests
     // ═══════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task GuidedFlow_ExtrasYes_ShowsFormatInstructions()
+    public async Task GuidedFlow_ObservationYes_ShowsFormatInstructions()
     {
         var state = new ConversationFields();
         _stateStoreMock
@@ -635,23 +634,23 @@ public class ParserHardeningTests
             .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
             .ReturnsAsync(true);
 
-        // Step 1: Order items → extras question
+        // Step 1: Order items → observation question
         await _sut.ProcessAsync(MakePayload("1 hamburguesa"), _testBusiness);
         state.Items.Should().NotBeEmpty();
         state.ExtrasOffered.Should().BeTrue();
-        sentMessages.Last().Body.Should().Contain("extras");
+        sentMessages.Last().Body.Should().Contain("observaci\u00f3n");
 
-        // Step 2: Say YES → format instructions
+        // Step 2: Say YES → observation format instructions
         sentMessages.Clear();
         await _sut.ProcessAsync(MakePayload("s\u00ed"), _testBusiness);
 
-        state.ObservationPromptSent.Should().BeTrue("'sí' should trigger extras format");
-        sentMessages.Last().Body.Should().Contain("cantidad + producto + : + extra",
-            "should show the per-item extras format");
+        state.ObservationPromptSent.Should().BeTrue("'s\u00ed' should trigger observation format");
+        sentMessages.Last().Body.Should().Contain("sin cebolla",
+            "should show observation format examples");
     }
 
     [Fact]
-    public async Task GuidedFlow_ExtrasNo_SkipsToConfirmation()
+    public async Task GuidedFlow_ObservationNo_SkipsToConfirmation()
     {
         var state = new ConversationFields();
         _stateStoreMock
@@ -664,7 +663,7 @@ public class ParserHardeningTests
             .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
             .ReturnsAsync(true);
 
-        // Order → extras question → NO → confirmation
+        // Order → observation question → NO → confirmation
         await _sut.ProcessAsync(MakePayload("1 hamburguesa"), _testBusiness);
         sentMessages.Clear();
         await _sut.ProcessAsync(MakePayload("no"), _testBusiness);
@@ -677,7 +676,7 @@ public class ParserHardeningTests
     }
 
     [Fact]
-    public async Task GuidedFlow_ExtrasFormatParsed_ThenConfirmation()
+    public async Task GuidedFlow_ObservationTextParsed_ThenConfirmation()
     {
         var state = new ConversationFields();
         _stateStoreMock
@@ -690,15 +689,16 @@ public class ParserHardeningTests
             .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
             .ReturnsAsync(true);
 
-        // Order → YES → send extras → confirmation
+        // Order → YES → send observation → confirmation
         await _sut.ProcessAsync(MakePayload("1 hamburguesa bbq"), _testBusiness);
         await _sut.ProcessAsync(MakePayload("s\u00ed"), _testBusiness);
 
         sentMessages.Clear();
-        await _sut.ProcessAsync(MakePayload("hamburguesa bbq: extra tocineta"), _testBusiness);
+        await _sut.ProcessAsync(MakePayload("sin cebolla"), _testBusiness);
 
         state.ObservationAnswered.Should().BeTrue();
-        // After extras, should show confirmation gate
+        state.SpecialInstructions.Should().Contain("sin cebolla");
+        // After observation, should show confirmation gate
         sentMessages.Last().Body.Should().Contain("deseas hacer");
         sentMessages.Last().Buttons.Should().NotBeNull();
         sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
@@ -718,7 +718,7 @@ public class ParserHardeningTests
             .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
             .ReturnsAsync(true);
 
-        // Order → NO extras → CONFIRMAR → delivery prompt
+        // Order → NO observation → CONFIRMAR → delivery prompt
         await _sut.ProcessAsync(MakePayload("1 hamburguesa"), _testBusiness);
         await _sut.ProcessAsync(MakePayload("no"), _testBusiness);
 
@@ -850,17 +850,17 @@ public class ParserHardeningTests
     // ── GOAL 1: Real reply buttons are sent ──
 
     [Fact]
-    public void ExtrasStep_HasReplyButtons()
+    public void ObservationStep_HasReplyButtons()
     {
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        reply.Body.Should().Contain("extras");
+        reply.Body.Should().Contain("observaci\u00f3n");
         reply.Buttons.Should().NotBeNull();
         reply.Buttons!.Should().HaveCount(2);
-        reply.Buttons!.Select(b => b.Title).Should().Contain("Sí");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("S\u00ed");
         reply.Buttons!.Select(b => b.Title).Should().Contain("No");
     }
 
@@ -920,22 +920,6 @@ public class ParserHardeningTests
         reply.Buttons!.Select(b => b.Title).Should().Contain("Zelle");
     }
 
-    // ── GOAL 3/4: Extras colon format parses correctly ──
-
-    [Theory]
-    [InlineData("2 hamburguesas clásicas: extra queso", "Hamburguesa Clasica", 2, "extra queso")]
-    [InlineData("1 hamburguesa doble: extra huevo", "Hamburguesa Doble", 1, "extra huevo")]
-    [InlineData("1 hamburguesa bbq: extra tocineta", "Hamburguesa BBQ", 1, "extra tocineta")]
-    public void ExtrasColonFormat_ParsesCorrectly(string input, string expectedName, int expectedQty, string expectedModifier)
-    {
-        var items = WebhookProcessor.ParseOrderText(input);
-
-        items.Should().HaveCount(1);
-        items[0].Name.Should().Be(expectedName);
-        items[0].Quantity.Should().Be(expectedQty);
-        items[0].Modifiers.Should().Contain(expectedModifier);
-    }
-
     // ═══════════════════════════════════════════════════════════
     //   INTERACTIVE BUTTON REPLIES — end-to-end flow tests
     // ═══════════════════════════════════════════════════════════
@@ -943,8 +927,8 @@ public class ParserHardeningTests
     [Fact]
     public void MapButtonIdToText_AllButtonsMapCorrectly()
     {
-        WebhookProcessor.MapButtonIdToText("btn_extras_si").Should().Be("si");
-        WebhookProcessor.MapButtonIdToText("btn_extras_no").Should().Be("no");
+        WebhookProcessor.MapButtonIdToText("btn_obs_si").Should().Be("si");
+        WebhookProcessor.MapButtonIdToText("btn_obs_no").Should().Be("no");
         WebhookProcessor.MapButtonIdToText("btn_confirmar").Should().Be("confirmar");
         WebhookProcessor.MapButtonIdToText("btn_editar").Should().Be("editar");
         WebhookProcessor.MapButtonIdToText("btn_cancelar").Should().Be("cancelar");
@@ -957,32 +941,32 @@ public class ParserHardeningTests
     }
 
     [Fact]
-    public async Task ExtrasButton_Yes_AdvancesToExtrasFormat()
+    public async Task ObservationButton_Yes_AdvancesToObservationFormat()
     {
         var state = new ConversationFields { MenuSent = true };
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
-        state.ExtrasOffered = true; // extras question was sent
+        state.ExtrasOffered = true; // observation question was sent
         SetupState(state);
 
-        await _sut.ProcessAsync(MakeButtonPayload("btn_extras_si", "Sí"), _testBusiness);
+        await _sut.ProcessAsync(MakeButtonPayload("btn_obs_si", "S\u00ed"), _testBusiness);
 
-        state.ObservationPromptSent.Should().BeTrue("tapping Sí should advance to extras format");
+        state.ObservationPromptSent.Should().BeTrue("tapping S\u00ed should advance to observation format");
         _whatsAppClientMock.Verify(x => x.SendTextMessageAsync(
-            It.Is<OutgoingMessage>(m => m.Body.Contains("Formato exacto")),
+            It.Is<OutgoingMessage>(m => m.Body.Contains("sin cebolla")),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task ExtrasButton_No_AdvancesToConfirmation()
+    public async Task ObservationButton_No_AdvancesToConfirmation()
     {
         var state = new ConversationFields { MenuSent = true };
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
         state.ExtrasOffered = true;
         SetupState(state);
 
-        await _sut.ProcessAsync(MakeButtonPayload("btn_extras_no", "No"), _testBusiness);
+        await _sut.ProcessAsync(MakeButtonPayload("btn_obs_no", "No"), _testBusiness);
 
-        state.ObservationAnswered.Should().BeTrue("tapping No should skip extras");
+        state.ObservationAnswered.Should().BeTrue("tapping No should skip observation");
         _whatsAppClientMock.Verify(x => x.SendTextMessageAsync(
             It.Is<OutgoingMessage>(m => m.Body.Contains("RESUMEN DE TU PEDIDO")),
             It.IsAny<CancellationToken>()), Times.Once);
@@ -1017,7 +1001,7 @@ public class ParserHardeningTests
         await _sut.ProcessAsync(MakeButtonPayload("btn_editar", "Editar pedido"), _testBusiness);
 
         state.OrderConfirmed.Should().BeFalse("tapping Editar should reset confirmation");
-        state.ExtrasOffered.Should().BeFalse("edit should reset extras flow");
+        state.ExtrasOffered.Should().BeFalse("edit should reset observation flow");
     }
 
     [Fact]

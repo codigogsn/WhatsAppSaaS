@@ -17,7 +17,7 @@ public class ParserConversationalStressTests
     public ParserConversationalStressTests()
     {
         // Ensure static catalog is set for NormalizeMenuItemName calls
-        WebhookProcessor.ActiveCatalog = WebhookProcessor.MenuCatalog;
+        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
     }
 
     // ─────────────────────────────────────────────────────────────

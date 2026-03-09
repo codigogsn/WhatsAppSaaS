@@ -243,17 +243,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // A-extras) Extras YES/NO gate response
+                    // A-obs) Observation YES/NO gate response
                     if (state.ExtrasOffered && !state.ObservationPromptSent && !state.ObservationAnswered)
                     {
                         if (IsSuggestionAcceptance(t))
                         {
-                            // User wants extras — show format instructions
+                            // User wants to add an observation — show format instructions
                             state.ObservationPromptSent = true;
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = Msg.ExtrasFormat,
+                                Body = Msg.ObservationFormat,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -265,7 +265,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                         if (IsNoObservation(t))
                         {
-                            // User skips extras — advance to confirmation
+                            // User skips observation — advance to confirmation
                             state.ObservationAnswered = true;
                             var nextReply = BuildOrderReplyFromState(state);
                             await SendAsync(new OutgoingMessage
@@ -282,27 +282,22 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                         }
 
-                        // User sent something else — try parsing as extras directly
+                        // User sent something else — treat as observation text directly
                         // (fall through to A0-style handling)
                         state.ObservationPromptSent = true;
                     }
 
-                    // A0) Observation/extras answer capture
+                    // A0) Observation answer capture
                     if (state.ObservationPromptSent && !state.ObservationAnswered)
                     {
                         state.ObservationAnswered = true;
 
                         if (!IsNoObservation(t))
                         {
-                            // Try structured per-item modifier parsing first
-                            // (e.g. "extra de queso en una y extra de tocineta en la otra")
-                            if (!TryApplyPerItemModifiers(state, rawText))
-                            {
-                                // Fallback: store as raw observation text
-                                state.SpecialInstructions = string.IsNullOrWhiteSpace(state.SpecialInstructions)
-                                    ? rawText.Trim()
-                                    : state.SpecialInstructions + "; " + rawText.Trim();
-                            }
+                            // Store as raw observation text
+                            state.SpecialInstructions = string.IsNullOrWhiteSpace(state.SpecialInstructions)
+                                ? rawText.Trim()
+                                : state.SpecialInstructions + "; " + rawText.Trim();
                         }
 
                         // Now continue to order confirmation gate
@@ -1061,16 +1056,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (state.Items.Count == 0)
             return Msg.WhatToOrder;
 
-        // Extras step — YES/NO gate before confirmation
+        // Observation step — YES/NO gate before confirmation
         if (!state.ExtrasOffered && !state.ObservationAnswered)
         {
             state.ExtrasOffered = true;
-
-            // If parser already detected inline observations, show them instead of generic question
-            if (!string.IsNullOrWhiteSpace(state.SpecialInstructions))
-                return Msg.ObservationDetected(state.SpecialInstructions);
-
-            return new BotReply(Msg.ExtrasQuestion, Msg.ExtrasButtons);
+            return new BotReply(Msg.ObservationQuestion, Msg.ObservationButtons);
         }
 
         // Confirmation gate: show summary + CONFIRMAR/EDITAR/CANCELAR
@@ -1405,8 +1395,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
     internal static string? MapButtonIdToText(string? buttonId)
         => buttonId switch
         {
-            "btn_extras_si"  => "si",
-            "btn_extras_no"  => "no",
+            "btn_obs_si"     => "si",
+            "btn_obs_no"     => "no",
+            "btn_extras_si"  => "si",   // legacy fallback
+            "btn_extras_no"  => "no",   // legacy fallback
             "btn_confirmar"  => "confirmar",
             "btn_editar"     => "editar",
             "btn_cancelar"   => "cancelar",
@@ -2020,7 +2012,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                              && !c.Name.Equals("Bebidas", StringComparison.OrdinalIgnoreCase)
                              && !c.Name.Equals("Bebidas Frias", StringComparison.OrdinalIgnoreCase)
                              && !c.Name.Equals("Papas", StringComparison.OrdinalIgnoreCase)
-                             && !c.Name.Equals("Extras", StringComparison.OrdinalIgnoreCase)
                              && !c.Name.Equals("Salsas", StringComparison.OrdinalIgnoreCase)
                              && !c.Name.Equals("Acompanamientos", StringComparison.OrdinalIgnoreCase))
                     .ToList();
@@ -2029,8 +2020,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     .ToList();
                 var sideCats = template.DefaultCategories
                     .Where(c => c.Name.Equals("Acompanamientos", StringComparison.OrdinalIgnoreCase)
-                             || c.Name.Equals("Papas", StringComparison.OrdinalIgnoreCase)
-                             || c.Name.Equals("Extras", StringComparison.OrdinalIgnoreCase))
+                             || c.Name.Equals("Papas", StringComparison.OrdinalIgnoreCase))
                     .ToList();
 
                 // Check if user has a main but no drink — suggest drink to "complete combo"
@@ -2382,17 +2372,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
             Category = "combos", IsCombo = true, Price = 11.00m },
         new() { Canonical = "Combo Perro", Aliases = new[] { "combo perro", "combo hot dog", "combo perro caliente" },
             Category = "combos", IsCombo = true, Price = 6.50m },
-
-        // ── Extras ──
-        new() { Canonical = "Extra Queso", Aliases = new[] { "extra queso", "queso extra", "mas queso" },
-            Category = "extras", Price = 1.00m },
-        new() { Canonical = "Extra Tocineta", Aliases = new[] { "extra tocineta", "tocineta extra",
-            "extra bacon", "mas tocineta", "extra rocineta", "rocineta extra" },
-            Category = "extras", Price = 1.50m },
-        new() { Canonical = "Extra Carne", Aliases = new[] { "extra carne", "carne extra", "doble carne", "mas carne" },
-            Category = "extras", Price = 2.50m },
-        new() { Canonical = "Extra Huevo", Aliases = new[] { "extra huevo", "huevo extra", "con huevo", "mas huevo" },
-            Category = "extras", Price = 1.00m },
 
         // ── Salsas ──
         new() { Canonical = "Salsa Ajo", Aliases = new[] { "salsa ajo", "salsa de ajo" },

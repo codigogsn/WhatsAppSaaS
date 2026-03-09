@@ -288,7 +288,7 @@ public class AdminBusinessesController : ControllerBase
         else
         {
             // No template: seed generic starter categories
-            var defaultCats = new[] { "Combos", "Bebidas", "Extras" };
+            var defaultCats = new[] { "Combos", "Bebidas" };
             for (var i = 0; i < defaultCats.Length; i++)
             {
                 _db.MenuCategories.Add(new MenuCategory

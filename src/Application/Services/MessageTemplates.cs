@@ -58,11 +58,6 @@ internal static class Msg
          + "  \u2022 Combo Doble  $10.50\n"
          + "  \u2022 Combo Bacon  $11.00\n"
          + "  \u2022 Combo Perro  $6.50\n\n"
-         + "*Extras*\n"
-         + "  \u2022 Extra Queso  $1.00\n"
-         + "  \u2022 Extra Tocineta  $1.50\n"
-         + "  \u2022 Extra Carne  $2.50\n"
-         + "  \u2022 Extra Huevo  $1.00\n\n"
          + "*Salsas*\n"
          + "  \u2022 Salsa Ajo  $0.50\n"
          + "  \u2022 Salsa Tartara  $0.50\n"
@@ -130,36 +125,22 @@ internal static class Msg
         new("btn_pickup", "Pickup")
     };
 
-    internal static string ExtrasQuestion
-        => "\u00bfQuieres agregar extras?";
+    internal static string ObservationQuestion
+        => "\u00bfQuieres agregar alguna observaci\u00f3n a tu pedido? (opcional)";
 
-    internal static readonly List<ReplyButton> ExtrasButtons = new()
+    internal static readonly List<ReplyButton> ObservationButtons = new()
     {
-        new("btn_extras_si", "S\u00ed"),
-        new("btn_extras_no", "No")
+        new("btn_obs_si", "S\u00ed"),
+        new("btn_obs_no", "No")
     };
 
-    internal static string ExtrasFormat
-        => "Perfecto. Escribe los extras as\u00ed, una l\u00ednea por producto.\n\n"
-         + "_Formato exacto:_\n"
-         + "_cantidad + producto + : + extra_\n\n"
+    internal static string ObservationFormat
+        => "Escribe tu observaci\u00f3n.\n\n"
          + "_Ejemplo:_\n"
-         + "_2 hamburguesas cl\u00e1sicas: extra queso_\n"
-         + "_1 hamburguesa doble: extra huevo_\n"
-         + "_1 hamburguesa bbq: extra tocineta_\n\n"
-         + "_Si no usas este formato exacto, el sistema puede no interpretar bien el extra._";
-
-    internal static string ObservationPrompt
-        => "\u270d\ufe0f Si tu pedido tiene una *observaci\u00f3n especial*, escr\u00edbela ahora.\n\n"
-         + "_Ejemplo:_\n"
-         + "_hamburguesa doble: extra queso_\n"
-         + "_hamburguesa bacon: extra carne_\n"
-         + "_2 hamburguesas bbq: extra huevo_\n\n"
-         + "_Escribe una observaci\u00f3n por l\u00ednea, siguiendo el orden de tu pedido._\n\n"
-         + "Si no tienes, responde *NO*.";
-
-    internal static string ObservationDetected(string obs)
-        => $"\u270d\ufe0f *Observaci\u00f3n detectada:* _{obs}_\n\n\u00bfDeseas agregar otra? Si no, responde *NO*.";
+         + "_sin cebolla_\n"
+         + "_salsa aparte_\n"
+         + "_sin hielo_\n"
+         + "_bien tostado_";
 
     // ── Order confirmation gate ──
 
@@ -259,8 +240,7 @@ internal static class Msg
             "perros calientes" => 2,
             "papas" => 3,
             "combos" => 4,
-            "extras" => 5,
-            "salsas" => 6,
+            "salsas" => 5,
             "bebidas" => 7,
             _ => 8
         };
@@ -334,6 +314,13 @@ internal static class Msg
             sb.AppendLine();
         }
 
+        // Observations (before total)
+        if (!string.IsNullOrWhiteSpace(specialInstructions))
+        {
+            sb.AppendLine();
+            sb.AppendLine($"\u270d\ufe0f Observaciones: {specialInstructions}");
+        }
+
         if (total > 0)
         {
             sb.AppendLine();
@@ -342,10 +329,6 @@ internal static class Msg
 
         // Estimated preparation time
         sb.AppendLine("\u23f1 Tiempo estimado: 30 minutos");
-
-        // Special instructions
-        if (!string.IsNullOrWhiteSpace(specialInstructions))
-            sb.AppendLine($"\u270d\ufe0f Observaci\u00f3n: {specialInstructions}");
 
         sb.AppendLine($"\ud83c\udfe1 Direcci\u00f3n: {address}");
         sb.AppendLine($"\ud83d\udcb5 Pago: {paymentText}");

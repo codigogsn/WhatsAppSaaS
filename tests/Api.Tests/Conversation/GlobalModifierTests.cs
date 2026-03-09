@@ -57,7 +57,7 @@ public class GlobalModifierTests
             _stateStoreMock.Object,
             new Mock<ILogger<WebhookProcessor>>().Object);
 
-        WebhookProcessor.ActiveCatalog = WebhookProcessor.MenuCatalog;
+        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -167,13 +167,13 @@ public class GlobalModifierTests
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        var payload = MakePayload("falto el extra de queso en cada una de las hamburguesas");
+        var payload = MakePayload("sin cebolla en cada una de las hamburguesas");
         await _sut.ProcessAsync(payload, _testBusiness);
 
         state.Items.Should().HaveCount(1, "no new products created");
         state.Items[0].Name.Should().Be("Hamburguesa Clasica");
-        state.Items[0].Modifiers.Should().Contain("extra queso");
-        state.Items[0].UnitPrice.Should().Be(7.50m);
+        state.Items[0].Modifiers.Should().Contain("sin cebolla");
+        state.Items[0].UnitPrice.Should().Be(6.50m, "sin modifier should not change price");
     }
 
     // ═══════════════════════════════════════════════════════════

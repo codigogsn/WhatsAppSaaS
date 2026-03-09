@@ -1257,23 +1257,23 @@ public class WebhookProcessorTests
     // ══════════════════════════════════════════════
 
     [Fact]
-    public void BuildOrderReply_AfterItems_ShowsExtrasQuestion()
+    public void BuildOrderReply_AfterItems_ShowsObservationQuestion()
     {
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        // New flow: items → extras question (before delivery)
-        reply.Body.Should().Contain("extras");
+        // New flow: items → observation question (before delivery)
+        reply.Body.Should().Contain("observaci\u00f3n");
         reply.Buttons.Should().NotBeNull();
-        reply.Buttons!.Select(b => b.Title).Should().Contain("Sí");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("S\u00ed");
         reply.Buttons!.Select(b => b.Title).Should().Contain("No");
         state.ExtrasOffered.Should().BeTrue();
     }
 
     [Fact]
-    public void BuildOrderReply_WithExistingObservation_ShowsDetected()
+    public void BuildOrderReply_WithExistingObservation_ShowsObservationQuestion()
     {
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
@@ -1282,8 +1282,9 @@ public class WebhookProcessorTests
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        reply.Body.Should().Contain("sin cebolla");
-        reply.Body.Should().Contain("Observaci\u00f3n detectada");
+        // Now always shows the observation question (no longer auto-detects)
+        reply.Body.Should().Contain("observaci\u00f3n");
+        reply.Buttons.Should().NotBeNull();
     }
 
     [Fact]
@@ -1433,7 +1434,7 @@ public class WebhookProcessorTests
 
         var receipt = sentBodies.Last();
         receipt.Should().Contain("PEDIDO CONFIRMADO");
-        receipt.Should().Contain("Observaci\u00f3n: 1 sin cebolla, 1 con extra queso");
+        receipt.Should().Contain("Observaciones: 1 sin cebolla, 1 con extra queso");
     }
 
     [Fact]
@@ -1970,7 +1971,6 @@ public class WebhookProcessorTests
     [InlineData("agua", "Agua")]
     [InlineData("pepsi", "Pepsi")]
     [InlineData("bacon", "Hamburguesa Bacon")]
-    [InlineData("extra queso", "Extra Queso")]
     [InlineData("salsa picante", "Salsa Picante")]
     public void NormalizeMenuItemName_Aliases(string input, string expected)
     {
@@ -2414,7 +2414,7 @@ public class WebhookProcessorTests
         state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
         state.DeliveryType.Should().Be("delivery");
 
-        // Extras question should have been shown (new flow: extras before confirmation)
+        // Observation question should have been shown (new flow: observation before confirmation)
         state.ExtrasOffered.Should().BeTrue();
     }
 
@@ -2549,17 +2549,17 @@ public class WebhookProcessorTests
     }
 
     [Fact]
-    public void BuildOrderReplyFromState_NoExtrasOffered_ShowsExtrasQuestion()
+    public void BuildOrderReplyFromState_NoExtrasOffered_ShowsObservationQuestion()
     {
         var state = new ConversationFields();
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1 });
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        // Should show extras YES/NO question
-        reply.Body.Should().Contain("extras");
+        // Should show observation YES/NO question
+        reply.Body.Should().Contain("observaci\u00f3n");
         reply.Buttons.Should().NotBeNull();
-        reply.Buttons!.Select(b => b.Title).Should().Contain("Sí");
+        reply.Buttons!.Select(b => b.Title).Should().Contain("S\u00ed");
         reply.Buttons!.Select(b => b.Title).Should().Contain("No");
         state.ExtrasOffered.Should().BeTrue();
     }
@@ -3350,10 +3350,10 @@ public class WebhookProcessorTests
         burger!.Quantity.Should().Be(2);
     }
 
-    // ── Full flow regression: order → extras → confirm → delivery → payment ──
+    // ── Full flow regression: order → observation → confirm → delivery → payment ──
 
     [Fact]
-    public async Task FullFlow_OrderThenExtrasToDelivery_AdvancesCorrectly()
+    public async Task FullFlow_OrderThenObservationToDelivery_AdvancesCorrectly()
     {
         var sentMessages = new List<OutgoingMessage>();
         _whatsAppClientMock
@@ -3372,9 +3372,9 @@ public class WebhookProcessorTests
             _testBusiness);
 
         state.Items.Should().NotBeEmpty("items should be parsed");
-        state.ExtrasOffered.Should().BeTrue("extras question should be shown after items");
+        state.ExtrasOffered.Should().BeTrue("observation question should be shown after items");
 
-        // Step 2: Skip extras → confirmation gate
+        // Step 2: Skip observation → confirmation gate
         sentMessages.Clear();
         await _sut.ProcessAsync(
             CreateTextMessagePayload("5511999999999", "no"),
@@ -3697,7 +3697,7 @@ public class WebhookProcessorTests
     [InlineData("cambia las papas medianas por papas grandes")]
     public void TryParseOrderModification_Swap_Detected(string input)
     {
-        WebhookProcessor.ActiveCatalog = WebhookProcessor.MenuCatalog;
+        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
         var result = WebhookProcessor.TryParseOrderModification(input, out var mod);
         result.Should().BeTrue();
         mod.Type.Should().Be(WebhookProcessor.ModificationType.Swap);
@@ -3709,7 +3709,7 @@ public class WebhookProcessorTests
     [Fact]
     public void TryParseOrderModification_Swap_ResolvesCorrectItems()
     {
-        WebhookProcessor.ActiveCatalog = WebhookProcessor.MenuCatalog;
+        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
         var result = WebhookProcessor.TryParseOrderModification(
             "cambia la hamburguesa clasica por una hamburguesa doble", out var mod);
         result.Should().BeTrue();

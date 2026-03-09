@@ -57,7 +57,7 @@ public class PerItemModifierTests
             _stateStoreMock.Object,
             new Mock<ILogger<WebhookProcessor>>().Object);
 
-        WebhookProcessor.ActiveCatalog = WebhookProcessor.MenuCatalog;
+        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -221,7 +221,7 @@ public class PerItemModifierTests
     // ═══════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task ObservationStage_ExtraQuesoEnUna_ModifierApplied()
+    public async Task ObservationStage_ExtraQuesoEnUna_StoredAsObservation()
     {
         var state = new ConversationFields
         {
@@ -241,14 +241,11 @@ public class PerItemModifierTests
         var payload = MakePayload("extra de queso en una\nextra de queso + extra de tocineta en la otra");
         await _sut.ProcessAsync(payload, _testBusiness);
 
-        // Items should be split with modifiers applied
-        state.Items.Should().HaveCount(2);
-        state.Items.Sum(i => i.UnitPrice * i.Quantity).Should().Be(16.50m,
-            "7.50 + 9.00 = 16.50 (original was 13.00, increase of 3.50)");
-
-        // SpecialInstructions should NOT have the raw text (modifiers were applied structurally)
-        state.SpecialInstructions.Should().BeNullOrEmpty(
-            "modifiers were applied to items, should not also be in SpecialInstructions");
+        // In the new observation flow, text is stored as-is (no structured parsing)
+        state.Items.Should().HaveCount(1, "items should not be split in observation flow");
+        state.SpecialInstructions.Should().Contain("extra de queso",
+            "observation text should be stored in SpecialInstructions");
+        state.ObservationAnswered.Should().BeTrue();
     }
 
     [Fact]

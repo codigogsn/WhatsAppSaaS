@@ -93,17 +93,6 @@ public static class RestaurantTemplates
                 },
                 new TemplateCategory
                 {
-                    Name = "Extras",
-                    Items =
-                    [
-                        new TemplateItem { Name = "Extra Queso", Price = 1.00m, Aliases = ["extra queso", "queso extra", "mas queso"] },
-                        new TemplateItem { Name = "Extra Tocineta", Price = 1.50m, Aliases = ["extra tocineta", "tocineta extra", "extra bacon", "mas tocineta"] },
-                        new TemplateItem { Name = "Extra Carne", Price = 2.50m, Aliases = ["extra carne", "carne extra", "doble carne", "mas carne"] },
-                        new TemplateItem { Name = "Extra Huevo", Price = 1.00m, Aliases = ["extra huevo", "huevo extra", "con huevo", "mas huevo"] },
-                    ]
-                },
-                new TemplateCategory
-                {
                     Name = "Salsas",
                     Items =
                     [
@@ -162,21 +151,12 @@ public static class RestaurantTemplates
                         new TemplateItem { Name = "Cerveza", Price = 2.50m, Aliases = ["cerveza", "birra", "beer"] },
                     ]
                 },
-                new TemplateCategory
-                {
-                    Name = "Extras",
-                    Items =
-                    [
-                        new TemplateItem { Name = "Pan de Ajo", Price = 2.00m, Aliases = ["pan de ajo", "garlic bread"] },
-                        new TemplateItem { Name = "Ensalada Cesar", Price = 3.50m, Aliases = ["ensalada", "cesar", "caesar"] },
-                    ]
-                }
             ],
             SuggestedUpsells = new()
             {
-                ["pizzas"] = ["bebidas", "extras"],
-                ["pastas"] = ["bebidas", "extras"],
-                ["bebidas"] = ["pizzas", "extras"],
+                ["pizzas"] = ["bebidas"],
+                ["pastas"] = ["bebidas"],
+                ["bebidas"] = ["pizzas"],
             }
         },
 
@@ -217,22 +197,12 @@ public static class RestaurantTemplates
                         new TemplateItem { Name = "Agua", Price = 1.00m, Aliases = ["agua"] },
                     ]
                 },
-                new TemplateCategory
-                {
-                    Name = "Extras",
-                    Items =
-                    [
-                        new TemplateItem { Name = "Edamame", Price = 3.00m, Aliases = ["edamame"] },
-                        new TemplateItem { Name = "Gyozas", Price = 4.00m, Aliases = ["gyozas", "dumplings", "gyoza"] },
-                        new TemplateItem { Name = "Sopa Miso", Price = 2.50m, Aliases = ["miso", "sopa miso", "sopa"] },
-                    ]
-                }
             ],
             SuggestedUpsells = new()
             {
-                ["rolls"] = ["bebidas", "extras"],
-                ["nigiri"] = ["bebidas", "extras"],
-                ["bebidas"] = ["rolls", "extras"],
+                ["rolls"] = ["bebidas"],
+                ["nigiri"] = ["bebidas"],
+                ["bebidas"] = ["rolls"],
             }
         },
 
@@ -276,20 +246,11 @@ public static class RestaurantTemplates
                         new TemplateItem { Name = "Coca Cola", Price = 1.50m, Aliases = ["coca", "cola"] },
                     ]
                 },
-                new TemplateCategory
-                {
-                    Name = "Extras",
-                    Items =
-                    [
-                        new TemplateItem { Name = "Tequeños", Price = 3.00m, Aliases = ["tequenos", "tequeños"] },
-                        new TemplateItem { Name = "Cachapa con Queso", Price = 4.00m, Aliases = ["cachapa", "cachapa con queso"] },
-                    ]
-                }
             ],
             SuggestedUpsells = new()
             {
-                ["arepas"] = ["bebidas", "extras"],
-                ["empanadas"] = ["bebidas", "extras"],
+                ["arepas"] = ["bebidas"],
+                ["empanadas"] = ["bebidas"],
                 ["bebidas"] = ["arepas", "empanadas"],
             }
         },
