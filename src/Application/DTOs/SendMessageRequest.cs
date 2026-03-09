@@ -27,6 +27,10 @@ public sealed class SendMessageRequest
     [JsonPropertyName("interactive")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public SendInteractivePayload? Interactive { get; init; }
+
+    [JsonPropertyName("document")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SendDocumentPayload? Document { get; init; }
 }
 
 public sealed class SendMessageText
@@ -80,4 +84,20 @@ public sealed class SendInteractiveReply
 
     [JsonPropertyName("title")]
     public required string Title { get; init; }
+}
+
+// ── Document message DTO ──
+
+public sealed class SendDocumentPayload
+{
+    [JsonPropertyName("link")]
+    public required string Link { get; init; }
+
+    [JsonPropertyName("caption")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Caption { get; init; }
+
+    [JsonPropertyName("filename")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Filename { get; init; }
 }

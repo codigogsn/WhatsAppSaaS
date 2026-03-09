@@ -13,4 +13,5 @@ public sealed record BusinessContext(
     string? PaymentMobileId = null,
     string? PaymentMobilePhone = null,
     string? NotificationPhone = null,
-    string? RestaurantType = null);
+    string? RestaurantType = null,
+    string? MenuPdfUrl = null);

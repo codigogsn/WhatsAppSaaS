@@ -26,6 +26,14 @@ internal static class Msg
          + "_2 Coca Cola_\n\n"
          + "_Escribe un producto por l\u00ednea_";
 
+    internal static string MenuPdfPrompt
+        => "Perfecto. Env\u00edame tu pedido.\n\n"
+         + "_Ejemplo:_\n"
+         + "_2 hamburguesas cl\u00e1sicas_\n"
+         + "_1 papa mediana_\n"
+         + "_2 Coca Cola_\n\n"
+         + "_Escribe un producto por l\u00ednea_";
+
     // ── Menu ──
 
     internal static string DemoMenu

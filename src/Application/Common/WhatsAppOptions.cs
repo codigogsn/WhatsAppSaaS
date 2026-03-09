@@ -18,6 +18,13 @@ public sealed class WhatsAppOptions
     public string? AppSecret { get; set; }
 
     public bool RequireSignatureValidation { get; set; } = false;
+
+    /// <summary>
+    /// Public base URL of this API (e.g. "https://example.com").
+    /// Used to construct URLs for static assets like menu PDFs.
+    /// Falls back to env var PUBLIC_BASE_URL.
+    /// </summary>
+    public string? PublicBaseUrl { get; set; }
 }
 
 public sealed class PaymentMobileOptions

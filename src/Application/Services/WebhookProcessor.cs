@@ -941,22 +941,40 @@ public sealed class WebhookProcessor : IWebhookProcessor
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
 
-        // Message 2: Menu (dynamic from DB or demo fallback)
-        var menuBody = BuildMenuMessage();
-
-        await SendAsync(new OutgoingMessage
+        // Message 2: Menu — send as PDF document if URL is available, otherwise fallback to text
+        string promptText;
+        if (!string.IsNullOrWhiteSpace(biz.MenuPdfUrl))
         {
-            To = to,
-            Body = menuBody,
-            PhoneNumberId = phoneNumberId,
-            AccessToken = biz.AccessToken
-        }, biz.BusinessId, conversationId, ct);
+            await SendAsync(new OutgoingMessage
+            {
+                To = to,
+                Body = $"📋 Menú de {businessName}",
+                PhoneNumberId = phoneNumberId,
+                AccessToken = biz.AccessToken,
+                DocumentUrl = biz.MenuPdfUrl,
+                DocumentFilename = "menu.pdf"
+            }, biz.BusinessId, conversationId, ct);
+            promptText = Msg.MenuPdfPrompt;
+        }
+        else
+        {
+            // Fallback: send text menu when no PDF URL is configured
+            var menuBody = BuildMenuMessage();
+            await SendAsync(new OutgoingMessage
+            {
+                To = to,
+                Body = menuBody,
+                PhoneNumberId = phoneNumberId,
+                AccessToken = biz.AccessToken
+            }, biz.BusinessId, conversationId, ct);
+            promptText = Msg.MenuPrompt;
+        }
 
         // Message 3: Prompt
         await SendAsync(new OutgoingMessage
         {
             To = to,
-            Body = Msg.MenuPrompt,
+            Body = promptText,
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);

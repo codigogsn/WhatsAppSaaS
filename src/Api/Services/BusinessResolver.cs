@@ -1,5 +1,6 @@
 using System.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Serilog;
 using WhatsAppSaaS.Application.Common;
 using WhatsAppSaaS.Domain.Entities;
@@ -16,10 +17,17 @@ public interface IBusinessResolver
 public class BusinessResolver : IBusinessResolver
 {
     private readonly AppDbContext _db;
+    private readonly string? _menuPdfUrl;
 
-    public BusinessResolver(AppDbContext db)
+    public BusinessResolver(AppDbContext db, IOptions<WhatsAppOptions>? whatsAppOptions = null)
     {
         _db = db;
+
+        // Build menu PDF URL from PublicBaseUrl config or PUBLIC_BASE_URL env var
+        var baseUrl = whatsAppOptions?.Value?.PublicBaseUrl
+                      ?? Environment.GetEnvironmentVariable("PUBLIC_BASE_URL");
+        if (!string.IsNullOrWhiteSpace(baseUrl))
+            _menuPdfUrl = baseUrl.TrimEnd('/') + "/menu-demo.pdf";
     }
 
     public async Task<BusinessContext?> ResolveByPhoneNumberIdAsync(string? phoneNumberId, CancellationToken ct = default)
@@ -82,7 +90,8 @@ public class BusinessResolver : IBusinessResolver
 
         return new BusinessContext(biz.Id, biz.PhoneNumberId, biz.AccessToken, biz.Name,
             biz.Greeting, biz.Schedule, biz.Address, biz.LogoUrl,
-            biz.PaymentMobileBank, biz.PaymentMobileId, biz.PaymentMobilePhone, biz.NotificationPhone);
+            biz.PaymentMobileBank, biz.PaymentMobileId, biz.PaymentMobilePhone, biz.NotificationPhone,
+            MenuPdfUrl: _menuPdfUrl);
     }
 
     private async Task<BusinessContext?> FindByPhoneNumberIdAsync(string id, CancellationToken ct)
@@ -134,7 +143,8 @@ public class BusinessResolver : IBusinessResolver
         var restaurantType = reader.IsDBNull(12) ? null : reader.GetString(12);
 
         return new BusinessContext(bizId, bizPhone, bizToken, bizName,
-            greeting, schedule, address, logoUrl, pmBank, pmId, pmPhone, notificationPhone, restaurantType);
+            greeting, schedule, address, logoUrl, pmBank, pmId, pmPhone, notificationPhone, restaurantType,
+            _menuPdfUrl);
     }
 
     public static string? EnvResolve(params string[] keys)

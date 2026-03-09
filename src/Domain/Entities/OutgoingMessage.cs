@@ -13,6 +13,17 @@ public sealed class OutgoingMessage
     /// as an interactive button message instead of plain text.
     /// </summary>
     public List<ReplyButton>? Buttons { get; init; }
+
+    /// <summary>
+    /// When set, the message is sent as a document (PDF, etc.) via public URL.
+    /// Body is used as the document caption.
+    /// </summary>
+    public string? DocumentUrl { get; init; }
+
+    /// <summary>
+    /// Filename shown to the recipient when DocumentUrl is set.
+    /// </summary>
+    public string? DocumentFilename { get; init; }
 }
 
 /// <summary>
