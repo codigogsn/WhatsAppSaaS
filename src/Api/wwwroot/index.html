@@ -506,6 +506,8 @@ let handoffPhones = {};
 let businessList = []; // cached for admin panel
 const knownOrders = new Set();
 let initialLoadDone = false;
+let _loadInProgress = false;
+let _autoRefreshActive = false;
 
 // ── New order notification ──
 function playNewOrderSound() {
@@ -864,7 +866,7 @@ async function loadSummary(){
   const qs = new URLSearchParams({ts: Date.now()});
   if (bid) qs.set('businessId', bid);
   try {
-    const res = await fetch('/api/admin/analytics/summary?' + qs.toString(), { headers: adminHeaders() });
+    const res = await fetch('/api/admin/analytics/summary?' + qs.toString(), { headers: adminHeaders(), cache: 'no-store' });
     if (!res.ok) { ids.forEach(id => document.getElementById(id).textContent = 'err'); return; }
     const s = await res.json();
     document.getElementById('kpiOrdersTotal').textContent = s.totalOrders ?? 0;
@@ -904,7 +906,7 @@ async function loadHandoffs(){
   const qs = new URLSearchParams();
   if (bid) qs.set('businessId', bid);
   try {
-    const res = await fetch('/api/admin/handoffs?' + qs.toString(), { headers: adminHeaders() });
+    const res = await fetch('/api/admin/handoffs?' + qs.toString(), { headers: adminHeaders(), cache: 'no-store' });
     if (!res.ok) return;
     const list = await res.json();
     document.getElementById('kpiHandoffs').textContent = list.length;
@@ -926,20 +928,41 @@ async function resolveHandoff(conversationId){
 // ── Auto-refresh ──
 function startAutoRefresh() {
   stopAutoRefresh();
+  _autoRefreshActive = true;
+  console.log('[AUTOREFRESH] started — interval=5s');
   load();
-  timer = setInterval(load, 5000);
+  timer = setInterval(function autoTick() {
+    console.log('[AUTOREFRESH] tick', new Date().toLocaleTimeString());
+    if (_loadInProgress) {
+      console.log('[AUTOREFRESH] skipped — previous load still in progress');
+      return;
+    }
+    load();
+  }, 5000);
   document.getElementById('btnAuto').textContent = 'Auto ●';
   document.getElementById('btnAuto').style.color = '#2e7d32';
 }
 function stopAutoRefresh() {
-  if (timer) { clearInterval(timer); timer = null; }
+  if (timer) {
+    clearInterval(timer); timer = null;
+    console.log('[AUTOREFRESH] stopped — interval cleared');
+  }
+  _autoRefreshActive = false;
   const btn = document.getElementById('btnAuto');
   if (btn) { btn.textContent = 'Auto 5s'; btn.style.color = ''; }
 }
 
 // ── Load ──
 async function load() {
+  if (_loadInProgress) {
+    console.log('[AUTOREFRESH] load() called but already in progress — skipping');
+    return;
+  }
+  _loadInProgress = true;
+  const isAuto = _autoRefreshActive;
+  const tag = isAuto ? '[AUTOREFRESH]' : '[MANUAL]';
 
+  try {
   const status = document.getElementById('status').value;
   const take = document.getElementById('take').value || 50;
   const phone = (document.getElementById('phone').value || '').trim();
@@ -952,15 +975,21 @@ async function load() {
   qs.set('take', take);
   const bid = getBusinessId();
   if (bid) qs.set('businessId', bid);
+  qs.set('_ts', Date.now()); // cache-busting
+
+  console.log(`${tag} load() starting — url=/api/orders?${qs.toString()}`);
 
   document.getElementById('msg').textContent = 'Cargando...';
   await Promise.all([loadSummary(), loadHandoffs()]);
 
   const isHandoffFilter = status === 'NeedsHuman';
-  const res = await fetch('/api/orders?' + qs.toString().replace('status=NeedsHuman',''));
-  if (!res.ok) { document.getElementById('msg').textContent = 'Error cargando pedidos'; return; }
+  const fetchUrl = '/api/orders?' + qs.toString().replace('status=NeedsHuman','');
+  const res = await fetch(fetchUrl, { cache: 'no-store' });
+  if (!res.ok) { document.getElementById('msg').textContent = 'Error cargando pedidos'; console.error(`${tag} fetch failed: ${res.status}`); return; }
 
   let data = await res.json();
+  const prevCount = document.getElementById('tbody').children.length / 2; // each order = 2 rows (main + detail)
+  console.log(`${tag} fetched ${data.length} orders (prev rendered: ${prevCount}) — first IDs: ${data.slice(0,3).map(o=>o.id?.slice(0,8)).join(', ')}`);
 
   // Front-end filters
   if (phone) { const p = phone.toLowerCase(); data = data.filter(o => ((o.customerPhone||'')+'').toLowerCase().includes(p)); }
@@ -973,6 +1002,7 @@ async function load() {
   setKpis(data);
   setTodayKpis(data);
 
+  console.log(`${tag} rendering ${data.length} orders to DOM`);
   const tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
 
@@ -1167,6 +1197,14 @@ async function load() {
 
   const now = new Date().toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
   document.getElementById('msg').textContent = `${data.length} pedidos · ${now}`;
+  console.log(`${tag} render complete — ${data.length} orders at ${now}`);
+
+  } catch(err) {
+    console.error('[AUTOREFRESH] load() error:', err);
+    document.getElementById('msg').textContent = 'Error: ' + err.message;
+  } finally {
+    _loadInProgress = false;
+  }
 }
 
 async function updateStatus(btn) {
