@@ -473,8 +473,8 @@
       <input id="take" type="number" value="50" min="1" max="200" style="width:60px;" />
 
       <button class="primary" onclick="load()">Cargar</button>
-      <button onclick="load(true)">Auto 5s</button>
-      <button onclick="if(timer){clearInterval(timer);timer=null;this.textContent='Auto 5s';}">Stop</button>
+      <button id="btnAuto" onclick="startAutoRefresh()">Auto 5s</button>
+      <button onclick="stopAutoRefresh()">Stop</button>
 
       <button onclick="downloadOrdersCsv()">CSV Orders</button>
       <button onclick="downloadCustomersCsv()">CSV Customers</button>
@@ -923,10 +923,22 @@ async function resolveHandoff(conversationId){
   await load();
 }
 
-// ── Load ──
-async function load(auto=false) {
+// ── Auto-refresh ──
+function startAutoRefresh() {
+  stopAutoRefresh();
+  load();
+  timer = setInterval(load, 5000);
+  document.getElementById('btnAuto').textContent = 'Auto ●';
+  document.getElementById('btnAuto').style.color = '#2e7d32';
+}
+function stopAutoRefresh() {
   if (timer) { clearInterval(timer); timer = null; }
-  if (auto) timer = setInterval(load, 5000);
+  const btn = document.getElementById('btnAuto');
+  if (btn) { btn.textContent = 'Auto 5s'; btn.style.color = ''; }
+}
+
+// ── Load ──
+async function load() {
 
   const status = document.getElementById('status').value;
   const take = document.getElementById('take').value || 50;
@@ -1153,7 +1165,8 @@ async function load(auto=false) {
     tbody.appendChild(detailTr);
   }
 
-  document.getElementById('msg').textContent = `${data.length} pedidos`;
+  const now = new Date().toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  document.getElementById('msg').textContent = `${data.length} pedidos · ${now}`;
 }
 
 async function updateStatus(btn) {
