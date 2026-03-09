@@ -113,6 +113,15 @@ internal static class Msg
          + "_2 Coca Cola_\n"
          + "_delivery_";
 
+    internal static string ContinueOrder
+        => "Perfecto, escr\u00edbeme tu pedido.\n\n"
+         + "_Ejemplo:_\n"
+         + "_2 hamburguesas cl\u00e1sicas_\n"
+         + "_1 papa mediana_\n"
+         + "_2 Coca Cola_\n"
+         + "_delivery_\n\n"
+         + "_Escribe un producto por l\u00ednea_";
+
     internal static string PickupOrDelivery
         => "\u00bfC\u00f3mo lo quieres?\n\n\ud83d\ude97 *delivery* \u2014 te lo llevamos\n\ud83c\udfe0 *pick up* \u2014 lo recoges en tienda";
 

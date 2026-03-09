@@ -381,7 +381,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = Msg.WhatToOrder,
+                                Body = Msg.ContinueOrder,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -1220,7 +1220,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
     {
         var s = StripAccents(t);
         return s.Contains("quisiera") || s.Contains("hacer un pedido")
-            || s.Contains("quiero pedir") || s.Contains("para llevar")
+            || s.Contains("quiero pedir") || s.Contains("voy a pedir")
+            || s.Contains("para llevar")
             || s.Contains("quiero ordenar") || s.Contains("me gustaria ordenar")
             || s.Contains("me gustaria pedir") || s.Contains("deseo pedir")
             || s.Contains("nuevo pedido") || s.Contains("empezar de nuevo")

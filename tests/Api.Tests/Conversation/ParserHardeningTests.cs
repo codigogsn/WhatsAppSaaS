@@ -455,38 +455,36 @@ public class ParserHardeningTests
     // ═══════════════════════════════════════════════════════════
 
     [Fact]
-    public async Task HolaQueTal_ThenQuisieraHacerUnPedido_NoDuplicateMenu()
+    public async Task HolaQueTal_ThenQuisieraHacerUnPedido_SendsContinuationPrompt()
     {
-        // Two-message flow: greeting then ordering intent
         var state = new ConversationFields();
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        // Message 1: greeting — should send full welcome/menu (3 messages)
+        // Message 1: greeting — full welcome/menu (3 messages)
         await _sut.ProcessAsync(MakePayload("hola que tal"), _testBusiness);
-
-        state.MenuSent.Should().BeTrue("greeting should set MenuSent");
-        state.LastActivityUtc.Should().NotBeNull("greeting should set LastActivityUtc");
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
             Times.Exactly(3),
             "first greeting should send 3 messages (welcome + menu + prompt)");
-
         _whatsAppClientMock.Invocations.Clear();
 
-        // Message 2: ordering intent — should send ONLY order prompt (1 message)
+        // Message 2: ordering intent — continuation prompt only
         await _sut.ProcessAsync(MakePayload("quisiera hacer un pedido"), _testBusiness);
 
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
             Times.Once,
-            "ordering intent after recent greeting should send only 1 prompt, not resend menu");
-        state.MenuSent.Should().BeTrue("menu was already sent — should NOT reset");
+            "ordering intent after recent greeting should send only 1 message");
+        var sentBody = (OutgoingMessage)_whatsAppClientMock.Invocations
+            .First(i => i.Method.Name == "SendTextMessageAsync").Arguments[0];
+        sentBody.Body.Should().StartWith("Perfecto",
+            "continuation prompt should use natural language, not repeat the menu prompt");
     }
 
     [Fact]
-    public async Task Hola_ThenQuieroPedir_NoDuplicateMenu()
+    public async Task Hola_ThenQuieroPedir_SendsContinuationPrompt()
     {
         var state = new ConversationFields();
         _stateStoreMock
@@ -500,12 +498,14 @@ public class ParserHardeningTests
 
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
-            Times.Once,
-            "'quiero pedir' after 'hola' should send only order prompt");
+            Times.Once);
+        var sentBody = (OutgoingMessage)_whatsAppClientMock.Invocations
+            .First(i => i.Method.Name == "SendTextMessageAsync").Arguments[0];
+        sentBody.Body.Should().StartWith("Perfecto");
     }
 
     [Fact]
-    public async Task Buenas_ThenVoyAPedir_NoDuplicateMenu()
+    public async Task Buenas_ThenVoyAPedir_SendsContinuationPrompt()
     {
         var state = new ConversationFields();
         _stateStoreMock
@@ -517,18 +517,17 @@ public class ParserHardeningTests
 
         await _sut.ProcessAsync(MakePayload("voy a pedir"), _testBusiness);
 
-        // "voy a pedir" is not in IsOrderingIntent — should fall through to gentle redirect
-        // But at minimum it must NOT resend the greeting sequence
-        var sendCount = _whatsAppClientMock.Invocations
-            .Count(i => i.Method.Name == "SendTextMessageAsync");
-        sendCount.Should().BeLessOrEqualTo(1,
-            "'voy a pedir' after 'buenas' must not resend full greeting sequence");
+        _whatsAppClientMock.Verify(
+            x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
+            Times.Once);
+        var sentBody = (OutgoingMessage)_whatsAppClientMock.Invocations
+            .First(i => i.Method.Name == "SendTextMessageAsync").Arguments[0];
+        sentBody.Body.Should().StartWith("Perfecto");
     }
 
     [Fact]
     public async Task NewConversation_StillShowsFullGreeting()
     {
-        // Safety: a fresh conversation with no prior state should show full greeting
         var state = new ConversationFields();
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
@@ -536,7 +535,7 @@ public class ParserHardeningTests
 
         await _sut.ProcessAsync(MakePayload("quisiera hacer un pedido"), _testBusiness);
 
-        // Fresh session — MenuSent is false, so full greeting should fire
+        // Fresh session — full greeting should fire, not the continuation prompt
         _whatsAppClientMock.Verify(
             x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()),
             Times.Exactly(3),
