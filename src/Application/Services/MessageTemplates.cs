@@ -206,6 +206,9 @@ internal static class Msg
 
     // ── GPS & payment evidence ──
 
+    internal static string LocationRequestPrompt
+        => "\u00a1De acuerdo! Por favor comparte la ubicaci\u00f3n de entrega.";
+
     internal static string GpsReceived
         => "\u2705 Ubicaci\u00f3n recibida. Escribe *CONFIRMAR* para finalizar.";
 

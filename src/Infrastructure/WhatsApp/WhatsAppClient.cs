@@ -62,9 +62,22 @@ public sealed class WhatsAppClient : IWhatsAppClient
 
         var url = $"https://graph.facebook.com/{_options.ApiVersion}/{phoneNumberId}/messages";
 
-        // Build payload: document, interactive buttons, or plain text
+        // Build payload: document, location request, interactive buttons, or plain text
         SendMessageRequest request;
-        if (!string.IsNullOrWhiteSpace(message.DocumentUrl))
+        if (message.LocationRequest)
+        {
+            request = new SendMessageRequest
+            {
+                To = message.To,
+                Type = "interactive",
+                Interactive = new SendLocationRequestPayload
+                {
+                    Body = new SendInteractiveBody { Text = message.Body },
+                    Action = new SendLocationRequestAction()
+                }
+            };
+        }
+        else if (!string.IsNullOrWhiteSpace(message.DocumentUrl))
         {
             request = new SendMessageRequest
             {

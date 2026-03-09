@@ -15,6 +15,12 @@ public sealed class OutgoingMessage
     public List<ReplyButton>? Buttons { get; init; }
 
     /// <summary>
+    /// When true, the message is sent as a WhatsApp location_request_message.
+    /// Body is used as the prompt text.
+    /// </summary>
+    public bool LocationRequest { get; init; }
+
+    /// <summary>
     /// When set, the message is sent as a document (PDF, etc.) via public URL.
     /// Body is used as the document caption.
     /// </summary>

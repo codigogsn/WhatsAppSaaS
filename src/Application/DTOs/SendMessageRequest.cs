@@ -26,7 +26,7 @@ public sealed class SendMessageRequest
 
     [JsonPropertyName("interactive")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public SendInteractivePayload? Interactive { get; init; }
+    public object? Interactive { get; init; }
 
     [JsonPropertyName("document")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -84,6 +84,26 @@ public sealed class SendInteractiveReply
 
     [JsonPropertyName("title")]
     public required string Title { get; init; }
+}
+
+// ── Location request interactive message ──
+
+public sealed class SendLocationRequestPayload
+{
+    [JsonPropertyName("type")]
+    public string Type { get; init; } = "location_request_message";
+
+    [JsonPropertyName("body")]
+    public required SendInteractiveBody Body { get; init; }
+
+    [JsonPropertyName("action")]
+    public required SendLocationRequestAction Action { get; init; }
+}
+
+public sealed class SendLocationRequestAction
+{
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "send_location";
 }
 
 // ── Document message DTO ──

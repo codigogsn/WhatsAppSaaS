@@ -133,13 +133,33 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                         if (state.Items.Count > 0 && state.CheckoutFormSent)
                         {
-                            await SendAsync(new OutgoingMessage
+                            // Delivery data already confirmed — auto-finalize the order
+                            if (state.DeliveryDataConfirmed)
                             {
-                                To = message.From,
-                                Body = Msg.GpsReceived,
-                                PhoneNumberId = phoneNumberId,
-                                AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                                var autoFinalizeReply = await FinalizeOrderIfPossibleAsync(
+                                    state, message.From, phoneNumberId, businessContext, cancellationToken);
+
+                                if (autoFinalizeReply is not null)
+                                {
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = autoFinalizeReply,
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
+                            }
+                            else
+                            {
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = Msg.GpsReceived,
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+                            }
                         }
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
@@ -394,13 +414,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         // Finalize the order (existing behavior)
                         var confirmReply = await FinalizeOrderIfPossibleAsync(state, message.From, phoneNumberId, businessContext, cancellationToken);
 
-                        await SendAsync(new OutgoingMessage
+                        // null means FinalizeOrderIfPossibleAsync already sent the response (e.g. location request)
+                        if (confirmReply is not null)
                         {
-                            To = message.From,
-                            Body = confirmReply,
-                            PhoneNumberId = phoneNumberId,
-                            AccessToken = businessContext.AccessToken
-                        }, businessContext.BusinessId, conversationId, cancellationToken);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = confirmReply,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -1131,7 +1155,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return Msg.CheckoutDataReceived;
     }
 
-    private async Task<string> FinalizeOrderIfPossibleAsync(
+    private async Task<string?> FinalizeOrderIfPossibleAsync(
         ConversationFields state,
         string from,
         string phoneNumberId,
@@ -1152,7 +1176,30 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("\u2022 \ud83d\udcf1 Tel\u00e9fono:");
         if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
         if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("\u2022 \ud83d\udcb5 Pago:");
-        if (!state.GpsPinReceived) missing.Add("\u2022 \ud83d\udccd Ubicaci\u00f3n GPS (pin)");
+
+        // For delivery orders: GPS is required but requested separately after text fields are confirmed
+        if (!state.GpsPinReceived && state.DeliveryType == "delivery")
+        {
+            // If text fields are all filled, transition to GPS request stage
+            if (missing.Count == 0)
+            {
+                state.DeliveryDataConfirmed = true;
+
+                // Send location request as a separate WhatsApp location_request_message
+                await SendAsync(new OutgoingMessage
+                {
+                    To = from,
+                    Body = Msg.LocationRequestPrompt,
+                    PhoneNumberId = phoneNumberId,
+                    AccessToken = businessContext.AccessToken,
+                    LocationRequest = true
+                }, businessId, $"{from}:{phoneNumberId}", ct);
+
+                return null; // location request already sent — caller should not send another message
+            }
+            // Text fields still missing — show those only (not GPS)
+        }
+        // For non-delivery (pickup): GPS is not required
 
         if (missing.Count > 0)
         {

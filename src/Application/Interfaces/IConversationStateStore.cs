@@ -19,6 +19,7 @@ public sealed class ConversationFields
     public string? Address { get; set; }
     public string? PaymentMethod { get; set; }
 
+    public bool DeliveryDataConfirmed { get; set; }
     public bool GpsPinReceived { get; set; }
     public string? LocationText { get; set; }
 
@@ -66,6 +67,7 @@ public sealed class ConversationFields
         CustomerPhone = null;
         Address = null;
         PaymentMethod = null;
+        DeliveryDataConfirmed = false;
         GpsPinReceived = false;
         LocationText = null;
         PaymentEvidenceRequested = false;
