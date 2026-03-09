@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Catalogo</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #1a1a1a; }
+  header { background: #111; color: #fff; padding: 20px 24px; text-align: center; }
+  header h1 { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+  header p { font-size: 13px; color: #aaa; margin-top: 4px; }
+  .catalog { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; padding: 24px; max-width: 1200px; margin: 0 auto; }
+  .card { background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.08); transition: transform 0.2s; }
+  .card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0,0,0,0.12); }
+  .card-img { width: 100%; height: 320px; object-fit: cover; background: #e0e0e0; display: flex; align-items: center; justify-content: center; color: #999; font-size: 14px; }
+  .card-body { padding: 16px; }
+  .card-body h2 { font-size: 18px; font-weight: 700; margin-bottom: 4px; }
+  .card-body .price { font-size: 20px; font-weight: 800; color: #111; margin-bottom: 12px; }
+  .options { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+  .opt-row { display: flex; align-items: center; gap: 8px; }
+  .opt-row label { font-size: 13px; font-weight: 600; min-width: 65px; }
+  .opt-row select, .opt-row input[type="number"] { flex: 1; padding: 8px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; background: #fafafa; }
+  .opt-row input[type="number"] { max-width: 70px; }
+  .color-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+  .color-chip { width: 28px; height: 28px; border-radius: 50%; border: 2px solid transparent; cursor: pointer; transition: border-color 0.15s; }
+  .color-chip:hover, .color-chip.selected { border-color: #111; }
+  .btn-wa { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 12px; border: none; border-radius: 8px; background: #25D366; color: #fff; font-size: 15px; font-weight: 700; cursor: pointer; transition: background 0.2s; }
+  .btn-wa:hover { background: #1ebe57; }
+  .btn-wa svg { width: 20px; height: 20px; fill: #fff; }
+  .config-bar { background: #fff; border-bottom: 1px solid #eee; padding: 12px 24px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .config-bar label { font-size: 13px; font-weight: 600; }
+  .config-bar input { padding: 6px 10px; border: 1px solid #ddd; border-radius: 6px; font-size: 14px; width: 180px; }
+  .config-bar .hint { font-size: 11px; color: #888; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="brandName">SHADOW APPAREL</h1>
+  <p>Catalogo &mdash; Elige tu producto y compra por WhatsApp</p>
+</header>
+
+<div class="config-bar">
+  <label>WhatsApp:</label>
+  <input type="text" id="waNumber" placeholder="584141234567" value="">
+  <span class="hint">Numero del negocio (con codigo de pais, sin +)</span>
+</div>
+
+<div class="catalog" id="catalog"></div>
+
+<script>
+// ── Product data (static demo — replace with API later) ──
+const PRODUCTS = [
+  {
+    name: 'Hoodie Shadow',
+    price: 45.00,
+    image: '',
+    sizes: ['S', 'M', 'L', 'XL'],
+    colors: [
+      { name: 'Black', hex: '#111' },
+      { name: 'Gray', hex: '#888' },
+      { name: 'Navy', hex: '#1a2744' }
+    ]
+  },
+  {
+    name: 'T-Shirt Classic',
+    price: 25.00,
+    image: '',
+    sizes: ['S', 'M', 'L', 'XL', 'XXL'],
+    colors: [
+      { name: 'White', hex: '#f5f5f5' },
+      { name: 'Black', hex: '#111' },
+      { name: 'Red', hex: '#c0392b' },
+      { name: 'Blue', hex: '#2980b9' }
+    ]
+  },
+  {
+    name: 'Joggers Urban',
+    price: 38.00,
+    image: '',
+    sizes: ['S', 'M', 'L', 'XL'],
+    colors: [
+      { name: 'Black', hex: '#111' },
+      { name: 'Gray', hex: '#888' },
+      { name: 'Olive', hex: '#556b2f' }
+    ]
+  },
+  {
+    name: 'Cap Minimal',
+    price: 18.00,
+    image: '',
+    sizes: ['Unica'],
+    colors: [
+      { name: 'Black', hex: '#111' },
+      { name: 'White', hex: '#f5f5f5' },
+      { name: 'Beige', hex: '#d2b48c' }
+    ]
+  }
+];
+
+const WA_ICON = `<svg viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/></svg>`;
+
+function render() {
+  const container = document.getElementById('catalog');
+  container.innerHTML = '';
+
+  PRODUCTS.forEach((p, idx) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+
+    const defaultColor = p.colors[0];
+
+    card.innerHTML = `
+      <div class="card-img" style="background:${defaultColor.hex}22;">
+        ${p.image ? `<img src="${p.image}" style="width:100%;height:100%;object-fit:cover;">` : `<span style="font-size:48px;">&#128085;</span>`}
+      </div>
+      <div class="card-body">
+        <h2>${esc(p.name)}</h2>
+        <div class="price">$${p.price.toFixed(2)}</div>
+        <div class="options">
+          <div class="opt-row">
+            <label>Talla</label>
+            <select id="size-${idx}">
+              ${p.sizes.map(s => `<option value="${s}">${s}</option>`).join('')}
+            </select>
+          </div>
+          <div class="opt-row">
+            <label>Color</label>
+            <div class="color-chips" id="colors-${idx}">
+              ${p.colors.map((c, ci) =>
+                `<div class="color-chip ${ci === 0 ? 'selected' : ''}"
+                      style="background:${c.hex};"
+                      data-color="${c.name}"
+                      title="${c.name}"
+                      onclick="selectColor(${idx}, this)"></div>`
+              ).join('')}
+            </div>
+          </div>
+          <div class="opt-row">
+            <label>Cantidad</label>
+            <input type="number" id="qty-${idx}" value="1" min="1" max="20">
+          </div>
+        </div>
+        <button class="btn-wa" onclick="buyOnWhatsApp(${idx})">
+          ${WA_ICON} Comprar por WhatsApp
+        </button>
+      </div>
+    `;
+    container.appendChild(card);
+  });
+}
+
+function selectColor(productIdx, chip) {
+  const container = document.getElementById(`colors-${productIdx}`);
+  container.querySelectorAll('.color-chip').forEach(c => c.classList.remove('selected'));
+  chip.classList.add('selected');
+}
+
+function getSelectedColor(productIdx) {
+  const container = document.getElementById(`colors-${productIdx}`);
+  const selected = container.querySelector('.color-chip.selected');
+  return selected ? selected.dataset.color : '';
+}
+
+function buyOnWhatsApp(productIdx) {
+  const p = PRODUCTS[productIdx];
+  const size = document.getElementById(`size-${productIdx}`).value;
+  const color = getSelectedColor(productIdx);
+  const qty = document.getElementById(`qty-${productIdx}`).value || '1';
+  const phone = document.getElementById('waNumber').value.trim();
+
+  if (!phone) {
+    alert('Configura el numero de WhatsApp del negocio primero.');
+    return;
+  }
+
+  const message =
+    `I want to order this item:\n` +
+    `Product: ${p.name}\n` +
+    `Size: ${size}\n` +
+    `Color: ${color}\n` +
+    `Quantity: ${qty}`;
+
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+  window.open(url, '_blank');
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+render();
+</script>
+</body>
+</html>
