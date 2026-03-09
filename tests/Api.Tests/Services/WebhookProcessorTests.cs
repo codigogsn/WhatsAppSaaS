@@ -257,6 +257,27 @@ public class WebhookProcessorTests
     }
 
     [Fact]
+    public async Task Greeting_PdfIsSentBeforePrompt_NotAfter()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "hola"), _testBusiness);
+
+        sentMessages.Should().HaveCount(3, "greeting = welcome + PDF + prompt");
+
+        // Strict ordering: [0]=text welcome, [1]=document PDF, [2]=text prompt
+        sentMessages[0].DocumentUrl.Should().BeNull("message 1 is a plain text welcome");
+        sentMessages[1].DocumentUrl.Should().NotBeNullOrWhiteSpace("message 2 must be the PDF document");
+        sentMessages[1].DocumentUrl.Should().Contain("menu", "PDF URL should reference the menu");
+        sentMessages[2].DocumentUrl.Should().BeNull("message 3 is a plain text prompt");
+        sentMessages[2].Body.Should().Contain("Envíame tu pedido", "message 3 is the ordering prompt");
+    }
+
+    [Fact]
     public async Task Greeting_WelcomeMessage_IncludesBusinessName()
     {
         var sentMessages = new List<OutgoingMessage>();

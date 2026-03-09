@@ -961,6 +961,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 DocumentUrl = biz.MenuPdfUrl,
                 DocumentFilename = "menu.pdf"
             }, biz.BusinessId, conversationId, ct);
+
+            // Delay so WhatsApp finishes downloading/queuing the PDF
+            // before we send the next text message — otherwise the text
+            // arrives first because document messages take longer to process.
+            await Task.Delay(1500, ct);
         }
 
         // Message 3: Prompt (always sent, even if PDF was missing)
