@@ -945,7 +945,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (string.IsNullOrWhiteSpace(biz.MenuPdfUrl))
         {
             _logger.LogError("MENU PDF URL IS MISSING — MenuPdfUrl is null/empty for business {BusinessId} ({BusinessName}). " +
-                              "Set PUBLIC_BASE_URL or WhatsApp:PublicBaseUrl so the bot can send the PDF menu. " +
+                              "Set PUBLIC_BASE_URL env var, WhatsApp:PublicBaseUrl in config, or deploy on Render (auto-detects RENDER_EXTERNAL_URL). " +
                               "Skipping menu send entirely.", biz.BusinessId, businessName);
         }
         else

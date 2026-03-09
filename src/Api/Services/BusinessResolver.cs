@@ -23,12 +23,13 @@ public class BusinessResolver : IBusinessResolver
     {
         _db = db;
 
-        // Build menu PDF URL from PublicBaseUrl config or PUBLIC_BASE_URL env var
+        // Build menu PDF URL: config > PUBLIC_BASE_URL > RENDER_EXTERNAL_URL (auto-provided by Render)
         var configBase = whatsAppOptions?.Value?.PublicBaseUrl;
         var envBase = Environment.GetEnvironmentVariable("PUBLIC_BASE_URL");
-        var baseUrl = configBase ?? envBase;
-        Log.Information("MENU PDF CONFIG — PublicBaseUrl(config)={ConfigBase} PUBLIC_BASE_URL(env)={EnvBase} resolved={Resolved}",
-            configBase ?? "(null)", envBase ?? "(null)", baseUrl ?? "(null)");
+        var renderUrl = Environment.GetEnvironmentVariable("RENDER_EXTERNAL_URL");
+        var baseUrl = configBase ?? envBase ?? renderUrl;
+        Log.Information("MENU PDF CONFIG — PublicBaseUrl(config)={ConfigBase} PUBLIC_BASE_URL(env)={EnvBase} RENDER_EXTERNAL_URL={RenderUrl} resolved={Resolved}",
+            configBase ?? "(null)", envBase ?? "(null)", renderUrl ?? "(null)", baseUrl ?? "(null)");
         if (!string.IsNullOrWhiteSpace(baseUrl))
         {
             _menuPdfUrl = baseUrl.TrimEnd('/') + "/menu-demo.pdf";
@@ -36,7 +37,7 @@ public class BusinessResolver : IBusinessResolver
         }
         else
         {
-            Log.Error("MENU PDF URL NOT CONFIGURED — set PUBLIC_BASE_URL env var or WhatsApp:PublicBaseUrl in appsettings. " +
+            Log.Error("MENU PDF URL NOT CONFIGURED — set PUBLIC_BASE_URL env var, WhatsApp:PublicBaseUrl in appsettings, or deploy on Render (auto-detects RENDER_EXTERNAL_URL). " +
                        "The bot will NOT be able to send the PDF menu.");
         }
     }
