@@ -18,6 +18,9 @@ internal static class Msg
     internal static string DefaultGreeting(string businessName)
         => $"Hola, bienvenido a *{businessName}* \ud83d\udc4b";
 
+    internal static string ReturningGreeting(string businessName, string customerName)
+        => $"Hola de nuevo, *{customerName}*! \ud83d\udc4b Bienvenido a *{businessName}*";
+
     internal static string MenuPrompt
         => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?\n\n"
          + "_Ejemplo:_\n"

@@ -399,7 +399,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
 
-                        await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+                        await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, null, cancellationToken);
 
                         state.LastActivityUtc = DateTime.UtcNow;
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
@@ -520,7 +520,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.MenuSent = true;
                         state.LastActivityUtc = DateTime.UtcNow;
 
-                        await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
+                        // Customer memory: load stored profile to pre-fill name + personalize greeting
+                        var customer = await _orderRepository.GetCustomerByPhoneAsync(
+                            message.From, businessContext.BusinessId, cancellationToken);
+
+                        if (customer is not null && !string.IsNullOrWhiteSpace(customer.Name))
+                            state.CustomerName = customer.Name;
+
+                        await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, customer, cancellationToken);
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -981,16 +988,19 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // ──────────────────────────────────────────
 
     private async Task SendGreetingSequenceAsync(
-        string to, string phoneNumberId, BusinessContext biz, string conversationId, CancellationToken ct)
+        string to, string phoneNumberId, BusinessContext biz, string conversationId,
+        Customer? customer, CancellationToken ct)
     {
         var businessName = !string.IsNullOrWhiteSpace(biz.BusinessName)
             ? biz.BusinessName
             : "nuestro restaurante";
 
-        // Message 1: Welcome (custom greeting or default)
-        var greeting = !string.IsNullOrWhiteSpace(biz.Greeting)
-            ? biz.Greeting
-            : Msg.DefaultGreeting(businessName);
+        // Message 1: Welcome — personalized for returning customers
+        var greeting = customer?.OrdersCount > 0 && !string.IsNullOrWhiteSpace(customer.Name)
+            ? Msg.ReturningGreeting(businessName, customer.Name)
+            : !string.IsNullOrWhiteSpace(biz.Greeting)
+                ? biz.Greeting
+                : Msg.DefaultGreeting(businessName);
 
         await SendAsync(new OutgoingMessage
         {

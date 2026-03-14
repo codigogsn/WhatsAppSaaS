@@ -16,16 +16,20 @@ public sealed class OrderRepository : IOrderRepository
 
     public async Task AddOrderAsync(Order order, CancellationToken ct = default)
     {
-        // Normalizar teléfono
-        var phoneE164 = NormalizeToE164(order.CustomerPhone) 
-                        ?? NormalizeToE164(order.From) 
-                        ?? "+0000000000";
+        // Use WhatsApp sender (order.From) as primary identifier — this is what
+        // greeting lookups use, so it must be the stored key for customer memory.
+        var fromE164 = NormalizeToE164(order.From);
+        var custPhoneE164 = NormalizeToE164(order.CustomerPhone);
+        var phoneE164 = fromE164 ?? custPhoneE164 ?? "+0000000000";
 
         var now = DateTime.UtcNow;
 
         // Buscar customer existente (scoped to business)
+        // Check both From phone and checkout-form phone (legacy records may use either)
         var customer = await _db.Customers
-            .FirstOrDefaultAsync(c => c.BusinessId == order.BusinessId && c.PhoneE164 == phoneE164, ct);
+            .FirstOrDefaultAsync(c => c.BusinessId == order.BusinessId
+                && (c.PhoneE164 == phoneE164
+                    || (custPhoneE164 != null && c.PhoneE164 == custPhoneE164)), ct);
 
         if (customer == null)
         {
@@ -46,6 +50,10 @@ public sealed class OrderRepository : IOrderRepository
         {
             if (string.IsNullOrWhiteSpace(customer.Name) && !string.IsNullOrWhiteSpace(order.CustomerName))
                 customer.Name = order.CustomerName.Trim();
+
+            // Migrate legacy records: if stored under checkout-form phone, update to WhatsApp sender
+            if (fromE164 != null && customer.PhoneE164 != phoneE164)
+                customer.PhoneE164 = phoneE164;
 
             customer.LastSeenAtUtc = now;
         }
