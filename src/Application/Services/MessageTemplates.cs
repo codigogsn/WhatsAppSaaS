@@ -264,17 +264,19 @@ internal static class Msg
 
     // ── Order summary with prices (shown before checkout form) ──
 
-    internal static string OrderSummaryWithTotal(IReadOnlyList<ConversationItemEntry> items, ResolvedRate? bcvRate = null)
+    internal const decimal DeliveryFeeUsd = 4.00m;
+
+    internal static string OrderSummaryWithTotal(IReadOnlyList<ConversationItemEntry> items, ResolvedRate? bcvRate = null, string? deliveryType = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine("\ud83e\uddfe *RESUMEN DE TU PEDIDO*");
         sb.AppendLine();
 
-        decimal total = 0m;
+        decimal subtotal = 0m;
         foreach (var item in SortByCategory(items))
         {
             var lineTotal = item.UnitPrice * item.Quantity;
-            total += lineTotal;
+            subtotal += lineTotal;
 
             var line = $"  {item.Quantity}x {item.Name}";
             if (!string.IsNullOrWhiteSpace(item.Modifiers))
@@ -285,9 +287,21 @@ internal static class Msg
         }
 
         sb.AppendLine();
-        if (total > 0)
+        if (subtotal > 0)
         {
-            sb.AppendLine($"*TOTAL: ${total:0.00}*");
+            var fee = deliveryType == "delivery" ? DeliveryFeeUsd : 0m;
+            var total = subtotal + fee;
+
+            if (fee > 0)
+            {
+                sb.AppendLine($"Subtotal: ${subtotal:0.00}");
+                sb.AppendLine($"\ud83d\ude97 Delivery: ${fee:0.00}");
+                sb.AppendLine($"*TOTAL: ${total:0.00}*");
+            }
+            else
+            {
+                sb.AppendLine($"*TOTAL: ${subtotal:0.00}*");
+            }
 
             if (bcvRate is not null && bcvRate.Rate > 0)
             {
@@ -346,12 +360,24 @@ internal static class Msg
 
         if (total > 0)
         {
+            var fee = deliveryType == "delivery" ? DeliveryFeeUsd : 0m;
+            var grandTotal = total + fee;
+
             sb.AppendLine();
-            sb.AppendLine($"\ud83d\udcb0 *TOTAL A PAGAR: ${total:0.00}*");
+            if (fee > 0)
+            {
+                sb.AppendLine($"Subtotal: ${total:0.00}");
+                sb.AppendLine($"\ud83d\ude97 Delivery: ${fee:0.00}");
+                sb.AppendLine($"\ud83d\udcb0 *TOTAL A PAGAR: ${grandTotal:0.00}*");
+            }
+            else
+            {
+                sb.AppendLine($"\ud83d\udcb0 *TOTAL A PAGAR: ${total:0.00}*");
+            }
 
             if (bcvRate is not null && bcvRate.Rate > 0)
             {
-                var bsTotal = total * bcvRate.Rate;
+                var bsTotal = grandTotal * bcvRate.Rate;
                 var staleTag = bcvRate.IsStale ? " (tasa anterior)" : "";
                 sb.AppendLine($"\ud83c\uddfb\ud83c\uddea Ref. BCV {bcvRate.CurrencyLabel}: Bs. {bsTotal:N2}{staleTag}");
             }

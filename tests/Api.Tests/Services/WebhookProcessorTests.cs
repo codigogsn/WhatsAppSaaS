@@ -354,7 +354,9 @@ public class WebhookProcessorTests
         receipt.Should().Contain("PEDIDO CONFIRMADO");
         receipt.Should().Contain("2x Hamburguesa Clasica");
         receipt.Should().Contain("1x Papas Medianas");
-        receipt.Should().Contain("TOTAL A PAGAR: $16.50");
+        receipt.Should().Contain("Subtotal: $16.50");
+        receipt.Should().Contain("Delivery: $4.00");
+        receipt.Should().Contain("TOTAL A PAGAR: $20.50");
     }
 
     [Fact]
@@ -514,7 +516,8 @@ public class WebhookProcessorTests
         coca.LineTotal.Should().Be(4.50m);
 
         savedOrder.SubtotalAmount.Should().Be(17.50m);
-        savedOrder.TotalAmount.Should().Be(17.50m);
+        savedOrder.DeliveryFee.Should().Be(4.00m);
+        savedOrder.TotalAmount.Should().Be(21.50m);
     }
 
     [Fact]

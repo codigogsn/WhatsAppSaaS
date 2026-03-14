@@ -647,7 +647,10 @@ public class VenezuelanOrderingStressTests
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
         // 5*8.50 + 3*4.50 + 4*1.50 + 2*4.50 = 42.50 + 13.50 + 6.00 + 9.00 = 71.00
-        reply.Body.Should().Contain("TOTAL: $71.00");
+        // delivery = $4.00 → total = $75.00
+        reply.Body.Should().Contain("Subtotal: $71.00");
+        reply.Body.Should().Contain("Delivery: $4.00");
+        reply.Body.Should().Contain("TOTAL: $75.00");
         reply.Body.Should().Contain("5x Hamburguesa Doble");
         reply.Body.Should().Contain("3x Papas Grandes");
         reply.Body.Should().Contain("4x Coca Cola");

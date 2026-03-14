@@ -383,7 +383,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = Msg.OrderSummaryWithTotal(state.Items, _bcvRate) + "\n\n" + Msg.WhatToOrder,
+                            Body = Msg.OrderSummaryWithTotal(state.Items, _bcvRate, state.DeliveryType) + "\n\n" + Msg.WhatToOrder,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -1162,7 +1162,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (!state.OrderConfirmed)
         {
             return new BotReply(
-                Msg.OrderSummaryWithTotal(state.Items, bcvRate) + "\n\n" + Msg.ConfirmOrderPrompt,
+                Msg.OrderSummaryWithTotal(state.Items, bcvRate, state.DeliveryType) + "\n\n" + Msg.ConfirmOrderPrompt,
                 Msg.ConfirmButtons);
         }
 
@@ -1281,6 +1281,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             }).ToList()
         };
 
+        order.DeliveryFee = state.DeliveryType == "delivery" ? Msg.DeliveryFeeUsd : 0m;
         order.RecalculateTotal();
 
         await _orderRepository.AddOrderAsync(order, ct);
