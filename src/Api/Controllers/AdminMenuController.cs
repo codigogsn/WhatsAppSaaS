@@ -20,24 +20,61 @@ public sealed class AdminMenuController : ControllerBase
         _config = config;
     }
 
+    /// <summary>
+    /// Auth check using raw ADO.NET because the Businesses table has legacy
+    /// text/integer column types (from SQLite-generated InitV2 migration).
+    /// EF queries against Businesses would throw InvalidCastException.
+    /// </summary>
     private async Task<bool> IsAuthorizedForBusinessAsync(Guid businessId, CancellationToken ct)
     {
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk) || string.IsNullOrWhiteSpace(hk))
             return false;
 
-        // Accept global admin key
-        var globalKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
-        if (!string.IsNullOrWhiteSpace(globalKey) && hk.ToString() == globalKey)
+        var key = hk.ToString().Trim();
+
+        // Accept global admin key (no DB query needed)
+        var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
+        if (!string.IsNullOrWhiteSpace(globalKey) && key == globalKey)
             return true;
 
-        // Accept per-business admin key
-        var biz = await _db.Businesses
-            .AsNoTracking()
-            .Where(b => b.Id == businessId && b.IsActive)
-            .Select(b => new { b.AdminKey })
-            .FirstOrDefaultAsync(ct);
+        // Check legacy global key sources
+        string?[] legacySources = [
+            Environment.GetEnvironmentVariable("WHATSAPP_ADMIN_KEY"),
+            _config["WhatsApp:AdminKey"],
+        ];
+        foreach (var src in legacySources)
+        {
+            if (!string.IsNullOrWhiteSpace(src) && key == src.Trim())
+                return true;
+        }
 
-        return biz is not null && biz.AdminKey == hk.ToString();
+        // Per-business key: raw SQL against legacy Businesses table
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT "AdminKey" FROM "Businesses"
+                WHERE "Id"::text = @bid AND "IsActive"::boolean = true
+                LIMIT 1
+            """;
+            var p = cmd.CreateParameter();
+            p.ParameterName = "bid";
+            p.Value = businessId.ToString();
+            cmd.Parameters.Add(p);
+
+            var result = await cmd.ExecuteScalarAsync(ct);
+            if (result is null or DBNull) return false;
+
+            return result.ToString()?.Trim() == key;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private bool IsAuthorized()
