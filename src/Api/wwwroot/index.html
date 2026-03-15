@@ -635,11 +635,12 @@ async function loadExchangeRate(){
 async function loadBusinesses(){
   const key = getAdminKey();
   const sel = document.getElementById('businessSelect');
-  if (!key) return;
+  if (!key) { console.warn('loadBusinesses: no admin key'); return; }
   try {
     const res = await fetch('/api/admin/businesses', { headers: adminHeaders() });
-    if (!res.ok) return;
+    if (!res.ok) { console.warn('loadBusinesses: HTTP ' + res.status); return; }
     const list = await res.json();
+    if (!Array.isArray(list)) { console.warn('loadBusinesses: response is not array', list); return; }
     businessList = list;
     const saved = localStorage.getItem('BUSINESS_ID') || '';
     sel.innerHTML = '<option value="">(Todos los negocios)</option>';
@@ -653,7 +654,7 @@ async function loadBusinesses(){
       sel.appendChild(opt);
     }
     updateBizAdminButton();
-  } catch {}
+  } catch(e) { console.error('loadBusinesses error:', e); }
 }
 function adminHeaders(){ const key = getAdminKey(); return key ? { 'X-Admin-Key': key } : {}; }
 

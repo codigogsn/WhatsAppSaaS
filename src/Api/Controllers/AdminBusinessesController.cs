@@ -52,7 +52,8 @@ public class AdminBusinessesController : ControllerBase
     }
 
     // GET /api/admin/businesses
-    // Global admin: returns all businesses. Per-business key: returns only that business.
+    // Global admin key → all businesses. Per-business key → only matching business.
+    // Also resolves WHATSAPP_ADMIN_KEY as global for backwards compat with auto-created businesses.
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
@@ -60,10 +61,15 @@ public class AdminBusinessesController : ControllerBase
             return Unauthorized();
 
         var key = headerKey.ToString();
+        if (string.IsNullOrWhiteSpace(key))
+            return Unauthorized();
+
+        // Check all possible global key sources (same as BusinessResolver.ResolveOrCreateAsync)
+        var isGlobal = IsGlobalAdmin() || IsGlobalAdminLegacy(key);
 
         IQueryable<Business> query = _db.Businesses.AsNoTracking();
 
-        if (!IsGlobalAdmin())
+        if (!isGlobal)
         {
             // Per-business key: filter to matching business only
             query = query.Where(b => b.AdminKey == key);
@@ -86,14 +92,33 @@ public class AdminBusinessesController : ControllerBase
                 b.PaymentMobilePhone,
                 b.NotificationPhone,
                 b.RestaurantType,
+                b.MenuPdfUrl,
                 b.CreatedAtUtc
             })
             .ToListAsync(ct);
 
-        if (items.Count == 0 && !IsGlobalAdmin())
+        if (items.Count == 0)
             return Unauthorized();
 
         return Ok(items);
+    }
+
+    /// <summary>
+    /// Check legacy global key sources (WHATSAPP_ADMIN_KEY, WhatsApp__AdminKey)
+    /// that BusinessResolver uses to auto-create businesses.
+    /// </summary>
+    private bool IsGlobalAdminLegacy(string key)
+    {
+        string?[] sources = [
+            Environment.GetEnvironmentVariable("WHATSAPP_ADMIN_KEY"),
+            _config["WhatsApp:AdminKey"],
+        ];
+        foreach (var src in sources)
+        {
+            if (!string.IsNullOrWhiteSpace(src) && ConstantTimeEquals(key, src))
+                return true;
+        }
+        return false;
     }
 
     // GET /api/admin/businesses/{id}

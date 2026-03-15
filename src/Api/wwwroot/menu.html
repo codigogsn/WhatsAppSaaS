@@ -131,7 +131,7 @@ async function loadBusinesses(){
     }
     // Auto-load if a business is selected
     if (sel.value) loadAll();
-  } catch {}
+  } catch(e) { console.error('loadBusinesses error:', e); }
 }
 
 async function loadAll(){
