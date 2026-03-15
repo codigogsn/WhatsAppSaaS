@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using WhatsAppSaaS.Domain.Entities;
 
 namespace WhatsAppSaaS.Infrastructure.Persistence;
@@ -6,6 +7,18 @@ namespace WhatsAppSaaS.Infrastructure.Persistence;
 public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
+
+    /// <summary>
+    /// Force all Guid properties to be stored/read as text.
+    /// The production schema has text columns for all Guid fields (created by a
+    /// SQLite-generated migration). This converter makes EF send string parameters
+    /// and read string values, which works with both text and uuid columns.
+    /// </summary>
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        configurationBuilder.Properties<Guid>()
+            .HaveConversion<GuidToStringConverter>();
+    }
 
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<OrderItem> OrderItems => Set<OrderItem>();

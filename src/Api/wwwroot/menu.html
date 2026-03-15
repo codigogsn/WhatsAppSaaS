@@ -160,7 +160,12 @@ async function loadAll(){
 
 async function loadCategories(){
   const res = await fetch(`/api/admin/menu/categories?businessId=${bid()}`, {headers: hdrs()});
-  if(!res.ok){ document.getElementById('msg').textContent='Error cargando categorias'; return; }
+  if(!res.ok){
+    let detail = 'HTTP ' + res.status;
+    try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
+    document.getElementById('msg').innerHTML='<span class="danger">Categorias: ' + esc(detail) + '</span>';
+    return;
+  }
   const cats = await res.json();
   const tbody = document.getElementById('catBody');
   tbody.innerHTML = '';
@@ -219,9 +224,19 @@ async function createCategory(){
   const order = parseInt(document.getElementById('newCatOrder').value)||0;
   if(!name) return alert('Nombre requerido');
   if(!bid()) return alert('Selecciona un negocio');
-  await fetch('/api/admin/menu/categories', { method:'POST', headers:hdrs(), body: JSON.stringify({businessId:bid(), name, sortOrder:order, isActive:true}) });
-  document.getElementById('newCatName').value = '';
-  await loadAll();
+  try {
+    const res = await fetch('/api/admin/menu/categories', { method:'POST', headers:hdrs(), body: JSON.stringify({businessId:bid(), name, sortOrder:order, isActive:true}) });
+    if(!res.ok){
+      let detail = 'HTTP ' + res.status;
+      try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
+      document.getElementById('msg').innerHTML='<span class="danger">' + esc(detail) + '</span>';
+      return;
+    }
+    document.getElementById('newCatName').value = '';
+    await loadAll();
+  } catch(e) {
+    document.getElementById('msg').innerHTML='<span class="danger">Error: ' + esc(e.message) + '</span>';
+  }
 }
 
 async function toggleCategory(id, isActive){
@@ -244,12 +259,22 @@ async function createItem(){
   const aliases = aliasStr ? aliasStr.split(',').map(a=>a.trim()).filter(Boolean) : [];
   if(!name) return alert('Nombre requerido');
   if(!catId) return alert('Selecciona una categoria');
-  await fetch('/api/admin/menu/items', { method:'POST', headers:hdrs(), body: JSON.stringify({categoryId:catId, name, price, description:desc, isAvailable:true, sortOrder:0, aliases}) });
-  document.getElementById('newItemName').value = '';
-  document.getElementById('newItemPrice').value = '0';
-  document.getElementById('newItemDesc').value = '';
-  document.getElementById('newItemAliases').value = '';
-  await loadAll();
+  try {
+    const res = await fetch('/api/admin/menu/items', { method:'POST', headers:hdrs(), body: JSON.stringify({categoryId:catId, name, price, description:desc, isAvailable:true, sortOrder:0, aliases}) });
+    if(!res.ok){
+      let detail = 'HTTP ' + res.status;
+      try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
+      document.getElementById('msg').innerHTML='<span class="danger">' + esc(detail) + '</span>';
+      return;
+    }
+    document.getElementById('newItemName').value = '';
+    document.getElementById('newItemPrice').value = '0';
+    document.getElementById('newItemDesc').value = '';
+    document.getElementById('newItemAliases').value = '';
+    await loadAll();
+  } catch(e) {
+    document.getElementById('msg').innerHTML='<span class="danger">Error: ' + esc(e.message) + '</span>';
+  }
 }
 
 async function toggleItem(id, isAvailable){
