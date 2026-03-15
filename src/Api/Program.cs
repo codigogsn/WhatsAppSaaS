@@ -460,6 +460,12 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     ExecSql(conn, """CREATE TABLE IF NOT EXISTS "Orders" ("Id" uuid NOT NULL PRIMARY KEY, "From" text NOT NULL, "PhoneNumberId" text NOT NULL, "DeliveryType" text NOT NULL DEFAULT 'pickup', "Status" text NOT NULL DEFAULT 'Pending', "CreatedAtUtc" timestamp NOT NULL DEFAULT now(), "CheckoutFormSent" boolean NOT NULL DEFAULT false, "CheckoutCompleted" boolean NOT NULL DEFAULT false)""");
     ExecSql(conn, """CREATE TABLE IF NOT EXISTS "OrderItems" ("Id" uuid NOT NULL PRIMARY KEY, "OrderId" uuid NOT NULL, "Name" text NOT NULL, "Quantity" integer NOT NULL DEFAULT 1, "UnitPrice" numeric(12,2), "LineTotal" numeric(12,2))""");
 
+    // ── Fix SQLite-style text columns → uuid ──
+    // InitV2 migration was generated for SQLite (all Guid columns = TEXT).
+    // If it ran against Postgres, every Id/FK column is 'text' instead of 'uuid'.
+    // This block detects and fixes that, converting text→uuid for all Guid columns.
+    RepairTextToUuid(conn);
+
     // ── Missing columns on Orders (ADD COLUMN IF NOT EXISTS) ──
     string[] orderColumns =
     [
@@ -648,6 +654,116 @@ static void AddFkIfMissing(System.Data.Common.DbConnection conn, string constrai
     {
         Log.Warning("LEGACY FK check warning: {Message}", ex.Message);
     }
+}
+
+// ──────────────────────────────────────────
+// Fix text→uuid columns from SQLite-generated InitV2 migration
+// ──────────────────────────────────────────
+static void RepairTextToUuid(System.Data.Common.DbConnection conn)
+{
+    // Check if Businesses.Id is text — if not, nothing to fix
+    bool needsFix;
+    try
+    {
+        using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema='public' AND table_name='Businesses' AND column_name='Id' AND data_type='text'
+        """;
+        needsFix = checkCmd.ExecuteScalar() is not null;
+    }
+    catch { return; }
+
+    if (!needsFix)
+    {
+        Log.Information("TEXT→UUID REPAIR: not needed (columns already uuid)");
+        return;
+    }
+
+    Log.Warning("TEXT→UUID REPAIR: detected text-typed Guid columns from SQLite migration — converting to uuid");
+
+    // Step 1: Drop ALL foreign key constraints (they reference text columns; will be re-added later)
+    try
+    {
+        using var fkCmd = conn.CreateCommand();
+        fkCmd.CommandText = """
+            DO $$ DECLARE r RECORD;
+            BEGIN
+              FOR r IN (
+                SELECT tc.constraint_name, tc.table_name
+                FROM information_schema.table_constraints tc
+                WHERE tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public'
+              ) LOOP
+                EXECUTE format('ALTER TABLE %I DROP CONSTRAINT IF EXISTS %I', r.table_name, r.constraint_name);
+              END LOOP;
+            END $$;
+        """;
+        fkCmd.ExecuteNonQuery();
+        Log.Information("TEXT→UUID REPAIR: dropped all FK constraints");
+    }
+    catch (Exception ex)
+    {
+        Log.Warning("TEXT→UUID REPAIR: FK drop warning: {Msg}", ex.Message);
+    }
+
+    // Step 2: Convert all text→uuid columns
+    // Each entry: (table, column)
+    (string table, string column)[] uuidColumns =
+    [
+        // Primary keys
+        ("Businesses", "Id"),
+        ("Customers", "Id"),
+        ("Products", "Id"),
+        ("ProcessedMessages", "Id"),
+        ("Orders", "Id"),
+        ("OrderItems", "Id"),
+        ("MenuCategories", "Id"),
+        ("MenuItems", "Id"),
+        ("MenuItemAliases", "Id"),
+        ("BusinessUsers", "Id"),
+        ("BackgroundJobs", "Id"),
+        ("ExchangeRates", "Id"),
+        ("MenuPdfs", "Id"),
+        // Foreign keys
+        ("Customers", "BusinessId"),
+        ("ConversationStates", "BusinessId"),
+        ("Orders", "BusinessId"),
+        ("Orders", "CustomerId"),
+        ("OrderItems", "OrderId"),
+        ("MenuCategories", "BusinessId"),
+        ("MenuItems", "CategoryId"),
+        ("MenuItemAliases", "MenuItemId"),
+        ("BusinessUsers", "BusinessId"),
+        ("BackgroundJobs", "BusinessId"),
+        ("MenuPdfs", "BusinessId"),
+    ];
+
+    foreach (var (table, column) in uuidColumns)
+    {
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            // Only alter if column exists AND is text (idempotent)
+            cmd.CommandText = $"""
+                DO $$ BEGIN
+                  IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_schema='public' AND table_name='{table}' AND column_name='{column}' AND data_type='text'
+                  ) THEN
+                    ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE uuid USING "{column}"::uuid;
+                    RAISE NOTICE 'Converted %.% text→uuid', '{table}', '{column}';
+                  END IF;
+                END $$;
+            """;
+            cmd.ExecuteNonQuery();
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("TEXT→UUID REPAIR: failed {Table}.{Col}: {Msg}", table, column, ex.Message);
+        }
+    }
+
+    Log.Information("TEXT→UUID REPAIR: done");
 }
 
 // ──────────────────────────────────────────
