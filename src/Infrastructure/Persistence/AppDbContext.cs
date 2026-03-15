@@ -9,15 +9,18 @@ public class AppDbContext : DbContext
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     /// <summary>
-    /// Force all Guid properties to be stored/read as text.
-    /// The production schema has text columns for all Guid fields (created by a
-    /// SQLite-generated migration). This converter makes EF send string parameters
-    /// and read string values, which works with both text and uuid columns.
+    /// The production schema was created by a SQLite-generated migration, so:
+    ///   - Guid columns are 'text' instead of 'uuid'
+    ///   - bool columns are 'integer' instead of 'boolean'
+    /// These global converters make EF work with both legacy and fixed schemas.
     /// </summary>
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
         configurationBuilder.Properties<Guid>()
             .HaveConversion<GuidToStringConverter>();
+
+        configurationBuilder.Properties<bool>()
+            .HaveConversion<BoolToZeroOneConverter<int>>();
     }
 
     public DbSet<Order> Orders => Set<Order>();

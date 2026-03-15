@@ -53,23 +53,30 @@ public sealed class AdminMenuController : ControllerBase
     [HttpGet("categories")]
     public async Task<IActionResult> ListCategories([FromQuery] Guid businessId, CancellationToken ct)
     {
-        if (!await IsAuthorizedForBusinessAsync(businessId, ct)) return Unauthorized();
+        try
+        {
+            if (!await IsAuthorizedForBusinessAsync(businessId, ct)) return Unauthorized();
 
-        var cats = await _db.MenuCategories
-            .AsNoTracking()
-            .Where(c => c.BusinessId == businessId)
-            .OrderBy(c => c.SortOrder)
-            .Select(c => new
-            {
-                c.Id,
-                c.Name,
-                c.SortOrder,
-                c.IsActive,
-                ItemCount = c.Items.Count
-            })
-            .ToListAsync(ct);
+            var cats = await _db.MenuCategories
+                .AsNoTracking()
+                .Where(c => c.BusinessId == businessId)
+                .OrderBy(c => c.SortOrder)
+                .Select(c => new
+                {
+                    c.Id,
+                    c.Name,
+                    c.SortOrder,
+                    c.IsActive,
+                    ItemCount = c.Items.Count
+                })
+                .ToListAsync(ct);
 
-        return Ok(cats);
+            return Ok(cats);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"ListCategories failed: {ex.GetType().Name}: {ex.Message}" });
+        }
     }
 
     public sealed class CategoryRequest
@@ -84,21 +91,28 @@ public sealed class AdminMenuController : ControllerBase
     [HttpPost("categories")]
     public async Task<IActionResult> CreateCategory([FromBody] CategoryRequest req, CancellationToken ct)
     {
-        if (!await IsAuthorizedForBusinessAsync(req.BusinessId, ct)) return Unauthorized();
-        if (string.IsNullOrWhiteSpace(req.Name)) return BadRequest(new { error = "Name required" });
-
-        var cat = new MenuCategory
+        try
         {
-            BusinessId = req.BusinessId,
-            Name = req.Name.Trim(),
-            SortOrder = req.SortOrder,
-            IsActive = req.IsActive
-        };
+            if (!await IsAuthorizedForBusinessAsync(req.BusinessId, ct)) return Unauthorized();
+            if (string.IsNullOrWhiteSpace(req.Name)) return BadRequest(new { error = "Name required" });
 
-        _db.MenuCategories.Add(cat);
-        await _db.SaveChangesAsync(ct);
+            var cat = new MenuCategory
+            {
+                BusinessId = req.BusinessId,
+                Name = req.Name.Trim(),
+                SortOrder = req.SortOrder,
+                IsActive = req.IsActive
+            };
 
-        return Ok(new { cat.Id, cat.Name, cat.SortOrder, cat.IsActive });
+            _db.MenuCategories.Add(cat);
+            await _db.SaveChangesAsync(ct);
+
+            return Ok(new { cat.Id, cat.Name, cat.SortOrder, cat.IsActive });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"CreateCategory failed: {ex.GetType().Name}: {ex.Message}" });
+        }
     }
 
     // PUT /api/admin/menu/categories/{id}
