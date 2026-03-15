@@ -111,7 +111,8 @@ public sealed class AdminMenuController : ControllerBase
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { error = $"CreateCategory failed: {ex.GetType().Name}: {ex.Message}" });
+            var inner = ex.InnerException?.Message ?? ex.Message;
+            return StatusCode(500, new { error = $"CreateCategory failed: {ex.GetType().Name}: {inner}" });
         }
     }
 

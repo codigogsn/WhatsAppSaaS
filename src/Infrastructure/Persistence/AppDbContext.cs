@@ -4,15 +4,29 @@ using WhatsAppSaaS.Domain.Entities;
 
 namespace WhatsAppSaaS.Infrastructure.Persistence;
 
+/// <summary>
+/// Converts bool to "1"/"0" strings. PostgreSQL can parse text into both
+/// 'integer' columns (via int4 input) and 'boolean' columns (via bool input),
+/// so this works regardless of the actual production column type.
+/// </summary>
+public class BoolToTextConverter : ValueConverter<bool, string>
+{
+    public BoolToTextConverter() : base(
+        v => v ? "1" : "0",
+        v => v == "1" || v == "true" || v == "True" || v == "TRUE" || v == "t") { }
+}
+
 public class AppDbContext : DbContext
 {
     public AppDbContext(DbContextOptions<AppDbContext> options) : base(options) { }
 
     /// <summary>
-    /// The production schema was created by a SQLite-generated migration, so:
-    ///   - Guid columns are 'text' instead of 'uuid'
-    ///   - bool columns are 'integer' instead of 'boolean'
-    /// These global converters make EF work with both legacy and fixed schemas.
+    /// The production schema was created by SQLite-generated migrations, so:
+    ///   - Guid columns may be 'text' instead of 'uuid'
+    ///   - bool columns may be 'integer' or 'boolean'
+    ///   - DateTime columns may be 'text' instead of 'timestamp'
+    /// These converters send everything as strings, which PostgreSQL can parse
+    /// into any target column type via I/O input functions.
     /// </summary>
     protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
     {
@@ -20,7 +34,10 @@ public class AppDbContext : DbContext
             .HaveConversion<GuidToStringConverter>();
 
         configurationBuilder.Properties<bool>()
-            .HaveConversion<BoolToZeroOneConverter<int>>();
+            .HaveConversion<BoolToTextConverter>();
+
+        configurationBuilder.Properties<DateTime>()
+            .HaveConversion<DateTimeToStringConverter>();
     }
 
     public DbSet<Order> Orders => Set<Order>();
