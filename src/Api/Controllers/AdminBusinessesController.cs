@@ -53,7 +53,7 @@ public class AdminBusinessesController : ControllerBase
 
     // GET /api/admin/businesses
     // Global admin key → all businesses. Per-business key → only matching business.
-    // Also resolves WHATSAPP_ADMIN_KEY as global for backwards compat with auto-created businesses.
+    // Uses raw ADO.NET to be immune to column-type mismatches (text vs uuid) in legacy schemas.
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
@@ -64,46 +64,77 @@ public class AdminBusinessesController : ControllerBase
         if (string.IsNullOrWhiteSpace(key))
             return Unauthorized(new { error = "Empty X-Admin-Key header" });
 
-        // Check all possible global key sources (same as BusinessResolver.ResolveOrCreateAsync)
         var isGlobal = IsGlobalAdmin() || IsGlobalAdminLegacy(key);
 
         try
         {
-            IQueryable<Business> query = _db.Businesses.AsNoTracking();
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
 
-            if (!isGlobal)
+            using var cmd = conn.CreateCommand();
+
+            // Build query — read ALL columns as their raw DB type (text-safe)
+            // SELECT * avoids "column does not exist" if legacy schema is missing columns
+            if (isGlobal)
             {
-                // Per-business key: filter to matching business only
-                query = query.Where(b => b.AdminKey == key);
+                cmd.CommandText = """SELECT * FROM "Businesses" ORDER BY "CreatedAtUtc" DESC""";
+            }
+            else
+            {
+                cmd.CommandText = """SELECT * FROM "Businesses" WHERE "AdminKey" = @key ORDER BY "CreatedAtUtc" DESC""";
+                var p = cmd.CreateParameter();
+                p.ParameterName = "key";
+                p.Value = key;
+                cmd.Parameters.Add(p);
             }
 
-            var items = await query
-                .OrderByDescending(b => b.CreatedAtUtc)
-                .Select(b => new
-                {
-                    b.Id,
-                    b.Name,
-                    b.PhoneNumberId,
-                    b.IsActive,
-                    b.Greeting,
-                    b.Schedule,
-                    b.Address,
-                    b.LogoUrl,
-                    b.PaymentMobileBank,
-                    b.PaymentMobileId,
-                    b.PaymentMobilePhone,
-                    b.NotificationPhone,
-                    b.RestaurantType,
-                    b.MenuPdfUrl,
-                    b.CreatedAtUtc
-                })
-                .ToListAsync(ct);
+            var items = new List<object>();
+            using var reader = await cmd.ExecuteReaderAsync(ct);
 
-            // Global admin with valid key: return list even if empty (no businesses yet)
+            // Build column index lookup (some columns may not exist in legacy schemas)
+            var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < reader.FieldCount; i++)
+                cols.Add(reader.GetName(i));
+
+            string? Col(string name) =>
+                cols.Contains(name) && reader[name] is not DBNull ? reader[name]?.ToString() : null;
+
+            while (await reader.ReadAsync(ct))
+            {
+                var rawIsActive = cols.Contains("IsActive") ? reader["IsActive"] : (object)true;
+
+                items.Add(new
+                {
+                    id = Col("Id") ?? "",
+                    name = Col("Name") ?? "",
+                    phoneNumberId = Col("PhoneNumberId") ?? "",
+                    isActive = rawIsActive switch
+                    {
+                        bool b => b,
+                        int i => i != 0,
+                        long l => l != 0,
+                        string s => s == "1" || s.Equals("true", StringComparison.OrdinalIgnoreCase),
+                        DBNull => true,
+                        _ => true
+                    },
+                    greeting = Col("Greeting"),
+                    schedule = Col("Schedule"),
+                    address = Col("Address"),
+                    logoUrl = Col("LogoUrl"),
+                    paymentMobileBank = Col("PaymentMobileBank"),
+                    paymentMobileId = Col("PaymentMobileId"),
+                    paymentMobilePhone = Col("PaymentMobilePhone"),
+                    notificationPhone = Col("NotificationPhone"),
+                    restaurantType = Col("RestaurantType"),
+                    menuPdfUrl = Col("MenuPdfUrl"),
+                    createdAtUtc = Col("CreatedAtUtc")
+                });
+            }
+
             if (isGlobal)
                 return Ok(items);
 
-            // Per-business key: if no match, key is invalid
             if (items.Count == 0)
                 return Unauthorized(new { error = "Invalid admin key — no matching business found" });
 
@@ -111,7 +142,6 @@ public class AdminBusinessesController : ControllerBase
         }
         catch (Exception ex)
         {
-            // Surface the real error so the frontend shows it instead of generic 500
             return StatusCode(500, new { error = $"DB query failed: {ex.GetType().Name}: {ex.Message}" });
         }
     }
