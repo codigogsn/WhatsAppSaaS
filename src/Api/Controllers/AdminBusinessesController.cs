@@ -263,10 +263,9 @@ public class AdminBusinessesController : ControllerBase
         };
 
         _db.Businesses.Add(biz);
+        await _db.SaveChangesAsync(ct);
 
         var (categoryNames, templateName) = await SeedRestaurantTemplateAsync(biz.Id, biz.RestaurantType, ct);
-
-        await _db.SaveChangesAsync(ct);
 
         return Ok(new
         {
@@ -315,15 +314,27 @@ public class AdminBusinessesController : ControllerBase
     /// <summary>
     /// Seeds menu categories, items, and aliases from a restaurant template.
     /// Idempotent: skips if the business already has any menu categories.
+    /// Uses raw ADO.NET because production IsActive/IsAvailable columns are
+    /// integer, not boolean — EF INSERTs would fail with type mismatch.
     /// </summary>
     private async Task<(List<string> categoryNames, string? templateName)> SeedRestaurantTemplateAsync(
         Guid businessId, string? restaurantType, CancellationToken ct)
     {
         var categoryNames = new List<string>();
 
+        var conn = _db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync(ct);
+
         // Idempotency: skip if business already has menu data
-        var hasExistingMenu = await _db.MenuCategories.AnyAsync(c => c.BusinessId == businessId, ct);
-        if (hasExistingMenu)
+        using var checkCmd = conn.CreateCommand();
+        checkCmd.CommandText = """SELECT COUNT(*) FROM "MenuCategories" WHERE "BusinessId" = @bid""";
+        var bp = checkCmd.CreateParameter();
+        bp.ParameterName = "bid";
+        bp.Value = businessId;
+        checkCmd.Parameters.Add(bp);
+        var count = Convert.ToInt64(await checkCmd.ExecuteScalarAsync(ct));
+        if (count > 0)
             return (categoryNames, null);
 
         var template = RestaurantTemplates.Get(restaurantType);
@@ -333,36 +344,52 @@ public class AdminBusinessesController : ControllerBase
             for (var i = 0; i < template.DefaultCategories.Count; i++)
             {
                 var tc = template.DefaultCategories[i];
-                var cat = new MenuCategory
-                {
-                    BusinessId = businessId,
-                    Name = tc.Name,
-                    SortOrder = i,
-                    IsActive = true
-                };
-                _db.MenuCategories.Add(cat);
+                var catId = Guid.NewGuid();
+
+                using var catCmd = conn.CreateCommand();
+                catCmd.CommandText = """
+                    INSERT INTO "MenuCategories" ("Id", "BusinessId", "Name", "SortOrder", "IsActive", "CreatedAtUtc")
+                    VALUES (@id, @bid, @name, @sort, @active, @created)
+                """;
+                AddParam(catCmd, "id", catId);
+                AddParam(catCmd, "bid", businessId);
+                AddParam(catCmd, "name", tc.Name);
+                AddParam(catCmd, "sort", i);
+                AddParam(catCmd, "active", 1);
+                AddParam(catCmd, "created", DateTime.UtcNow);
+                await catCmd.ExecuteNonQueryAsync(ct);
                 categoryNames.Add(tc.Name);
 
                 for (var j = 0; j < tc.Items.Count; j++)
                 {
                     var ti = tc.Items[j];
-                    var item = new MenuItem
-                    {
-                        CategoryId = cat.Id,
-                        Name = ti.Name,
-                        Price = ti.Price,
-                        IsAvailable = true,
-                        SortOrder = j
-                    };
-                    _db.MenuItems.Add(item);
+                    var itemId = Guid.NewGuid();
+
+                    using var itemCmd = conn.CreateCommand();
+                    itemCmd.CommandText = """
+                        INSERT INTO "MenuItems" ("Id", "CategoryId", "Name", "Price", "Description", "IsAvailable", "SortOrder", "CreatedAtUtc")
+                        VALUES (@id, @cid, @name, @price, NULL, @avail, @sort, @created)
+                    """;
+                    AddParam(itemCmd, "id", itemId);
+                    AddParam(itemCmd, "cid", catId);
+                    AddParam(itemCmd, "name", ti.Name);
+                    AddParam(itemCmd, "price", ti.Price);
+                    AddParam(itemCmd, "avail", 1);
+                    AddParam(itemCmd, "sort", j);
+                    AddParam(itemCmd, "created", DateTime.UtcNow);
+                    await itemCmd.ExecuteNonQueryAsync(ct);
 
                     foreach (var alias in ti.Aliases)
                     {
-                        _db.MenuItemAliases.Add(new MenuItemAlias
-                        {
-                            MenuItemId = item.Id,
-                            Alias = alias
-                        });
+                        using var aliasCmd = conn.CreateCommand();
+                        aliasCmd.CommandText = """
+                            INSERT INTO "MenuItemAliases" ("Id", "MenuItemId", "Alias")
+                            VALUES (@id, @mid, @alias)
+                        """;
+                        AddParam(aliasCmd, "id", Guid.NewGuid());
+                        AddParam(aliasCmd, "mid", itemId);
+                        AddParam(aliasCmd, "alias", alias);
+                        await aliasCmd.ExecuteNonQueryAsync(ct);
                     }
                 }
             }
@@ -373,18 +400,31 @@ public class AdminBusinessesController : ControllerBase
             var defaultCats = new[] { "Combos", "Bebidas" };
             for (var i = 0; i < defaultCats.Length; i++)
             {
-                _db.MenuCategories.Add(new MenuCategory
-                {
-                    BusinessId = businessId,
-                    Name = defaultCats[i],
-                    SortOrder = i,
-                    IsActive = true
-                });
+                using var catCmd = conn.CreateCommand();
+                catCmd.CommandText = """
+                    INSERT INTO "MenuCategories" ("Id", "BusinessId", "Name", "SortOrder", "IsActive", "CreatedAtUtc")
+                    VALUES (@id, @bid, @name, @sort, @active, @created)
+                """;
+                AddParam(catCmd, "id", Guid.NewGuid());
+                AddParam(catCmd, "bid", businessId);
+                AddParam(catCmd, "name", defaultCats[i]);
+                AddParam(catCmd, "sort", i);
+                AddParam(catCmd, "active", 1);
+                AddParam(catCmd, "created", DateTime.UtcNow);
+                await catCmd.ExecuteNonQueryAsync(ct);
                 categoryNames.Add(defaultCats[i]);
             }
         }
 
         return (categoryNames, template?.Name);
+    }
+
+    private static void AddParam(System.Data.Common.DbCommand cmd, string name, object value)
+    {
+        var p = cmd.CreateParameter();
+        p.ParameterName = name;
+        p.Value = value;
+        cmd.Parameters.Add(p);
     }
 
     public sealed class UpdateBusinessRequest
