@@ -33,6 +33,10 @@ try
 {
     Log.Information("Starting WhatsApp SaaS API");
 
+    // Npgsql 6+ maps DateTime to 'timestamptz' by default.
+    // Our legacy schema uses 'timestamp' (without tz). Enable compat to prevent exceptions.
+    AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
     var builder = WebApplication.CreateBuilder(args);
 
     if (builder.Environment.IsDevelopment())
@@ -602,6 +606,9 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
         "20260307193423_AddBusinessUsers",
         "20260307212018_AddRestaurantType",
         "20260308012829_AddBackgroundJobs",
+        "20260309174326_AddExchangeRatesAndCurrencyRef",
+        "20260309201857_AddVerticalType",
+        "20260315000747_AddMenuPdfUpload",
     ];
     foreach (var mid in allMigrations)
     {

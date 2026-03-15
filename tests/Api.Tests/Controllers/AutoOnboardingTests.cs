@@ -217,6 +217,35 @@ public class AutoOnboardingTests : IDisposable
     }
 
     // 5. Seed categories match template
+    [Fact]
+    public async Task List_WithGlobalAdminKey_ReturnsBusinesses()
+    {
+        // Create a business first
+        var createReq = WithAdmin(new HttpRequestMessage(HttpMethod.Post, "/api/admin/businesses")
+        {
+            Content = JsonContent.Create(new
+            {
+                name = "List Test Biz",
+                phoneNumberId = "list-test-001"
+            })
+        });
+        var createRes = await _client.SendAsync(createReq);
+        createRes.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Now GET /api/admin/businesses
+        var listReq = new HttpRequestMessage(HttpMethod.Get, "/api/admin/businesses");
+        listReq.Headers.Add("X-Admin-Key", AdminKey);
+        var listRes = await _client.SendAsync(listReq);
+
+        // Dump response for debugging
+        var body = await listRes.Content.ReadAsStringAsync();
+        listRes.StatusCode.Should().Be(HttpStatusCode.OK, $"Response body: {body}");
+
+        var arr = JsonDocument.Parse(body).RootElement;
+        arr.ValueKind.Should().Be(JsonValueKind.Array);
+        arr.GetArrayLength().Should().BeGreaterThanOrEqualTo(1);
+    }
+
     [Theory]
     [InlineData("burger", new[] { "Hamburguesas", "Perros Calientes", "Papas", "Bebidas", "Combos", "Salsas" })]
     [InlineData("pizza", new[] { "Pizzas", "Pastas", "Bebidas" })]

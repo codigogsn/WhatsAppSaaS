@@ -67,45 +67,53 @@ public class AdminBusinessesController : ControllerBase
         // Check all possible global key sources (same as BusinessResolver.ResolveOrCreateAsync)
         var isGlobal = IsGlobalAdmin() || IsGlobalAdminLegacy(key);
 
-        IQueryable<Business> query = _db.Businesses.AsNoTracking();
-
-        if (!isGlobal)
+        try
         {
-            // Per-business key: filter to matching business only
-            query = query.Where(b => b.AdminKey == key);
-        }
+            IQueryable<Business> query = _db.Businesses.AsNoTracking();
 
-        var items = await query
-            .OrderByDescending(b => b.CreatedAtUtc)
-            .Select(b => new
+            if (!isGlobal)
             {
-                b.Id,
-                b.Name,
-                b.PhoneNumberId,
-                b.IsActive,
-                b.Greeting,
-                b.Schedule,
-                b.Address,
-                b.LogoUrl,
-                b.PaymentMobileBank,
-                b.PaymentMobileId,
-                b.PaymentMobilePhone,
-                b.NotificationPhone,
-                b.RestaurantType,
-                b.MenuPdfUrl,
-                b.CreatedAtUtc
-            })
-            .ToListAsync(ct);
+                // Per-business key: filter to matching business only
+                query = query.Where(b => b.AdminKey == key);
+            }
 
-        // Global admin with valid key: return list even if empty (no businesses yet)
-        if (isGlobal)
+            var items = await query
+                .OrderByDescending(b => b.CreatedAtUtc)
+                .Select(b => new
+                {
+                    b.Id,
+                    b.Name,
+                    b.PhoneNumberId,
+                    b.IsActive,
+                    b.Greeting,
+                    b.Schedule,
+                    b.Address,
+                    b.LogoUrl,
+                    b.PaymentMobileBank,
+                    b.PaymentMobileId,
+                    b.PaymentMobilePhone,
+                    b.NotificationPhone,
+                    b.RestaurantType,
+                    b.MenuPdfUrl,
+                    b.CreatedAtUtc
+                })
+                .ToListAsync(ct);
+
+            // Global admin with valid key: return list even if empty (no businesses yet)
+            if (isGlobal)
+                return Ok(items);
+
+            // Per-business key: if no match, key is invalid
+            if (items.Count == 0)
+                return Unauthorized(new { error = "Invalid admin key — no matching business found" });
+
             return Ok(items);
-
-        // Per-business key: if no match, key is invalid
-        if (items.Count == 0)
-            return Unauthorized(new { error = "Invalid admin key — no matching business found" });
-
-        return Ok(items);
+        }
+        catch (Exception ex)
+        {
+            // Surface the real error so the frontend shows it instead of generic 500
+            return StatusCode(500, new { error = $"DB query failed: {ex.GetType().Name}: {ex.Message}" });
+        }
     }
 
     /// <summary>
