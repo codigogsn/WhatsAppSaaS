@@ -907,13 +907,43 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // E0a) Handle pending ambiguity resolution
+                    if (state.PendingAmbiguousItems is { Count: > 0 })
+                    {
+                        var resolved = TryResolveAmbiguity(state, rawText);
+                        if (resolved)
+                        {
+                            var ambReply = BuildOrderReplyFromState(state, _bcvRate);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = ambReply.Body,
+                                Buttons = ambReply.Buttons,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                        // If not resolved, clear pending and reparse as new order
+                        state.PendingAmbiguousItems = null;
+                    }
+
                     // E0) Quick parse (no AI)
                     if (TryParseQuickOrder(rawText, out var quickItems, out var quickDelivery, out var quickObs))
                     {
                         // TryParseQuickOrder already calls ParseOrderText internally.
                         // Use its returned items directly to avoid double-adding.
                         var parsedRich = ParseOrderText(rawText);
-                        foreach (var p in parsedRich)
+
+                        // Check for ambiguous items that need clarification
+                        var ambiguousItems = parsedRich.Where(p => p.AmbiguousCandidates is { Count: > 1 }).ToList();
+                        var clearItems = parsedRich.Where(p => p.AmbiguousCandidates is null or { Count: 0 } && !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+                        // Add clear items to the order
+                        foreach (var p in clearItems)
                             AddOrIncreaseItem(state, p.Name, p.Quantity, p.Modifiers);
 
                         if (!string.IsNullOrWhiteSpace(quickDelivery))
@@ -926,6 +956,31 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 ? quickObs
                                 : state.SpecialInstructions + "; " + quickObs;
                             state.ObservationAnswered = true;
+                        }
+
+                        // If there are ambiguous items, ask for clarification before showing summary
+                        if (ambiguousItems.Count > 0)
+                        {
+                            state.PendingAmbiguousItems = ambiguousItems.Select(a => new AmbiguousItemEntry
+                            {
+                                OriginalText = a.OriginalText ?? "",
+                                Quantity = a.Quantity,
+                                Candidates = a.AmbiguousCandidates!,
+                                Modifiers = a.Modifiers
+                            }).ToList();
+
+                            var clarifyMsg = BuildAmbiguityClarificationMessage(state.PendingAmbiguousItems);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = clarifyMsg,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
                         }
 
                         var quickReply = BuildOrderReplyFromState(state, _bcvRate);
@@ -1880,6 +1935,80 @@ public sealed class WebhookProcessor : IWebhookProcessor
             "btn_zelle"      => "zelle",
             _ => null
         };
+
+    // ── Ambiguity clarification ──
+
+    internal static string BuildAmbiguityClarificationMessage(List<AmbiguousItemEntry> ambiguousItems)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Quiero asegurarme de entender bien tu pedido. 🤔");
+        sb.AppendLine();
+
+        for (var i = 0; i < ambiguousItems.Count; i++)
+        {
+            var item = ambiguousItems[i];
+            sb.AppendLine($"Pediste *{item.Quantity}x \"{item.OriginalText}\"*");
+            sb.AppendLine("¿Cuál de estos quisiste decir?");
+            sb.AppendLine();
+            for (var j = 0; j < item.Candidates.Count; j++)
+                sb.AppendLine($"  {j + 1}. {item.Candidates[j]}");
+            if (i < ambiguousItems.Count - 1)
+                sb.AppendLine();
+        }
+
+        sb.AppendLine();
+        sb.Append("Responde con el número o el nombre del producto.");
+        return sb.ToString();
+    }
+
+    internal static bool TryResolveAmbiguity(ConversationFields state, string rawText)
+    {
+        if (state.PendingAmbiguousItems is not { Count: > 0 }) return false;
+
+        var text = rawText.Trim().ToLowerInvariant();
+        var resolved = false;
+
+        // Handle numeric responses ("1", "2", etc.)
+        if (int.TryParse(text, out var idx))
+        {
+            // Apply to first pending ambiguous item
+            var item = state.PendingAmbiguousItems[0];
+            if (idx >= 1 && idx <= item.Candidates.Count)
+            {
+                AddOrIncreaseItem(state, item.Candidates[idx - 1], item.Quantity, item.Modifiers);
+                state.PendingAmbiguousItems.RemoveAt(0);
+                resolved = true;
+            }
+        }
+        else
+        {
+            // Try to match the response text against candidates
+            var catalog = ActiveCatalog ?? MenuCatalog;
+            var match = NormalizeMenuItemName(rawText, catalog);
+
+            if (match != null)
+            {
+                // Find which pending item this resolves
+                for (var i = 0; i < state.PendingAmbiguousItems.Count; i++)
+                {
+                    if (state.PendingAmbiguousItems[i].Candidates.Contains(match))
+                    {
+                        AddOrIncreaseItem(state, match, state.PendingAmbiguousItems[i].Quantity,
+                            state.PendingAmbiguousItems[i].Modifiers);
+                        state.PendingAmbiguousItems.RemoveAt(i);
+                        resolved = true;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Clear pending if all resolved
+        if (state.PendingAmbiguousItems.Count == 0)
+            state.PendingAmbiguousItems = null;
+
+        return resolved;
+    }
 
     private static string? NormalizeDeliveryType(string? input)
     {
@@ -2890,21 +3019,34 @@ public sealed class WebhookProcessor : IWebhookProcessor
         t = StripAccents(t);
         var tNoS = t.EndsWith("s") ? t[..^1] : t;
 
+        // Also build a per-word singularized variant for multi-word phrases:
+        // "perros especiales" → "perro especial"
+        var tSingularized = SingularizeWords(t);
+
         // Pass 1: exact matches (canonical, aliases) — no ambiguity
         foreach (var entry in catalog)
         {
             var canonLower = StripAccents(entry.Canonical.ToLowerInvariant());
-            if (t == canonLower || tNoS == canonLower)
+            if (t == canonLower || tNoS == canonLower || tSingularized == canonLower)
                 return entry.Canonical;
 
             var canonNoS = canonLower.EndsWith("s") ? canonLower[..^1] : canonLower;
-            if (t == canonNoS || tNoS == canonNoS)
+            if (t == canonNoS || tNoS == canonNoS || tSingularized == canonNoS)
+                return entry.Canonical;
+
+            // Also singularize canonical for comparison
+            var canonSingularized = SingularizeWords(canonLower);
+            if (tSingularized == canonSingularized)
                 return entry.Canonical;
 
             foreach (var alias in entry.Aliases)
             {
                 var a = StripAccents(alias);
-                if (t == a || tNoS == a)
+                if (t == a || tNoS == a || tSingularized == a)
+                    return entry.Canonical;
+
+                var aSingularized = SingularizeWords(a);
+                if (tSingularized == aSingularized)
                     return entry.Canonical;
             }
         }
@@ -2926,6 +3068,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 if (canonLower.Length >= 4 && LevenshteinDistance(t, canonLower) <= maxDist)
                     return entry.Canonical;
 
+                // Also try singularized variant against canonical
+                if (tSingularized.Length >= 5 && canonLower.Length >= 4
+                    && LevenshteinDistance(tSingularized, canonLower) <= maxDist)
+                    return entry.Canonical;
+
                 foreach (var alias in entry.Aliases)
                 {
                     var a = StripAccents(alias);
@@ -2936,6 +3083,129 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Singularizes each word in a phrase independently.
+    /// "perros especiales" → "perro especial"
+    /// "hamburguesas clasicas" → "hamburguesa clasica"
+    /// "papas pequenas" → "papa pequena"
+    /// </summary>
+    internal static string SingularizeWords(string phrase)
+    {
+        var words = phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < words.Length; i++)
+            words[i] = SingularizeWord(words[i]);
+        return string.Join(" ", words);
+    }
+
+    internal static string SingularizeWord(string word)
+    {
+        if (word.Length < 3) return word;
+
+        // "especiales" → "especial"
+        if (word.EndsWith("ales") && word.Length > 5)
+            return word[..^2];
+        // "clasicas" → "clasica"
+        if (word.EndsWith("cas") && word.Length > 4)
+            return word[..^1];
+        // "medianas" → "mediana", "pequenas" → "pequena", "grandes" → "grande"
+        if (word.EndsWith("nas") && word.Length > 4)
+            return word[..^1];
+        if (word.EndsWith("des") && word.Length > 4)
+            return word[..^1];
+        // "mixtas" → "mixta"
+        if (word.EndsWith("tas") && word.Length > 4)
+            return word[..^1];
+        // "calientes" → "caliente"
+        if (word.EndsWith("tes") && word.Length > 4)
+            return word[..^1];
+        // "refrescos" → "refresco", "perros" → "perro", "combos" → "combo"
+        if (word.EndsWith("os") && word.Length > 3)
+            return word[..^1];
+        // "hamburguesas" → "hamburguesa", "cocas" → "coca", "papas" → "papa"
+        if (word.EndsWith("as") && word.Length > 3)
+            return word[..^1];
+        // Generic trailing "s"
+        if (word.EndsWith("s") && !word.EndsWith("ss"))
+            return word[..^1];
+
+        return word;
+    }
+
+    /// <summary>
+    /// Finds menu item matches with confidence scoring.
+    /// Returns (matched canonical name, confidence 0.0-1.0, alternative candidates if ambiguous).
+    /// High confidence (>= 0.8): exact or alias match. Low confidence (< 0.8): fuzzy/partial.
+    /// If a bare word (e.g. "perro") matches multiple variants, returns all candidates as ambiguous.
+    /// </summary>
+    internal static (string? Match, double Confidence, List<string>? Alternatives) FindMatchWithConfidence(
+        string rawItem, MenuEntry[] catalog)
+    {
+        if (string.IsNullOrWhiteSpace(rawItem))
+            return (null, 0, null);
+
+        var t = StripAccents(rawItem.Trim().ToLowerInvariant());
+        var tSingularized = SingularizeWords(t);
+
+        // Try exact match first — high confidence
+        var exact = NormalizeMenuItemName(rawItem, catalog);
+        if (exact != null)
+        {
+            // Check if this was a multi-word or alias match — full confidence
+            return (exact, 1.0, null);
+        }
+
+        // No exact match. Check if the bare word matches the base of multiple items
+        // e.g. "perro" → "Perro Clasico", "Perro Especial", "Perro con Queso"
+        // e.g. "especial" → "Hamburguesa Especial", "Perro Especial"
+        var candidates = new List<string>();
+        foreach (var entry in catalog)
+        {
+            var canonLower = StripAccents(entry.Canonical.ToLowerInvariant());
+
+            // Does the canonical name contain our search term as a word?
+            if (ContainsWord(canonLower, t) || ContainsWord(canonLower, tSingularized))
+            {
+                if (!candidates.Contains(entry.Canonical))
+                    candidates.Add(entry.Canonical);
+                continue;
+            }
+
+            // Check aliases
+            foreach (var alias in entry.Aliases)
+            {
+                var a = StripAccents(alias);
+                if (a == t || a == tSingularized || ContainsWord(a, t))
+                {
+                    if (!candidates.Contains(entry.Canonical))
+                        candidates.Add(entry.Canonical);
+                    break;
+                }
+            }
+        }
+
+        if (candidates.Count == 1)
+            return (candidates[0], 0.7, null); // single partial match — medium confidence
+        if (candidates.Count > 1)
+            return (null, 0.3, candidates); // ambiguous — low confidence
+
+        return (null, 0, null); // no match at all
+    }
+
+    private static bool ContainsWord(string text, string word)
+    {
+        if (string.IsNullOrWhiteSpace(word)) return false;
+        // Check if word appears as a whole word in text
+        var idx = text.IndexOf(word, StringComparison.Ordinal);
+        while (idx >= 0)
+        {
+            var before = idx == 0 || text[idx - 1] == ' ';
+            var after = idx + word.Length >= text.Length || text[idx + word.Length] == ' ';
+            if (before && after) return true;
+            idx = text.IndexOf(word, idx + 1, StringComparison.Ordinal);
+        }
+        return false;
     }
 
     internal static int LevenshteinDistance(string a, string b)
@@ -3241,6 +3511,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
         public string Name { get; set; } = "";
         public int Quantity { get; set; } = 1;
         public string? Modifiers { get; set; }
+        /// <summary>When non-null, the match was ambiguous and these are the candidate canonical names.</summary>
+        public List<string>? AmbiguousCandidates { get; set; }
+        /// <summary>The original text the user typed for this item segment (before normalization).</summary>
+        public string? OriginalText { get; set; }
     }
 
     internal static bool TryParseQuickOrder(
@@ -3362,8 +3636,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var results = new List<ParsedItem>();
         var text = rawText.Trim();
 
-        // Noise words to strip (greetings + filler) — preserve newlines for segment splitting
-        var noisePattern = @"\b(hola|buenas?|buenos?\s+d[ií]as?|buenas\s+tardes|buenas\s+noches|hey|epa|epale|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|me\s+das?|dame|necesito|pedimos|para\s+comer|mand[ae]\s*me|bro|pana|mano|vale|loco|hermano)\b";
+        // Noise words to strip (greetings + filler + ordering prefixes) — preserve newlines for segment splitting
+        var noisePattern = @"\b(hola|buenas?|buenos?\s+d[ií]as?|buenas\s+tardes|buenas\s+noches|hey|epa|epale|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|voy\s+a\s+querer|voy\s+a\s+pedir|quiero|quisiera|me\s+das?|dame|ponme|regalame|reg[aá]lame|necesito|pedimos|para\s+comer|mand[ae]\s*me|manda\s*me|bro|pana|mano|vale|loco|hermano)\b";
         var cleaned = Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase);
         // Collapse spaces on each line but preserve newlines
         cleaned = string.Join("\n", cleaned.Split('\n').Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim()));
@@ -3396,9 +3670,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
             var s = seg.Trim();
             if (string.IsNullOrWhiteSpace(s)) continue;
 
-            // Try "N items [modifiers]"
+            // Try "N items [modifiers]" or "N de items"
             var m = Regex.Match(s,
-                @"^(\d+)\s+(.+)$",
+                @"^(\d+)\s+(?:de\s+)?(.+)$",
                 RegexOptions.IgnoreCase);
 
             if (m.Success && int.TryParse(m.Groups[1].Value, out var qty) && qty > 0)
@@ -3553,6 +3827,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Strip trailing noise
         itemText = StripTrailingNoise(itemText);
 
+        // Try the full phrase first — "perros especiales" → "Perro Especial"
+        var fullMatch = NormalizeMenuItemName(itemText);
+        if (fullMatch != null)
+        {
+            return new ParsedItem
+            {
+                Name = fullMatch,
+                Quantity = 1,
+                Modifiers = modifiers
+            };
+        }
+
         // Try con-collapsed variant: "hamburguesa con bbq" → "hamburguesa bbq"
         // This catches cases where "con" links a base item to its variant name
         if (itemText.Contains(" con ", StringComparison.OrdinalIgnoreCase))
@@ -3590,14 +3876,45 @@ public sealed class WebhookProcessor : IWebhookProcessor
             }
         }
 
-        if (bestMatch == null) return null;
-
-        return new ParsedItem
+        if (bestMatch != null)
         {
-            Name = bestMatch,
-            Quantity = 1,
-            Modifiers = modifiers
-        };
+            return new ParsedItem
+            {
+                Name = bestMatch,
+                Quantity = 1,
+                Modifiers = modifiers,
+                OriginalText = itemText
+            };
+        }
+
+        // No exact/fuzzy match. Check for ambiguity — e.g. "perro" matches both
+        // "Perro Clasico" and "Perro Especial" but user didn't specify which.
+        var catalog = ActiveCatalog ?? MenuCatalog;
+        var (partialMatch, confidence, alternatives) = FindMatchWithConfidence(itemText, catalog);
+        if (alternatives is { Count: > 1 })
+        {
+            // Ambiguous — return a marker so the caller can ask for clarification
+            return new ParsedItem
+            {
+                Name = "", // no definitive match
+                Quantity = 1,
+                Modifiers = modifiers,
+                AmbiguousCandidates = alternatives,
+                OriginalText = itemText
+            };
+        }
+        if (partialMatch != null)
+        {
+            return new ParsedItem
+            {
+                Name = partialMatch,
+                Quantity = 1,
+                Modifiers = modifiers,
+                OriginalText = itemText
+            };
+        }
+
+        return null;
     }
 
     // Extract standalone observations not already captured as item modifiers

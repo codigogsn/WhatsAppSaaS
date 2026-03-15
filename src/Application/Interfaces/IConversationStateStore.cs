@@ -56,6 +56,13 @@ public sealed class ConversationFields
 
     public DateTime? LastActivityUtc { get; set; }
 
+    /// <summary>
+    /// Pending items that had ambiguous matches. Each entry contains
+    /// the original text, quantity, and candidate canonical names.
+    /// Cleared after the user selects or the ambiguity is resolved.
+    /// </summary>
+    public List<AmbiguousItemEntry>? PendingAmbiguousItems { get; set; }
+
     public void ResetAfterConfirm()
     {
         MenuSent = false;
@@ -94,8 +101,17 @@ public sealed class ConversationFields
         ComboSuggestedCount = 0;
         ComboAcceptedCount = 0;
         ComboDeclinedCount = 0;
+        PendingAmbiguousItems = null;
         LastActivityUtc = null;
     }
+}
+
+public sealed class AmbiguousItemEntry
+{
+    public string OriginalText { get; set; } = "";
+    public int Quantity { get; set; } = 1;
+    public List<string> Candidates { get; set; } = new();
+    public string? Modifiers { get; set; }
 }
 
 public sealed class ConversationItemEntry
