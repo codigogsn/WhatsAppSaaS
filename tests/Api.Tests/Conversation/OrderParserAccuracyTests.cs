@@ -447,4 +447,144 @@ public class OrderParserAccuracyTests
         parsed[2].Name.Should().Be("Coca Cola");
         parsed[2].Quantity.Should().Be(1);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  CHAINED QUANTITY+ITEM GROUPS (no commas)
+    //  Real-world LatAm typing pattern: users write multiple
+    //  items in one line separated only by whitespace.
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void ParseOrderText_ChainedNoCommas_ProductionBug()
+    {
+        // THE EXACT failing production input
+        var input = "voy a querer 2 perros especiales 2 papas pequeñas y una cocacola";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+
+        parsed.Should().HaveCount(3);
+        parsed.Should().Contain(p => p.Name == "Perro Especial" && p.Quantity == 2);
+        parsed.Should().Contain(p => p.Name == "Papas Pequenas" && p.Quantity == 2);
+        parsed.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    [Fact]
+    public void ParseOrderText_ChainedNoCommas_NoConjunction()
+    {
+        // No "y" at all — purely whitespace-separated chained groups
+        var input = "voy a querer 2 perros especiales 2 papas pequeñas 1 cocacola";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+
+        parsed.Should().HaveCount(3);
+        parsed.Should().Contain(p => p.Name == "Perro Especial" && p.Quantity == 2);
+        parsed.Should().Contain(p => p.Name == "Papas Pequenas" && p.Quantity == 2);
+        parsed.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    [Fact]
+    public void ParseOrderText_ChainedNoCommas_ThreeItems()
+    {
+        var input = "quisiera 1 hamburguesa clasica 1 papa mediana 2 cocas";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+
+        parsed.Should().HaveCount(3);
+        parsed.Should().Contain(p => p.Name == "Hamburguesa Clasica" && p.Quantity == 1);
+        parsed.Should().Contain(p => p.Name == "Papas Medianas" && p.Quantity == 1);
+        parsed.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 2);
+    }
+
+    [Fact]
+    public void ParseOrderText_ChainedWithConjunction()
+    {
+        var input = "ponme 2 perros especiales y 2 papas pequeñas";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+
+        parsed.Should().HaveCount(2);
+        parsed.Should().Contain(p => p.Name == "Perro Especial" && p.Quantity == 2);
+        parsed.Should().Contain(p => p.Name == "Papas Pequenas" && p.Quantity == 2);
+    }
+
+    [Fact]
+    public void ParseOrderText_ChainedAllDigitQuantities()
+    {
+        var input = "2 perros especiales 2 papas pequeñas 2 cocas";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+
+        parsed.Should().HaveCount(3);
+        parsed.Should().Contain(p => p.Name == "Perro Especial" && p.Quantity == 2);
+        parsed.Should().Contain(p => p.Name == "Papas Pequenas" && p.Quantity == 2);
+        parsed.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 2);
+    }
+
+    [Fact]
+    public void ParseOrderText_ChainedWithWordNumbers()
+    {
+        // Mix of digit and word quantities, no commas
+        var input = "2 perros especiales una coca";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+
+        parsed.Should().HaveCount(2);
+        parsed.Should().Contain(p => p.Name == "Perro Especial" && p.Quantity == 2);
+        parsed.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    [Fact]
+    public void ParseOrderText_ChainedWithWordNumbersOnly()
+    {
+        var input = "dos hamburguesas clasicas una coca";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+
+        parsed.Should().HaveCount(2);
+        parsed.Should().Contain(p => p.Name == "Hamburguesa Clasica" && p.Quantity == 2);
+        parsed.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SplitChainedQuantities — unit tests
+    // ═══════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("2 perros especiales 2 papas pequenas", new[] { "2 perros especiales", "2 papas pequenas" })]
+    [InlineData("2 perros especiales 2 papas pequenas 1 cocacola", new[] { "2 perros especiales", "2 papas pequenas", "1 cocacola" })]
+    [InlineData("1 hamburguesa clasica 1 papa mediana 2 cocas", new[] { "1 hamburguesa clasica", "1 papa mediana", "2 cocas" })]
+    [InlineData("2 perros especiales una coca", new[] { "2 perros especiales", "una coca" })]
+    [InlineData("combo 2", new[] { "combo 2" })]  // should NOT split — digit at end, no space+letter after
+    [InlineData("coca cola 355", new[] { "coca cola 355" })]  // should NOT split
+    [InlineData("1 hamburguesa", new[] { "1 hamburguesa" })]  // single item, no split
+    public void SplitChainedQuantities_SplitsCorrectly(string input, string[] expected)
+    {
+        var result = WebhookProcessor.SplitChainedQuantities(input);
+        result.Should().BeEquivalentTo(expected, options => options.WithStrictOrdering());
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  TryParseQuickOrder — chained input variant
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void TryParseQuickOrder_ChainedNoCommas_AllItemsParsed()
+    {
+        var success = WebhookProcessor.TryParseQuickOrder(
+            "voy a querer 2 perros especiales 2 papas pequeñas y una cocacola",
+            out var items, out _, out _);
+
+        success.Should().BeTrue();
+        items.Should().HaveCount(3);
+        items.Should().Contain(i => i.Name == "Perro Especial" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Papas Pequenas" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
+
+    [Fact]
+    public void TryParseQuickOrder_ChainedNoDelimiters_AllItemsParsed()
+    {
+        var success = WebhookProcessor.TryParseQuickOrder(
+            "2 perros especiales 2 papas pequeñas 2 cocas",
+            out var items, out _, out _);
+
+        success.Should().BeTrue();
+        items.Should().HaveCount(3);
+        items.Should().Contain(i => i.Name == "Perro Especial" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Papas Pequenas" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 2);
+    }
 }

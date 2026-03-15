@@ -3670,7 +3670,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             var s = seg.Trim();
             if (string.IsNullOrWhiteSpace(s)) continue;
 
-            // Try "N items [modifiers]" or "N de items"
+            // Try "N items [modifiers]" or "N de items" (digit quantity)
             var m = Regex.Match(s,
                 @"^(\d+)\s+(?:de\s+)?(.+)$",
                 RegexOptions.IgnoreCase);
@@ -3685,6 +3685,28 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     results.Add(item);
                     if (results.Count == 1) leadQty = qty; // remember first item's quantity
                     continue;
+                }
+            }
+
+            // Try word-number quantity: "una coca", "dos perros especiales"
+            // (handles segments from SplitChainedQuantities that start with word numbers)
+            var wordQtyMatch = Regex.Match(s,
+                @"^(un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+(?:de\s+)?(.+)$",
+                RegexOptions.IgnoreCase);
+            if (wordQtyMatch.Success)
+            {
+                var wordQty = ParseWordNumber(wordQtyMatch.Groups[1].Value);
+                if (wordQty > 0)
+                {
+                    var rest = wordQtyMatch.Groups[2].Value.Trim();
+                    var item = ExtractItemAndModifiers(rest);
+                    if (item != null)
+                    {
+                        item.Quantity = wordQty;
+                        results.Add(item);
+                        if (results.Count == 1) leadQty = wordQty;
+                        continue;
+                    }
                 }
             }
 
@@ -3714,9 +3736,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return results;
     }
 
-    // Split text into segments, separating on " y " and "con [menu-item]"
+    // Split text into segments, separating on " y ", commas, newlines,
+    // "con [menu-item]", and chained quantity+item groups (no delimiter).
     // "3 hamburguesas con papas y coca" -> ["3 hamburguesas", "papas", "coca"]
     // "1 hamburguesa sin cebolla y 1 coca" -> ["1 hamburguesa sin cebolla", "1 coca"]
+    // "2 perros especiales 2 papas pequeñas" -> ["2 perros especiales", "2 papas pequeñas"]
     internal static List<string> SplitIntoOrderSegments(string text)
     {
         var results = new List<string>();
@@ -3739,19 +3763,55 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     var part = yp.Trim();
                     if (string.IsNullOrWhiteSpace(part)) continue;
 
-                    // Check if this segment has "con [menu-item]" pattern
-                    // e.g. "3 hamburguesas con papas" → split into "3 hamburguesas" and "papas"
-                    var conSplit = TrySplitOnConMenuItem(part);
-                    if (conSplit != null)
+                    // Split chained quantity+item groups with no delimiter:
+                    // "2 perros especiales 2 papas pequeñas" → ["2 perros especiales", "2 papas pequeñas"]
+                    var chainedParts = SplitChainedQuantities(part);
+
+                    foreach (var chainedPart in chainedParts)
                     {
-                        results.AddRange(conSplit);
-                    }
-                    else
-                    {
-                        results.Add(part);
+                        // Check if this segment has "con [menu-item]" pattern
+                        var conSplit = TrySplitOnConMenuItem(chainedPart);
+                        if (conSplit != null)
+                        {
+                            results.AddRange(conSplit);
+                        }
+                        else
+                        {
+                            results.Add(chainedPart);
+                        }
                     }
                 }
             }
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Splits a single segment that contains multiple chained quantity+item groups
+    /// written without commas or conjunctions. Detects boundaries where a letter
+    /// is followed by whitespace then a new digit+word pattern.
+    /// "2 perros especiales 2 papas pequeñas" → ["2 perros especiales", "2 papas pequeñas"]
+    /// Safe: does NOT split "combo 2" or "coca cola 355" (digit not followed by space+letter).
+    /// Also handles word-number quantities: "2 perros especiales una coca" splits correctly.
+    /// </summary>
+    internal static List<string> SplitChainedQuantities(string segment)
+    {
+        // Pattern: split where a letter is followed by whitespace, then a quantity
+        // (digit or Spanish word number) followed by space and another letter.
+        // This detects "...especiales 2 papas..." or "...especiales una coca..."
+        var splitPattern = @"(?<=\p{L})\s+(?=(?:\d+|un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+\p{L})";
+        var parts = Regex.Split(segment, splitPattern, RegexOptions.IgnoreCase);
+
+        if (parts.Length <= 1)
+            return new List<string> { segment };
+
+        var results = new List<string>();
+        foreach (var p in parts)
+        {
+            var trimmed = p.Trim();
+            if (!string.IsNullOrWhiteSpace(trimmed))
+                results.Add(trimmed);
         }
 
         return results;
