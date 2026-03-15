@@ -105,6 +105,7 @@ public class AdminBusinessesController : ControllerBase
             biz.PaymentMobilePhone,
             biz.NotificationPhone,
             biz.RestaurantType,
+            biz.MenuPdfUrl,
             biz.CreatedAtUtc
         });
     }

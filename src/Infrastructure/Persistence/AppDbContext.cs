@@ -20,6 +20,7 @@ public class AppDbContext : DbContext
     public DbSet<BusinessUser> BusinessUsers => Set<BusinessUser>();
     public DbSet<BackgroundJob> BackgroundJobs => Set<BackgroundJob>();
     public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
+    public DbSet<MenuPdf> MenuPdfs => Set<MenuPdf>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -167,6 +168,9 @@ public class AppDbContext : DbContext
             // Notification
             b.Property(x => x.NotificationPhone).HasMaxLength(50);
 
+            // Per-business menu PDF URL
+            b.Property(x => x.MenuPdfUrl).HasMaxLength(500);
+
             b.Property(x => x.IsActive)
                 .IsRequired();
 
@@ -176,6 +180,16 @@ public class AppDbContext : DbContext
             // cada phone_number_id debe ser único
             b.HasIndex(x => x.PhoneNumberId)
                 .IsUnique();
+        });
+
+        modelBuilder.Entity<MenuPdf>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.BusinessId).IsRequired();
+            b.Property(x => x.Data).IsRequired();
+            b.Property(x => x.ContentType).IsRequired().HasMaxLength(100);
+            b.Property(x => x.UploadedAtUtc).IsRequired();
+            b.HasIndex(x => x.BusinessId).IsUnique();
         });
 
         modelBuilder.Entity<MenuCategory>(b =>

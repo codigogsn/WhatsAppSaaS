@@ -39,6 +39,9 @@ public class Business
     // Business vertical: "restaurant", "fashion", etc. (defaults to "restaurant")
     public string VerticalType { get; set; } = "restaurant";
 
+    // Per-business menu PDF URL (set when PDF is uploaded; null = use global fallback)
+    public string? MenuPdfUrl { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

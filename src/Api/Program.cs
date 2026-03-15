@@ -547,6 +547,11 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "VerticalType" varchar(30) DEFAULT 'restaurant'""");
     ExecSql(conn, """UPDATE "Businesses" SET "VerticalType" = 'restaurant' WHERE "VerticalType" IS NULL""");
 
+    // ── Per-business menu PDF ──
+    ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "MenuPdfUrl" varchar(500)""");
+    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "MenuPdfs" ("Id" uuid NOT NULL PRIMARY KEY, "BusinessId" uuid NOT NULL REFERENCES "Businesses"("Id") ON DELETE CASCADE, "Data" bytea NOT NULL, "ContentType" varchar(100) NOT NULL DEFAULT 'application/pdf', "UploadedAtUtc" timestamp NOT NULL DEFAULT now())""");
+    ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_MenuPdfs_BusinessId" ON "MenuPdfs" ("BusinessId")""");
+
     // ── Boolean column repair ──
     string[] boolRepairs =
     [

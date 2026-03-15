@@ -239,6 +239,17 @@
       </div>
     </div>
 
+    <div class="biz-section">
+      <h4>Menu PDF</h4>
+      <div>
+        <span id="bizMenuPdfStatus" class="small muted"></span>
+        <input id="bizMenuPdf" type="file" accept="application/pdf" style="margin:6px 0;" />
+        <button onclick="uploadBizMenuPdf()">Subir PDF</button>
+        <button onclick="deleteBizMenuPdf()" style="color:#c00;">Eliminar PDF</button>
+        <span id="bizMenuPdfMsg" class="small"></span>
+      </div>
+    </div>
+
     <div class="biz-actions">
       <button class="success" onclick="saveBizProfile()">Guardar Cambios</button>
       <button id="btnToggleActive" onclick="toggleBizActive()">Desactivar</button>
@@ -305,6 +316,11 @@
           </select>
           <small class="muted" id="newBizTypeDesc"></small>
           <div id="templatePreview" style="display:none;margin-top:8px;padding:8px;background:#f5f5f5;border-radius:6px;font-size:12px;max-height:200px;overflow-y:auto;"></div>
+        </div>
+        <div>
+          <label>Menu PDF</label>
+          <input id="newBizMenuPdf" type="file" accept="application/pdf" />
+          <small class="muted">PDF del menu del restaurante (max 10 MB)</small>
         </div>
       </div>
       <div class="biz-actions" style="margin-top:16px;">
@@ -671,6 +687,9 @@ async function loadBizProfile(bizId){
     document.getElementById('bizPmId').value = b.paymentMobileId || '';
     document.getElementById('bizPmPhone').value = b.paymentMobilePhone || '';
     document.getElementById('bizNotifPhone').value = b.notificationPhone || '';
+    document.getElementById('bizMenuPdfStatus').textContent = b.menuPdfUrl ? 'PDF activo: ' + b.menuPdfUrl : 'Sin PDF personalizado (usa menu por defecto)';
+    document.getElementById('bizMenuPdfMsg').textContent = '';
+    document.getElementById('bizMenuPdf').value = '';
     document.getElementById('bizSaveMsg').textContent = '';
 
     // Show admin key hint
@@ -722,6 +741,50 @@ async function saveBizProfile(){
   }
 }
 
+async function uploadBizMenuPdf(){
+  const bid = getBusinessId();
+  if (!bid) return;
+  const fileInput = document.getElementById('bizMenuPdf');
+  if (!fileInput.files || !fileInput.files.length) {
+    document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="danger">Selecciona un PDF</span>';
+    return;
+  }
+  const fd = new FormData();
+  fd.append('file', fileInput.files[0]);
+  document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="muted">Subiendo...</span>';
+  try {
+    const res = await fetch('/api/admin/businesses/' + bid + '/menu-pdf', {
+      method: 'POST', headers: adminHeaders(), body: fd
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="danger">' + esc(err.error || 'Error') + '</span>';
+      return;
+    }
+    const r = await res.json();
+    document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="ok">PDF subido</span>';
+    document.getElementById('bizMenuPdfStatus').textContent = 'PDF activo: ' + r.menuPdfUrl;
+    fileInput.value = '';
+  } catch(e) {
+    document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
+  }
+}
+async function deleteBizMenuPdf(){
+  const bid = getBusinessId();
+  if (!bid) return;
+  if (!confirm('Eliminar el PDF del menu? El bot usara el menu por defecto.')) return;
+  try {
+    const res = await fetch('/api/admin/businesses/' + bid + '/menu-pdf', {
+      method: 'DELETE', headers: adminHeaders()
+    });
+    if (res.ok) {
+      document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="ok">PDF eliminado</span>';
+      document.getElementById('bizMenuPdfStatus').textContent = 'Sin PDF personalizado (usa menu por defecto)';
+    }
+  } catch(e) {
+    document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
+  }
+}
 async function toggleBizActive(){
   const bid = getBusinessId();
   if (!bid) return;
@@ -754,6 +817,7 @@ function openCreateBiz(){
   });
   document.getElementById('newBizType').value = '';
   document.getElementById('newBizTypeDesc').textContent = '';
+  document.getElementById('newBizMenuPdf').value = '';
 }
 // Template type descriptions + live preview
 document.getElementById('newBizType')?.addEventListener('change', async function(){
@@ -816,7 +880,31 @@ async function submitCreateBiz(){
     }
     const result = await res.json();
     const seedInfo = result.menuSeeded ? ' Menu: ' + esc(result.templateName || 'generico') + ' (' + (result.defaultCategories||[]).length + ' categorias)' : '';
-    document.getElementById('createBizMsg').innerHTML = '<span class="ok">Negocio creado.' + seedInfo + ' Admin Key: <code>' + esc(result.adminKey) + '</code></span>';
+
+    // Upload menu PDF if selected
+    const pdfInput = document.getElementById('newBizMenuPdf');
+    let pdfInfo = '';
+    if (pdfInput.files && pdfInput.files.length > 0) {
+      document.getElementById('createBizMsg').innerHTML = '<span class="muted">Subiendo PDF...</span>';
+      const fd = new FormData();
+      fd.append('file', pdfInput.files[0]);
+      try {
+        const pdfRes = await fetch('/api/admin/businesses/' + result.id + '/menu-pdf', {
+          method: 'POST',
+          headers: adminHeaders(),
+          body: fd
+        });
+        if (pdfRes.ok) {
+          const pdfResult = await pdfRes.json();
+          pdfInfo = ' PDF subido.';
+        } else {
+          const pdfErr = await pdfRes.json().catch(() => ({}));
+          pdfInfo = ' PDF error: ' + esc(pdfErr.error || 'fallo');
+        }
+      } catch(pe) { pdfInfo = ' PDF error: ' + esc(pe.message); }
+    }
+
+    document.getElementById('createBizMsg').innerHTML = '<span class="ok">Negocio creado.' + seedInfo + pdfInfo + ' Admin Key: <code>' + esc(result.adminKey) + '</code></span>';
 
     // Refresh and auto-select
     await loadBusinesses();
@@ -829,7 +917,7 @@ async function submitCreateBiz(){
     setTimeout(() => {
       closeCreateBiz();
       load();
-    }, 3000);
+    }, 4000);
   } catch(e) {
     document.getElementById('createBizMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
   }
