@@ -25,12 +25,12 @@ public class AdminBusinessesController : ControllerBase
 
     private bool IsGlobalAdmin()
     {
-        var adminKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
+        var adminKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
         if (string.IsNullOrWhiteSpace(adminKey))
             return false;
 
         return Request.Headers.TryGetValue("X-Admin-Key", out var headerKey)
-               && ConstantTimeEquals(headerKey.ToString(), adminKey);
+               && ConstantTimeEquals(headerKey.ToString().Trim(), adminKey);
     }
 
     private async Task<Business?> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
@@ -42,10 +42,10 @@ public class AdminBusinessesController : ControllerBase
         if (biz is null) return null;
 
         // Accept global admin key OR per-business admin key
-        var globalKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
-        var key = headerKey.ToString();
+        var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
+        var key = headerKey.ToString().Trim();
         if ((!string.IsNullOrWhiteSpace(globalKey) && ConstantTimeEquals(key, globalKey))
-            || (!string.IsNullOrWhiteSpace(biz.AdminKey) && ConstantTimeEquals(key, biz.AdminKey)))
+            || (!string.IsNullOrWhiteSpace(biz.AdminKey) && ConstantTimeEquals(key, biz.AdminKey.Trim())))
             return biz;
 
         return null;
@@ -58,11 +58,11 @@ public class AdminBusinessesController : ControllerBase
     public async Task<IActionResult> List(CancellationToken ct)
     {
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey))
-            return Unauthorized();
+            return Unauthorized(new { error = "Missing X-Admin-Key header" });
 
-        var key = headerKey.ToString();
+        var key = headerKey.ToString().Trim();
         if (string.IsNullOrWhiteSpace(key))
-            return Unauthorized();
+            return Unauthorized(new { error = "Empty X-Admin-Key header" });
 
         // Check all possible global key sources (same as BusinessResolver.ResolveOrCreateAsync)
         var isGlobal = IsGlobalAdmin() || IsGlobalAdminLegacy(key);
@@ -97,8 +97,13 @@ public class AdminBusinessesController : ControllerBase
             })
             .ToListAsync(ct);
 
+        // Global admin with valid key: return list even if empty (no businesses yet)
+        if (isGlobal)
+            return Ok(items);
+
+        // Per-business key: if no match, key is invalid
         if (items.Count == 0)
-            return Unauthorized();
+            return Unauthorized(new { error = "Invalid admin key — no matching business found" });
 
         return Ok(items);
     }
@@ -115,7 +120,7 @@ public class AdminBusinessesController : ControllerBase
         ];
         foreach (var src in sources)
         {
-            if (!string.IsNullOrWhiteSpace(src) && ConstantTimeEquals(key, src))
+            if (!string.IsNullOrWhiteSpace(src) && ConstantTimeEquals(key.Trim(), src.Trim()))
                 return true;
         }
         return false;

@@ -103,11 +103,24 @@ function onBizSelect(){
 async function loadBusinesses(){
   const key = getKey();
   const sel = document.getElementById('businessSelect');
-  if (!key) return;
+  const statusEl = document.getElementById('bizStatus');
+  if (!key) { if(statusEl) statusEl.innerHTML='<span style="color:#c62828;">Sin admin key</span>'; return; }
   try {
+    if(statusEl) statusEl.innerHTML='<span class="muted">Cargando...</span>';
     const res = await fetch('/api/admin/businesses', { headers: {'X-Admin-Key': key} });
-    if (!res.ok) return;
+    if (!res.ok) {
+      let detail = 'HTTP ' + res.status;
+      try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
+      console.warn('loadBusinesses:', detail);
+      if(statusEl) statusEl.innerHTML='<span style="color:#c62828;">' + esc(detail) + '</span>';
+      return;
+    }
     const list = await res.json();
+    if (!Array.isArray(list)) {
+      console.warn('loadBusinesses: not array', list);
+      if(statusEl) statusEl.innerHTML='<span style="color:#c62828;">Respuesta inesperada</span>';
+      return;
+    }
     const saved = localStorage.getItem('BUSINESS_ID') || '';
     sel.innerHTML = '<option value="">(Seleccionar negocio)</option>';
     for (const b of list) {
@@ -120,18 +133,20 @@ async function loadBusinesses(){
       sel.appendChild(opt);
     }
     // Show status of selected business
-    const statusEl = document.getElementById('bizStatus');
     const selected = list.find(b => b.id === sel.value);
     if (selected && statusEl) {
       statusEl.innerHTML = selected.isActive
         ? '<span style="color:#2e7d32; font-weight:600;">Activo</span>'
         : '<span style="color:#c62828; font-weight:600;">Inactivo</span>';
     } else if (statusEl) {
-      statusEl.innerHTML = '';
+      statusEl.innerHTML = list.length ? '<span style="color:#2e7d32;">' + list.length + ' negocio(s)</span>' : '<span class="muted">0 negocios</span>';
     }
     // Auto-load if a business is selected
     if (sel.value) loadAll();
-  } catch(e) { console.error('loadBusinesses error:', e); }
+  } catch(e) {
+    console.error('loadBusinesses error:', e);
+    if(statusEl) statusEl.innerHTML='<span style="color:#c62828;">Error: ' + esc(e.message) + '</span>';
+  }
 }
 
 async function loadAll(){
