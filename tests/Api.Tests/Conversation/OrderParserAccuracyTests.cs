@@ -587,4 +587,127 @@ public class OrderParserAccuracyTests
         items.Should().Contain(i => i.Name == "Papas Pequenas" && i.Quantity == 2);
         items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 2);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  ORDERING INTENT + ITEMS IN SAME MESSAGE
+    //  Must parse items, not fall back to "escríbeme tu pedido"
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void TryParseQuickOrder_Quisiera_WithItems_ParsesOrder()
+    {
+        var success = WebhookProcessor.TryParseQuickOrder(
+            "quisiera 1 hamburguesa clasica 1 papa mediana 2 cocas",
+            out var items, out _, out _);
+
+        success.Should().BeTrue();
+        items.Should().HaveCount(3);
+        items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 1);
+        items.Should().Contain(i => i.Name == "Papas Medianas" && i.Quantity == 1);
+        items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 2);
+    }
+
+    [Fact]
+    public void TryParseQuickOrder_Quiero_WithItems_ParsesOrder()
+    {
+        var success = WebhookProcessor.TryParseQuickOrder(
+            "quiero 2 hamburguesas clasicas y 1 coca",
+            out var items, out _, out _);
+
+        success.Should().BeTrue();
+        items.Should().HaveCount(2);
+        items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
+
+    [Fact]
+    public void TryParseQuickOrder_VoyAQuerer_WithChainedItems_ParsesOrder()
+    {
+        var success = WebhookProcessor.TryParseQuickOrder(
+            "voy a querer 2 perros especiales 2 papas pequeñas 1 cocacola",
+            out var items, out _, out _);
+
+        success.Should().BeTrue();
+        items.Should().HaveCount(3);
+        items.Should().Contain(i => i.Name == "Perro Especial" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Papas Pequenas" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
+
+    [Fact]
+    public void TryParseQuickOrder_Ponme_WithItems_ParsesOrder()
+    {
+        var success = WebhookProcessor.TryParseQuickOrder(
+            "ponme 1 perro especial y 1 coca",
+            out var items, out _, out _);
+
+        success.Should().BeTrue();
+        items.Should().HaveCount(2);
+        items.Should().Contain(i => i.Name == "Perro Especial" && i.Quantity == 1);
+        items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
+
+    [Fact]
+    public void TryParseQuickOrder_Regalame_WithItems_ParsesOrder()
+    {
+        var success = WebhookProcessor.TryParseQuickOrder(
+            "regalame 2 papas medianas",
+            out var items, out _, out _);
+
+        success.Should().BeTrue();
+        items.Should().HaveCount(1);
+        items.Should().Contain(i => i.Name == "Papas Medianas" && i.Quantity == 2);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  IsOrderingIntent — confirms these trigger ordering intent
+    // ═══════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("quisiera 1 hamburguesa clasica 1 papa mediana 2 cocas")]
+    [InlineData("quisiera pedir algo")]
+    public void IsOrderingIntent_ReturnsTrue_ForQuisiera(string input)
+    {
+        var t = input.Trim().ToLowerInvariant();
+        WebhookProcessor.IsOrderingIntent(t).Should().BeTrue();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  CANCEL COMMAND — typo tolerance
+    // ═══════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("cancelar", true)]
+    [InlineData("cancelar pedido", true)]
+    [InlineData("cancelar orden", true)]
+    [InlineData("cancela", true)]
+    [InlineData("cancelo", true)]
+    [InlineData("cancelae", true)]      // common typo
+    [InlineData("cancalar", true)]      // transposed vowel
+    [InlineData("cancela pedido", true)]
+    [InlineData("cancelo pedido", true)]
+    [InlineData("borrar todo", true)]
+    [InlineData("empezar de cero", true)]
+    [InlineData("hamburguesa", false)]  // should not match
+    [InlineData("hola", false)]         // should not match
+    [InlineData("canal", false)]        // too short / too different
+    public void IsCancelCommand_MatchesTypos(string input, bool expected)
+    {
+        WebhookProcessor.IsCancelCommand(input).Should().Be(expected);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  ORDERING PHRASE SAFETY — must not parse as menu items
+    // ═══════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("quisiera hacer un pedido")]
+    [InlineData("quiero hacer un pedido")]
+    [InlineData("quiero pedir")]
+    public void ParseOrderText_PureOrderingPhrase_ReturnsZeroItems(string input)
+    {
+        var parsed = WebhookProcessor.ParseOrderText(input);
+        parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name))
+            .Should().BeEmpty($"'{input}' should not match any menu items");
+    }
 }

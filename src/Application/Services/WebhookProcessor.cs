@@ -499,11 +499,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                         // If menu was already sent in this active session and the trigger is
                         // an ordering-intent phrase (not a direct greeting/menu request),
-                        // skip re-greeting — just nudge the user to order.
+                        // skip re-greeting — but first try to parse items from the same
+                        // message (e.g. "quisiera 1 hamburguesa clasica 1 papa mediana 2 cocas").
+                        // Only show "escríbeme tu pedido" when no parseable items exist.
                         if (state.MenuSent && IsOrderingIntent(t) && !IsGreeting(t) && !IsMenuRequest(t)
                             && state.LastActivityUtc.HasValue
                             && (DateTime.UtcNow - state.LastActivityUtc.Value).TotalMinutes <= 10)
                         {
+                            // Try quick-parse: the message may contain actual items
+                            if (TryParseQuickOrder(rawText, out var intentItems, out var intentDelivery, out var intentObs)
+                                && intentItems.Count > 0)
+                            {
+                                // Items found — fall through to the normal quick-parse flow below
+                                // by NOT continuing here. The restart-intent block will exit,
+                                // and the quick-parse block at E0 will handle the order.
+                                goto quickParseEntry;
+                            }
+
                             state.LastActivityUtc = DateTime.UtcNow;
                             await SendAsync(new OutgoingMessage
                             {
@@ -906,6 +918,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
+
+                    quickParseEntry: // jumped to from ordering-intent block when items found in message
 
                     // E0a) Handle pending ambiguity resolution
                     if (state.PendingAmbiguousItems is { Count: > 0 })
@@ -1835,7 +1849,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
         => t is "editar" or "modificar" or "cambiar pedido" or "cambiar mi pedido";
 
     internal static bool IsCancelCommand(string t)
-        => t is "cancelar" or "cancelar pedido" or "borrar todo" or "empezar de cero";
+    {
+        // Exact matches
+        if (t is "cancelar" or "cancelar pedido" or "cancelar orden"
+            or "borrar todo" or "empezar de cero" or "cancela"
+            or "cancelo" or "cancela pedido" or "cancelo pedido")
+            return true;
+
+        // Typo-tolerant: Levenshtein distance ≤ 2 from common cancel words
+        var firstWord = t.Contains(' ') ? t.Split(' ')[0] : t;
+        if (firstWord.Length >= 6
+            && (LevenshteinDistance(firstWord, "cancelar") <= 2
+                || LevenshteinDistance(firstWord, "cancela") <= 2
+                || LevenshteinDistance(firstWord, "cancelo") <= 2))
+            return true;
+
+        return false;
+    }
 
     internal static bool IsAmbiguousStall(string t)
     {
@@ -3637,7 +3667,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var text = rawText.Trim();
 
         // Noise words to strip (greetings + filler + ordering prefixes) — preserve newlines for segment splitting
-        var noisePattern = @"\b(hola|buenas?|buenos?\s+d[ií]as?|buenas\s+tardes|buenas\s+noches|hey|epa|epale|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|voy\s+a\s+querer|voy\s+a\s+pedir|quiero|quisiera|me\s+das?|dame|ponme|regalame|reg[aá]lame|necesito|pedimos|para\s+comer|mand[ae]\s*me|manda\s*me|bro|pana|mano|vale|loco|hermano)\b";
+        // Multi-word phrases listed first so they match before individual words
+        var noisePattern = @"\b(quisiera\s+hacer\s+un\s+pedido|hacer\s+un\s+pedido|hacer\s+pedido|quiero\s+hacer\s+un\s+pedido|quiero\s+pedir|voy\s+a\s+querer|voy\s+a\s+pedir|me\s+das?|mand[ae]\s*me|manda\s*me|para\s+comer|buenas\s+tardes|buenas\s+noches|buenos?\s+d[ií]as?|hola|buenas?|hey|epa|epale|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|dame|ponme|regalame|reg[aá]lame|necesito|pedimos|bro|pana|mano|vale|loco|hermano)\b";
         var cleaned = Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase);
         // Collapse spaces on each line but preserve newlines
         cleaned = string.Join("\n", cleaned.Split('\n').Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim()));
