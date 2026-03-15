@@ -52,14 +52,24 @@ public class AdminBusinessesController : ControllerBase
     }
 
     // GET /api/admin/businesses
+    // Global admin: returns all businesses. Per-business key: returns only that business.
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
-        if (!IsGlobalAdmin())
+        if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey))
             return Unauthorized();
 
-        var items = await _db.Businesses
-            .AsNoTracking()
+        var key = headerKey.ToString();
+
+        IQueryable<Business> query = _db.Businesses.AsNoTracking();
+
+        if (!IsGlobalAdmin())
+        {
+            // Per-business key: filter to matching business only
+            query = query.Where(b => b.AdminKey == key);
+        }
+
+        var items = await query
             .OrderByDescending(b => b.CreatedAtUtc)
             .Select(b => new
             {
@@ -79,6 +89,9 @@ public class AdminBusinessesController : ControllerBase
                 b.CreatedAtUtc
             })
             .ToListAsync(ct);
+
+        if (items.Count == 0 && !IsGlobalAdmin())
+            return Unauthorized();
 
         return Ok(items);
     }
