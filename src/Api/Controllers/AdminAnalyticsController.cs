@@ -202,6 +202,316 @@ public class AdminAnalyticsController : ControllerBase
         }
     }
 
+    // ── Extended analytics — Phase A + B metrics for dashboard ──
+    [HttpGet("/api/admin/analytics/extended")]
+    public async Task<IActionResult> GetExtended([FromQuery] Guid? businessId, CancellationToken ct)
+    {
+        if (!await IsAuthorizedAsync(businessId, ct))
+            return Unauthorized();
+
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
+
+            var bizFilter = businessId.HasValue ? """ AND o."BusinessId" = @bid""" : "";
+            var bizFilterShort = businessId.HasValue ? """ WHERE "BusinessId" = @bid""" : "";
+            var bizFilterAnd = businessId.HasValue ? """ AND "BusinessId" = @bid""" : "";
+
+            // ── 1) Peak Hour (completed orders, today) ──
+            string? peakHourLabel = null;
+            int peakHourOrders = 0;
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"""
+                    SELECT EXTRACT(HOUR FROM "CreatedAtUtc") AS hr, COUNT(*) AS cnt
+                    FROM "Orders"
+                    WHERE "CheckoutCompleted"::boolean = true
+                      AND "CreatedAtUtc" >= @today{bizFilterAnd}
+                    GROUP BY hr ORDER BY cnt DESC LIMIT 1
+                """;
+                AddParam(cmd, "today", DateTime.UtcNow.Date);
+                if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                if (await r.ReadAsync(ct))
+                {
+                    var hr = Convert.ToInt32(r["hr"]);
+                    peakHourOrders = Convert.ToInt32(r["cnt"]);
+                    peakHourLabel = $"{hr:00}:00 - {(hr + 1) % 24:00}:00";
+                }
+            }
+
+            // ── 2+3) Best / Worst weekday (all time or last 30 days) ──
+            string? bestWeekday = null, worstWeekday = null;
+            decimal bestWeekdayRevenue = 0, worstWeekdayRevenue = 0;
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"""
+                    SELECT EXTRACT(DOW FROM "CreatedAtUtc") AS dow,
+                           COALESCE(SUM(COALESCE("TotalAmount",0)),0) AS rev
+                    FROM "Orders"
+                    WHERE "CheckoutCompleted"::boolean = true
+                      AND "CreatedAtUtc" >= @month{bizFilterAnd}
+                    GROUP BY dow ORDER BY rev DESC
+                """;
+                AddParam(cmd, "month", DateTime.UtcNow.AddDays(-30));
+                if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
+                var days = new List<(int Dow, decimal Rev)>();
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                    days.Add((Convert.ToInt32(r["dow"]), Convert.ToDecimal(r["rev"])));
+                if (days.Count > 0)
+                {
+                    bestWeekday = DowName(days[0].Dow);
+                    bestWeekdayRevenue = days[0].Rev;
+                    worstWeekday = DowName(days[^1].Dow);
+                    worstWeekdayRevenue = days[^1].Rev;
+                }
+            }
+
+            // ── 4) Avg items per order ──
+            decimal avgItemsPerOrder = 0;
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"""
+                    SELECT COALESCE(AVG(item_count), 0) AS avg_items
+                    FROM (
+                        SELECT o."Id", SUM(oi."Quantity") AS item_count
+                        FROM "Orders" o
+                        JOIN "OrderItems" oi ON oi."OrderId" = o."Id"
+                        WHERE o."CheckoutCompleted"::boolean = true{bizFilter}
+                        GROUP BY o."Id"
+                    ) sub
+                """;
+                if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
+                var val = await cmd.ExecuteScalarAsync(ct);
+                if (val is not null and not DBNull) avgItemsPerOrder = Math.Round(Convert.ToDecimal(val), 1);
+            }
+
+            // ── 5) Conversations started (last 30 days) ──
+            // ConversationStates tracks all conversations; use UpdatedAtUtc as proxy
+            int conversationsStarted = 0;
+            {
+                using var cmd = conn.CreateCommand();
+                var csBizFilter = businessId.HasValue ? """ AND "BusinessId" = @bid""" : "";
+                cmd.CommandText = $"""
+                    SELECT COUNT(*) FROM "ConversationStates"
+                    WHERE "UpdatedAtUtc" >= @month{csBizFilter}
+                """;
+                AddParam(cmd, "month", DateTime.UtcNow.AddDays(-30));
+                if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
+                conversationsStarted = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+            }
+
+            // ── 6) Conversion rate ──
+            int confirmedOrders30d = 0;
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"""
+                    SELECT COUNT(*) FROM "Orders"
+                    WHERE "CheckoutCompleted"::boolean = true
+                      AND "CreatedAtUtc" >= @month{bizFilterAnd}
+                """;
+                AddParam(cmd, "month", DateTime.UtcNow.AddDays(-30));
+                if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
+                confirmedOrders30d = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+            }
+            var conversionRate = conversationsStarted == 0 ? 0m
+                : Math.Round((decimal)confirmedOrders30d / conversationsStarted * 100, 1);
+
+            // ── 7) Bot vs Human handoff ──
+            int handoffCount = 0;
+            {
+                using var cmd = conn.CreateCommand();
+                var csBizFilter = businessId.HasValue ? """ AND "BusinessId" = @bid""" : "";
+                // Count conversations where StateJson contains humanHandoffRequested:true
+                // or humanHandoffAtUtc is set (even if later resolved)
+                cmd.CommandText = $"""
+                    SELECT COUNT(*) FROM "ConversationStates"
+                    WHERE "UpdatedAtUtc" >= @month{csBizFilter}
+                      AND ("StateJson" LIKE '%"humanHandoffRequested":true%'
+                        OR "StateJson" LIKE '%"humanHandoffAtUtc":"%')
+                """;
+                AddParam(cmd, "month", DateTime.UtcNow.AddDays(-30));
+                if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
+                handoffCount = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+            }
+            int botResolved = Math.Max(0, conversationsStarted - handoffCount);
+            var botPct = conversationsStarted == 0 ? 0m
+                : Math.Round((decimal)botResolved / conversationsStarted * 100, 1);
+            var humanPct = conversationsStarted == 0 ? 0m
+                : Math.Round((decimal)handoffCount / conversationsStarted * 100, 1);
+
+            // ── 8) New vs returning customers (last 30 days) ──
+            int newCustomers30d = 0, returningCustomers30d = 0;
+            {
+                using var cmd = conn.CreateCommand();
+                var month = DateTime.UtcNow.AddDays(-30);
+                cmd.CommandText = $"""
+                    SELECT
+                      COALESCE(SUM(CASE WHEN "FirstSeenAtUtc" >= @month THEN 1 ELSE 0 END), 0) AS new_cust,
+                      COALESCE(SUM(CASE WHEN "FirstSeenAtUtc" < @month AND "LastPurchaseAtUtc" >= @month THEN 1 ELSE 0 END), 0) AS ret_cust
+                    FROM "Customers"
+                    WHERE 1=1{bizFilterShort.Replace("WHERE", "AND")}
+                """;
+                AddParam(cmd, "month", month);
+                if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                if (await r.ReadAsync(ct))
+                {
+                    newCustomers30d = Convert.ToInt32(r["new_cust"]);
+                    returningCustomers30d = Convert.ToInt32(r["ret_cust"]);
+                }
+            }
+
+            // ── 9+10) Sales/Orders by hour (last 7 days) ──
+            var salesByHour = new decimal[24];
+            var ordersByHour = new int[24];
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = $"""
+                    SELECT EXTRACT(HOUR FROM "CreatedAtUtc") AS hr,
+                           COUNT(*) AS cnt,
+                           COALESCE(SUM(COALESCE("TotalAmount",0)),0) AS rev
+                    FROM "Orders"
+                    WHERE "CheckoutCompleted"::boolean = true
+                      AND "CreatedAtUtc" >= @week{bizFilterAnd}
+                    GROUP BY hr ORDER BY hr
+                """;
+                AddParam(cmd, "week", DateTime.UtcNow.AddDays(-7));
+                if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    var hr = Convert.ToInt32(r["hr"]);
+                    if (hr >= 0 && hr < 24)
+                    {
+                        ordersByHour[hr] = Convert.ToInt32(r["cnt"]);
+                        salesByHour[hr] = Convert.ToDecimal(r["rev"]);
+                    }
+                }
+            }
+
+            // ── 11) Top revenue product ──
+            string? topRevenueProduct = null;
+            decimal topRevenueProductAmount = 0;
+            if (businessId.HasValue)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = """
+                    SELECT oi."Name", COALESCE(SUM(oi."LineTotal"),0) AS rev
+                    FROM "OrderItems" oi
+                    JOIN "Orders" o ON o."Id" = oi."OrderId"
+                    WHERE o."BusinessId" = @bid
+                      AND o."CheckoutCompleted"::boolean = true
+                      AND oi."Name" IS NOT NULL AND oi."Name" != ''
+                    GROUP BY oi."Name" ORDER BY rev DESC LIMIT 1
+                """;
+                AddParam(cmd, "bid", businessId.Value);
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                if (await r.ReadAsync(ct))
+                {
+                    topRevenueProduct = r.GetString(0);
+                    topRevenueProductAmount = Convert.ToDecimal(r["rev"]);
+                }
+            }
+
+            // ── 12) Top category by sales ──
+            // OrderItems don't store category, so join through MenuItems→MenuCategories
+            string? topCategory = null;
+            decimal topCategoryRevenue = 0;
+            if (businessId.HasValue)
+            {
+                using var cmd = conn.CreateCommand();
+                // Best-effort: match OrderItem.Name to MenuItem.Name to get category
+                cmd.CommandText = """
+                    SELECT mc."Name" AS cat, COALESCE(SUM(oi."LineTotal"),0) AS rev
+                    FROM "OrderItems" oi
+                    JOIN "Orders" o ON o."Id" = oi."OrderId"
+                    JOIN "MenuItems" mi ON LOWER(TRIM(mi."Name")) = LOWER(TRIM(oi."Name"))
+                    JOIN "MenuCategories" mc ON mc."Id" = mi."CategoryId"
+                    WHERE o."BusinessId" = @bid
+                      AND o."CheckoutCompleted"::boolean = true
+                      AND mc."BusinessId" = @bid
+                    GROUP BY mc."Name" ORDER BY rev DESC LIMIT 1
+                """;
+                AddParam(cmd, "bid", businessId.Value);
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                if (await r.ReadAsync(ct))
+                {
+                    topCategory = r.GetString(0);
+                    topCategoryRevenue = Convert.ToDecimal(r["rev"]);
+                }
+            }
+
+            // ── 13) Top 5 customers by revenue ──
+            var topCustomers = new List<object>();
+            if (businessId.HasValue)
+            {
+                using var cmd = conn.CreateCommand();
+                cmd.CommandText = """
+                    SELECT "Name", "PhoneE164", "OrdersCount", "TotalSpent"
+                    FROM "Customers"
+                    WHERE "BusinessId" = @bid AND "OrdersCount" > 0
+                    ORDER BY "TotalSpent" DESC
+                    LIMIT 5
+                """;
+                AddParam(cmd, "bid", businessId.Value);
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    var nameOrd = r.GetOrdinal("Name");
+                    topCustomers.Add(new
+                    {
+                        name = r.IsDBNull(nameOrd) ? null : r.GetString(nameOrd),
+                        phone = r.GetString(r.GetOrdinal("PhoneE164")),
+                        orders = Convert.ToInt32(r["OrdersCount"]),
+                        revenue = Convert.ToDecimal(r["TotalSpent"])
+                    });
+                }
+            }
+
+            return Ok(new
+            {
+                // Phase A
+                peakHour = peakHourLabel,
+                peakHourOrders,
+                bestWeekday,
+                bestWeekdayRevenue,
+                worstWeekday,
+                worstWeekdayRevenue,
+                avgItemsPerOrder,
+                conversationsStarted,
+                conversionRate,
+                botResolved,
+                botResolvedPct = botPct,
+                humanHandoffs = handoffCount,
+                humanHandoffPct = humanPct,
+                newCustomers = newCustomers30d,
+                returningCustomers = returningCustomers30d,
+                // Phase B
+                salesByHour,
+                ordersByHour,
+                topRevenueProduct,
+                topRevenueProductAmount,
+                topCategory,
+                topCategoryRevenue,
+                topCustomers
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"Extended analytics failed: {ex.GetType().Name}: {ex.Message}" });
+        }
+    }
+
+    private static string DowName(int dow) => dow switch
+    {
+        0 => "Domingo", 1 => "Lunes", 2 => "Martes", 3 => "Miércoles",
+        4 => "Jueves", 5 => "Viernes", 6 => "Sábado", _ => "?"
+    };
+
     // ── 1) Sales Analytics ──
     [HttpGet("sales")]
     public async Task<IActionResult> GetSales([FromQuery] Guid businessId, CancellationToken ct)

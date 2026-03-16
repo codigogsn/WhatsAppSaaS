@@ -464,6 +464,51 @@
     <div class="card"><div class="label" style="color:#c62828;">Cancelled</div><div class="value" style="color:#c62828;" id="kpiCancelled">0</div></div>
   </div>
 
+  <!-- Extended Analytics -->
+  <details id="extAnalytics" style="margin-bottom:16px;">
+    <summary style="cursor:pointer;font-weight:600;font-size:14px;padding:8px 0;color:#1a73e8;">Analíticas Avanzadas ▸</summary>
+
+    <!-- Row A: Operations -->
+    <div class="kpi" style="margin-top:10px;">
+      <div class="card"><div class="label">Hora Pico (hoy)</div><div class="value" id="exPeakHour" style="font-size:14px;">-</div><div class="muted small" id="exPeakHourCount"></div></div>
+      <div class="card"><div class="label">Mejor Día</div><div class="value" id="exBestDay" style="font-size:14px;">-</div><div class="muted small" id="exBestDayRev"></div></div>
+      <div class="card"><div class="label">Peor Día</div><div class="value" id="exWorstDay" style="font-size:14px;">-</div><div class="muted small" id="exWorstDayRev"></div></div>
+      <div class="card"><div class="label">Prom. Items/Pedido</div><div class="value" id="exAvgItems">-</div></div>
+    </div>
+
+    <!-- Row B: Funnel -->
+    <div class="kpi">
+      <div class="card"><div class="label">Conversaciones (30d)</div><div class="value" id="exConversations">-</div></div>
+      <div class="card"><div class="label">Conversión</div><div class="value" id="exConversion">-</div></div>
+      <div class="card"><div class="label">Bot vs Humano</div><div class="value" id="exBotHuman" style="font-size:13px;">-</div></div>
+      <div class="card"><div class="label">Nuevos / Recurrentes</div><div class="value" id="exNewRet" style="font-size:13px;">-</div></div>
+    </div>
+
+    <!-- Row C: Hourly charts (simple bar) -->
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
+      <div class="card" style="flex:1;min-width:300px;">
+        <div class="label" style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Pedidos por Hora (7d)</div>
+        <div id="chartOrdersHour" style="display:flex;align-items:flex-end;gap:2px;height:80px;"></div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;"><span class="muted small">0h</span><span class="muted small">12h</span><span class="muted small">23h</span></div>
+      </div>
+      <div class="card" style="flex:1;min-width:300px;">
+        <div class="label" style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Ventas por Hora (7d)</div>
+        <div id="chartSalesHour" style="display:flex;align-items:flex-end;gap:2px;height:80px;"></div>
+        <div style="display:flex;justify-content:space-between;margin-top:4px;"><span class="muted small">0h</span><span class="muted small">12h</span><span class="muted small">23h</span></div>
+      </div>
+    </div>
+
+    <!-- Row D: Top revenue / category / customers -->
+    <div class="kpi">
+      <div class="card"><div class="label">Producto Más Rentable</div><div class="value" id="exTopRevProduct" style="font-size:13px;">-</div><div class="muted small" id="exTopRevProductAmt"></div></div>
+      <div class="card"><div class="label">Mejor Categoría</div><div class="value" id="exTopCat" style="font-size:13px;">-</div><div class="muted small" id="exTopCatRev"></div></div>
+      <div class="card" style="flex:2;min-width:280px;">
+        <div class="label">Mejores Clientes (Top 5)</div>
+        <div id="exTopCustomers" style="font-size:12px;margin-top:4px;">-</div>
+      </div>
+    </div>
+  </details>
+
   <!-- Filters -->
   <div class="filters">
     <div class="row">
@@ -1001,6 +1046,70 @@ async function loadSummary(){
   } catch { ids.forEach(id => document.getElementById(id).textContent = 'err'); }
 }
 
+async function loadExtended(){
+  const key = getAdminKey();
+  if (!key) return;
+  const bid = getBusinessId();
+  const qs = new URLSearchParams({ts: Date.now()});
+  if (bid) qs.set('businessId', bid);
+  try {
+    const res = await fetch('/api/admin/analytics/extended?' + qs.toString(), { headers: adminHeaders(), cache: 'no-store' });
+    if (!res.ok) { console.warn('Extended analytics:', res.status); return; }
+    const d = await res.json();
+
+    // Row A
+    document.getElementById('exPeakHour').textContent = d.peakHour || '-';
+    document.getElementById('exPeakHourCount').textContent = d.peakHourOrders ? d.peakHourOrders + ' pedidos' : '';
+    document.getElementById('exBestDay').textContent = d.bestWeekday || '-';
+    document.getElementById('exBestDayRev').textContent = d.bestWeekdayRevenue ? '$' + fmtMoney(d.bestWeekdayRevenue) : '';
+    document.getElementById('exWorstDay').textContent = d.worstWeekday || '-';
+    document.getElementById('exWorstDayRev').textContent = d.worstWeekdayRevenue ? '$' + fmtMoney(d.worstWeekdayRevenue) : '';
+    document.getElementById('exAvgItems').textContent = d.avgItemsPerOrder ?? '-';
+
+    // Row B
+    document.getElementById('exConversations').textContent = d.conversationsStarted ?? 0;
+    document.getElementById('exConversion').textContent = (d.conversionRate ?? 0) + '%';
+    document.getElementById('exBotHuman').textContent =
+      'Bot ' + (d.botResolvedPct ?? 0) + '% / Humano ' + (d.humanHandoffPct ?? 0) + '%';
+    document.getElementById('exNewRet').textContent =
+      (d.newCustomers ?? 0) + ' nuevos / ' + (d.returningCustomers ?? 0) + ' recurrentes';
+
+    // Row C: Hourly charts
+    renderHourlyChart('chartOrdersHour', d.ordersByHour || [], '#1a73e8');
+    renderHourlyChart('chartSalesHour', d.salesByHour || [], '#2e7d32');
+
+    // Row D
+    document.getElementById('exTopRevProduct').textContent = d.topRevenueProduct || '-';
+    document.getElementById('exTopRevProductAmt').textContent = d.topRevenueProduct ? '$' + fmtMoney(d.topRevenueProductAmount) : '';
+    document.getElementById('exTopCat').textContent = d.topCategory || '-';
+    document.getElementById('exTopCatRev').textContent = d.topCategory ? '$' + fmtMoney(d.topCategoryRevenue) : '';
+
+    // Top customers
+    const tc = d.topCustomers || [];
+    if (tc.length === 0) {
+      document.getElementById('exTopCustomers').textContent = 'Sin datos';
+    } else {
+      document.getElementById('exTopCustomers').innerHTML = tc.map((c, i) =>
+        `<div>${i+1}. <strong>${esc(c.name || c.phone)}</strong> — ${c.orders} pedidos — $${fmtMoney(c.revenue)}</div>`
+      ).join('');
+    }
+  } catch(e) { console.warn('loadExtended error:', e); }
+}
+
+function renderHourlyChart(containerId, data, color){
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const max = Math.max(...data, 1);
+  let html = '';
+  for (let h = 0; h < 24; h++){
+    const v = data[h] || 0;
+    const pct = Math.max(2, (v / max) * 100);
+    const tip = h + ':00 — ' + (typeof v === 'number' && v % 1 !== 0 ? '$' + fmtMoney(v) : v);
+    html += `<div title="${tip}" style="flex:1;background:${color};border-radius:2px 2px 0 0;min-height:2px;height:${pct}%;opacity:${v>0?1:0.15};"></div>`;
+  }
+  el.innerHTML = html;
+}
+
 function setKpis(list){
   const c = { Pending:0, Preparing:0, OutForDelivery:0, Completed:0, Cancelled:0 };
   for (const o of list) c[o.status] = (c[o.status] || 0) + 1;
@@ -1099,7 +1208,7 @@ async function load() {
   console.log(`${tag} load() starting — url=/api/orders?${qs.toString()}`);
 
   document.getElementById('msg').textContent = 'Cargando...';
-  await Promise.all([loadSummary(), loadHandoffs(), loadExchangeRate()]);
+  await Promise.all([loadSummary(), loadHandoffs(), loadExchangeRate(), loadExtended()]);
 
   const isHandoffFilter = status === 'NeedsHuman';
   const fetchUrl = '/api/orders?' + qs.toString().replace('status=NeedsHuman','');
