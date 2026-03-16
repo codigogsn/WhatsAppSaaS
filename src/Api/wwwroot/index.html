@@ -705,16 +705,20 @@ async function loadBusinesses(){
     businessList = list;
     const saved = localStorage.getItem('BUSINESS_ID') || '';
     sel.innerHTML = '<option value="">(Todos los negocios)</option>';
-    // Only show active businesses in dropdown — junk/test entries are deactivated via cleanup
-    const activeList = list.filter(b => b.isActive);
-    for (const b of activeList) {
+    // Show only active non-junk businesses in dropdown
+    const visibleList = list.filter(b => b.isActive && !b.isJunk);
+    for (const b of visibleList) {
       const opt = document.createElement('option');
       opt.value = b.id;
       opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')';
       if (b.id === saved) opt.selected = true;
       sel.appendChild(opt);
     }
-    if(statusEl) statusEl.innerHTML = list.length ? '<span class="ok">' + list.length + ' negocio(s)</span>' : '<span class="muted">0 negocios</span>';
+    const junkCount = list.filter(b => b.isJunk).length;
+    const statusMsg = visibleList.length
+      ? visibleList.length + ' negocio(s)' + (junkCount > 0 ? ' <span class="muted">(' + junkCount + ' ocultos)</span>' : '')
+      : '0 negocios visibles';
+    if(statusEl) statusEl.innerHTML = '<span class="ok">' + statusMsg + '</span>';
     updateBizAdminButton();
   } catch(e) {
     console.error('loadBusinesses error:', e);

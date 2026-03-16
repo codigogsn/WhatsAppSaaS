@@ -103,21 +103,28 @@ public class AdminBusinessesController : ControllerBase
             while (await reader.ReadAsync(ct))
             {
                 var rawIsActive = cols.Contains("IsActive") ? reader["IsActive"] : (object)true;
+                var name = Col("Name") ?? "";
+                var phoneNumberId = Col("PhoneNumberId") ?? "";
+                var token = Col("AccessToken");
+                var isActive = rawIsActive switch
+                {
+                    bool b => b,
+                    int i => i != 0,
+                    long l => l != 0,
+                    string s => s == "1" || s.Equals("true", StringComparison.OrdinalIgnoreCase),
+                    DBNull => true,
+                    _ => true
+                };
+
+                var (isJunk, _) = ClassifyBusiness(name, phoneNumberId, token);
 
                 items.Add(new
                 {
                     id = Col("Id") ?? "",
-                    name = Col("Name") ?? "",
-                    phoneNumberId = Col("PhoneNumberId") ?? "",
-                    isActive = rawIsActive switch
-                    {
-                        bool b => b,
-                        int i => i != 0,
-                        long l => l != 0,
-                        string s => s == "1" || s.Equals("true", StringComparison.OrdinalIgnoreCase),
-                        DBNull => true,
-                        _ => true
-                    },
+                    name,
+                    phoneNumberId,
+                    isActive,
+                    isJunk,
                     greeting = Col("Greeting"),
                     schedule = Col("Schedule"),
                     address = Col("Address"),
@@ -550,10 +557,52 @@ public class AdminBusinessesController : ControllerBase
         });
     }
 
-    // POST /api/admin/businesses/cleanup — deactivate junk/test businesses
-    // Safe: only deactivates, does not delete. Preserves FK integrity.
-    [HttpPost("cleanup")]
-    public async Task<IActionResult> Cleanup(CancellationToken ct)
+    // ── Junk Business Classification ──
+    // A business is classified as junk when it matches placeholder patterns
+    // created by BusinessResolver auto-onboarding with Meta verification webhooks.
+
+    private static readonly string[] PlaceholderNames = ["Default Business", "Demo Restaurant", "Test", "Test Business"];
+
+    private static (bool IsJunk, string? Reason) ClassifyBusiness(string name, string phoneNumberId, string? accessToken)
+    {
+        var reasons = new List<string>();
+        var n = (name ?? "").Trim();
+        var pid = (phoneNumberId ?? "").Trim();
+
+        // Rule 1: Placeholder name
+        bool hasPlaceholderName = string.IsNullOrWhiteSpace(n)
+            || PlaceholderNames.Any(p => n.Equals(p, StringComparison.OrdinalIgnoreCase))
+            || n.StartsWith("Test ", StringComparison.OrdinalIgnoreCase)
+            || n.StartsWith("Verify", StringComparison.OrdinalIgnoreCase);
+
+        if (hasPlaceholderName)
+            reasons.Add("placeholder name: " + (string.IsNullOrWhiteSpace(n) ? "(empty)" : n));
+
+        // Rule 2: Invalid PhoneNumberId (Meta phone number IDs are numeric only)
+        bool hasInvalidPhone = string.IsNullOrWhiteSpace(pid)
+            || !pid.All(char.IsDigit)
+            || pid.Length < 5;
+
+        if (hasInvalidPhone)
+            reasons.Add("invalid PhoneNumberId: " + (string.IsNullOrWhiteSpace(pid) ? "(empty)" : pid));
+
+        // Rule 3: Missing access token (can't actually process WhatsApp messages)
+        bool hasNoToken = string.IsNullOrWhiteSpace(accessToken);
+        if (hasNoToken)
+            reasons.Add("no access token");
+
+        // Classification: junk if placeholder name + invalid phone, OR invalid phone + no token
+        // Conservative: don't mark as junk if only one weak signal
+        bool isJunk = (hasPlaceholderName && hasInvalidPhone)
+                   || (hasInvalidPhone && hasNoToken)
+                   || (hasPlaceholderName && hasNoToken && hasInvalidPhone);
+
+        return (isJunk, reasons.Count > 0 ? string.Join("; ", reasons) : null);
+    }
+
+    // GET /api/admin/businesses/audit — classify all businesses as real or junk
+    [HttpGet("audit")]
+    public async Task<IActionResult> Audit(CancellationToken ct)
     {
         if (!IsGlobalAdmin())
             return Unauthorized();
@@ -564,39 +613,134 @@ public class AdminBusinessesController : ControllerBase
             if (conn.State != System.Data.ConnectionState.Open)
                 await conn.OpenAsync(ct);
 
-            // Deactivate businesses with obvious junk/test data:
-            // - Name is "Default Business" (auto-created by BusinessResolver with placeholder phone IDs)
-            // - PhoneNumberId contains non-numeric characters (like "erify2", "ER_ID>", "verify")
-            //   indicating test/placeholder values
-            // - But preserve the Demo Restaurant (11111111-...) if it has a real phone number
             using var cmd = conn.CreateCommand();
             cmd.CommandText = """
-                UPDATE "Businesses"
-                SET "IsActive" = 0
-                WHERE "IsActive"::boolean = true
-                  AND (
-                    ("Name" = 'Default Business')
-                    OR ("PhoneNumberId" ~ '[^0-9]')
-                  )
-                RETURNING "Id"::text, "Name", "PhoneNumberId"
+                SELECT b."Id"::text, b."Name", b."PhoneNumberId", b."IsActive", b."AccessToken",
+                       b."CreatedAtUtc",
+                       (SELECT COUNT(*) FROM "Orders" o WHERE o."BusinessId" = b."Id") AS order_count,
+                       (SELECT COUNT(*) FROM "MenuCategories" mc WHERE mc."BusinessId" = b."Id") AS menu_count
+                FROM "Businesses" b
+                ORDER BY b."CreatedAtUtc" DESC
             """;
 
-            var deactivated = new List<object>();
+            var results = new List<object>();
             using var reader = await cmd.ExecuteReaderAsync(ct);
             while (await reader.ReadAsync(ct))
             {
-                deactivated.Add(new
+                var id = reader.GetString(0);
+                var name = reader.IsDBNull(1) ? "" : reader.GetString(1);
+                var phoneNumberId = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                var rawIsActive = reader["IsActive"];
+                var isActive = rawIsActive switch
                 {
-                    id = reader.GetString(0),
-                    name = reader.GetString(1),
-                    phoneNumberId = reader.GetString(2)
+                    bool bv => bv, int iv => iv != 0, long lv => lv != 0,
+                    string sv => sv == "1" || sv.Equals("true", StringComparison.OrdinalIgnoreCase),
+                    _ => true
+                };
+                var token = reader.IsDBNull(4) ? null : reader.GetString(4);
+                var created = reader.IsDBNull(5) ? (DateTime?)null : reader.GetDateTime(5);
+                var orderCount = Convert.ToInt32(reader["order_count"]);
+                var menuCount = Convert.ToInt32(reader["menu_count"]);
+
+                var (isJunk, junkReason) = ClassifyBusiness(name, phoneNumberId, token);
+
+                // Safety override: never classify as junk if it has real orders
+                if (isJunk && orderCount > 0)
+                {
+                    isJunk = false;
+                    junkReason = (junkReason ?? "") + " [OVERRIDE: has " + orderCount + " orders — kept as real]";
+                }
+
+                results.Add(new
+                {
+                    id, name, phoneNumberId, isActive, isJunk, junkReason,
+                    orderCount, menuCount,
+                    createdAtUtc = created?.ToString("o")
                 });
+            }
+
+            var junkCount = results.Cast<dynamic>().Count(r => r.isJunk);
+            var realCount = results.Count - junkCount;
+
+            return Ok(new { total = results.Count, real = realCount, junk = junkCount, businesses = results });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"Audit failed: {ex.GetType().Name}: {ex.Message}" });
+        }
+    }
+
+    // POST /api/admin/businesses/cleanup?dryRun=true — deactivate junk businesses
+    // Safe: only sets IsActive=0, never deletes. dryRun=true previews without changing anything.
+    [HttpPost("cleanup")]
+    public async Task<IActionResult> Cleanup([FromQuery] bool dryRun = false, CancellationToken ct = default)
+    {
+        if (!IsGlobalAdmin())
+            return Unauthorized();
+
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
+
+            // Step 1: Read all active businesses and classify
+            using var readCmd = conn.CreateCommand();
+            readCmd.CommandText = """
+                SELECT b."Id"::text, b."Name", b."PhoneNumberId", b."AccessToken",
+                       (SELECT COUNT(*) FROM "Orders" o WHERE o."BusinessId" = b."Id") AS order_count
+                FROM "Businesses" b
+                WHERE b."IsActive"::boolean = true
+            """;
+
+            var toDeactivate = new List<(string Id, string Name, string Phone, string Reason)>();
+            using (var reader = await readCmd.ExecuteReaderAsync(ct))
+            {
+                while (await reader.ReadAsync(ct))
+                {
+                    var id = reader.GetString(0);
+                    var name = reader.IsDBNull(1) ? "" : reader.GetString(1);
+                    var phone = reader.IsDBNull(2) ? "" : reader.GetString(2);
+                    var token = reader.IsDBNull(3) ? null : reader.GetString(3);
+                    var orderCount = Convert.ToInt32(reader["order_count"]);
+
+                    var (isJunk, reason) = ClassifyBusiness(name, phone, token);
+
+                    // Safety: never deactivate businesses with real orders
+                    if (isJunk && orderCount == 0)
+                        toDeactivate.Add((id, name, phone, reason ?? "matched junk pattern"));
+                }
+            }
+
+            if (dryRun)
+            {
+                return Ok(new
+                {
+                    dryRun = true,
+                    message = $"Would deactivate {toDeactivate.Count} junk business(es)",
+                    affected = toDeactivate.Select(d => new { d.Id, d.Name, phoneNumberId = d.Phone, reason = d.Reason })
+                });
+            }
+
+            // Step 2: Deactivate
+            var deactivated = new List<object>();
+            foreach (var (id, name, phone, reason) in toDeactivate)
+            {
+                using var upd = conn.CreateCommand();
+                upd.CommandText = """UPDATE "Businesses" SET "IsActive" = 0 WHERE "Id"::text = @id""";
+                var p = upd.CreateParameter();
+                p.ParameterName = "id";
+                p.Value = id;
+                upd.Parameters.Add(p);
+                await upd.ExecuteNonQueryAsync(ct);
+                deactivated.Add(new { id, name, phoneNumberId = phone, reason });
             }
 
             return Ok(new
             {
-                message = $"Deactivated {deactivated.Count} junk/test business(es)",
-                deactivated
+                dryRun = false,
+                message = $"Deactivated {deactivated.Count} junk business(es)",
+                affected = deactivated
             });
         }
         catch (Exception ex)
