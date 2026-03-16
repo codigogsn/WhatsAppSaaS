@@ -31,7 +31,7 @@
   <div class="top">
     <div>
       <h2>Menu Manager</h2>
-      <div class="muted small"><a href="/">← Volver al Dashboard</a></div>
+      <div class="muted small">Productos, precios y alias que el bot usa para interpretar pedidos | <a href="/">← Volver al Dashboard</a></div>
     </div>
     <div class="row">
       <label class="muted small">Admin Key:</label>
@@ -53,7 +53,8 @@
 
   <!-- Categories -->
   <div class="card">
-    <h3 style="margin-top:0;">Categorias</h3>
+    <h3 style="margin-top:0;">Categorias del Menu</h3>
+    <small class="muted">Agrupa tus productos (ej: Hamburguesas, Bebidas, Combos). El bot muestra estas categorias al armar pedidos.</small>
     <div class="row">
       <input id="newCatName" placeholder="Nombre categoria" />
       <input id="newCatOrder" type="number" value="0" style="width:60px;" placeholder="Orden" />
@@ -67,7 +68,8 @@
 
   <!-- Items -->
   <div class="card">
-    <h3 style="margin-top:0;">Items del Menu</h3>
+    <h3 style="margin-top:0;">Productos del Menu</h3>
+    <small class="muted">Cada producto necesita nombre, precio y categoria. Agrega <strong>alias</strong> para que el bot reconozca variaciones (ej: "coca" para "Coca Cola").</small>
     <div class="row">
       <select id="newItemCat"></select>
       <input id="newItemName" placeholder="Nombre" />

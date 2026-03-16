@@ -147,7 +147,7 @@
   <div class="top">
     <div>
       <h2 style="margin:0;">Dashboard Pro</h2>
-      <div class="muted small">API: <code id="baseUrl"></code> | <a href="/menu.html">Menu Manager</a></div>
+      <div class="muted small">API: <code id="baseUrl"></code> | <a href="/menu.html">Menu Manager (productos y precios del bot)</a></div>
     </div>
     <div class="row">
       <input id="adminKey" class="key" placeholder="Admin Key" />
@@ -240,13 +240,17 @@
     </div>
 
     <div class="biz-section">
-      <h4>Menu PDF</h4>
+      <h4>Menu PDF (visual para el cliente)</h4>
+      <small class="muted" style="display:block;margin-bottom:8px;">Este PDF se envia al cliente por WhatsApp al iniciar una conversacion. Es la carta visual de tu negocio.</small>
       <div>
         <span id="bizMenuPdfStatus" class="small muted"></span>
         <input id="bizMenuPdf" type="file" accept="application/pdf" style="margin:6px 0;" />
         <button onclick="uploadBizMenuPdf()">Subir PDF</button>
         <button onclick="deleteBizMenuPdf()" style="color:#c00;">Eliminar PDF</button>
         <span id="bizMenuPdfMsg" class="small"></span>
+      </div>
+      <div style="margin-top:10px; padding:8px 12px; background:#f0f7ff; border-radius:6px; border:1px solid #c8ddf5;">
+        <small><strong>Menu del Bot (productos y precios):</strong> Para que el bot interprete pedidos correctamente, configura categorias, productos, precios y alias en el <a href="/menu.html">Menu Manager</a>.</small>
       </div>
     </div>
 
@@ -656,12 +660,12 @@ async function loadBusinesses(){
     businessList = list;
     const saved = localStorage.getItem('BUSINESS_ID') || '';
     sel.innerHTML = '<option value="">(Todos los negocios)</option>';
-    for (const b of list) {
+    // Only show active businesses in dropdown — junk/test entries are deactivated via cleanup
+    const activeList = list.filter(b => b.isActive);
+    for (const b of activeList) {
       const opt = document.createElement('option');
       opt.value = b.id;
-      const status = b.isActive ? '' : ' [INACTIVO]';
-      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')' + status;
-      if (!b.isActive) opt.style.color = '#c62828';
+      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')';
       if (b.id === saved) opt.selected = true;
       sel.appendChild(opt);
     }

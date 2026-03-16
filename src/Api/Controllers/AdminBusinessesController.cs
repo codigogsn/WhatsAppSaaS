@@ -550,6 +550,61 @@ public class AdminBusinessesController : ControllerBase
         });
     }
 
+    // POST /api/admin/businesses/cleanup — deactivate junk/test businesses
+    // Safe: only deactivates, does not delete. Preserves FK integrity.
+    [HttpPost("cleanup")]
+    public async Task<IActionResult> Cleanup(CancellationToken ct)
+    {
+        if (!IsGlobalAdmin())
+            return Unauthorized();
+
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
+
+            // Deactivate businesses with obvious junk/test data:
+            // - Name is "Default Business" (auto-created by BusinessResolver with placeholder phone IDs)
+            // - PhoneNumberId contains non-numeric characters (like "erify2", "ER_ID>", "verify")
+            //   indicating test/placeholder values
+            // - But preserve the Demo Restaurant (11111111-...) if it has a real phone number
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE "Businesses"
+                SET "IsActive" = 0
+                WHERE "IsActive"::boolean = true
+                  AND (
+                    ("Name" = 'Default Business')
+                    OR ("PhoneNumberId" ~ '[^0-9]')
+                  )
+                RETURNING "Id"::text, "Name", "PhoneNumberId"
+            """;
+
+            var deactivated = new List<object>();
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                deactivated.Add(new
+                {
+                    id = reader.GetString(0),
+                    name = reader.GetString(1),
+                    phoneNumberId = reader.GetString(2)
+                });
+            }
+
+            return Ok(new
+            {
+                message = $"Deactivated {deactivated.Count} junk/test business(es)",
+                deactivated
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"Cleanup failed: {ex.GetType().Name}: {ex.Message}" });
+        }
+    }
+
     private static bool ConstantTimeEquals(string a, string b)
     {
         return CryptographicOperations.FixedTimeEquals(
