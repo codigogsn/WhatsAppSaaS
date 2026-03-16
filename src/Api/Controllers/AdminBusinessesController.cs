@@ -33,22 +33,97 @@ public class AdminBusinessesController : ControllerBase
                && ConstantTimeEquals(headerKey.ToString().Trim(), adminKey);
     }
 
+    /// <summary>
+    /// Raw ADO.NET auth — production Businesses.IsActive is integer, not boolean.
+    /// EF queries throw InvalidCastException on this column.
+    /// </summary>
     private async Task<Business?> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
     {
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || string.IsNullOrWhiteSpace(headerKey))
             return null;
 
-        var biz = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == businessId && b.IsActive, ct);
-        if (biz is null) return null;
-
-        // Accept global admin key OR per-business admin key
-        var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
         var key = headerKey.ToString().Trim();
-        if ((!string.IsNullOrWhiteSpace(globalKey) && ConstantTimeEquals(key, globalKey))
-            || (!string.IsNullOrWhiteSpace(biz.AdminKey) && ConstantTimeEquals(key, biz.AdminKey.Trim())))
-            return biz;
 
-        return null;
+        // Accept global admin key
+        var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
+        var isGlobal = !string.IsNullOrWhiteSpace(globalKey) && ConstantTimeEquals(key, globalKey);
+        if (!isGlobal && IsGlobalAdminLegacy(key)) isGlobal = true;
+
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
+
+            using var cmd = conn.CreateCommand();
+            // Use LOWER(CAST()) for cross-DB compat (PostgreSQL UUID vs SQLite TEXT)
+            // Check IsActive in application code to handle int/bool/string variants
+            cmd.CommandText = """
+                SELECT * FROM "Businesses"
+                WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@bid)
+                LIMIT 1
+            """;
+            var p = cmd.CreateParameter();
+            p.ParameterName = "bid";
+            p.Value = businessId.ToString();
+            cmd.Parameters.Add(p);
+
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            if (!await reader.ReadAsync(ct)) return null;
+
+            // Check IsActive in application code (handles int/bool/string)
+            var cols0 = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var j = 0; j < reader.FieldCount; j++) cols0.Add(reader.GetName(j));
+            if (cols0.Contains("IsActive"))
+            {
+                var rawActive = reader["IsActive"];
+                var active = rawActive switch
+                {
+                    bool bv => bv, int iv => iv != 0, long lv => lv != 0,
+                    string sv => sv == "1" || sv.Equals("true", StringComparison.OrdinalIgnoreCase),
+                    DBNull => true, _ => true
+                };
+                if (!active) return null;
+            }
+
+            // Build column lookup
+            var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            for (var i = 0; i < reader.FieldCount; i++) cols.Add(reader.GetName(i));
+            string? Col(string name) => cols.Contains(name) && reader[name] is not DBNull ? reader[name]?.ToString() : null;
+
+            var biz = new Business
+            {
+                Id = Guid.TryParse(Col("Id"), out var gid) ? gid : businessId,
+                Name = Col("Name") ?? "",
+                PhoneNumberId = Col("PhoneNumberId") ?? "",
+                AccessToken = Col("AccessToken") ?? "",
+                AdminKey = Col("AdminKey") ?? "",
+                Greeting = Col("Greeting"),
+                Schedule = Col("Schedule"),
+                Address = Col("Address"),
+                LogoUrl = Col("LogoUrl"),
+                PaymentMobileBank = Col("PaymentMobileBank"),
+                PaymentMobileId = Col("PaymentMobileId"),
+                PaymentMobilePhone = Col("PaymentMobilePhone"),
+                NotificationPhone = Col("NotificationPhone"),
+                RestaurantType = Col("RestaurantType"),
+                MenuPdfUrl = Col("MenuPdfUrl"),
+                IsActive = true // we filtered for active
+            };
+            if (DateTime.TryParse(Col("CreatedAtUtc"), out var created))
+                biz.CreatedAtUtc = created;
+
+            // Check key
+            if (isGlobal) return biz;
+            if (!string.IsNullOrWhiteSpace(biz.AdminKey) && ConstantTimeEquals(key, biz.AdminKey.Trim()))
+                return biz;
+
+            return null;
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     // GET /api/admin/businesses
@@ -448,53 +523,108 @@ public class AdminBusinessesController : ControllerBase
     }
 
     // PUT /api/admin/businesses/{id}
+    // Raw ADO.NET because AuthorizeBusinessAsync returns untracked entity
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateBusinessRequest req, CancellationToken ct)
     {
         var biz = await AuthorizeBusinessAsync(id, ct);
         if (biz is null) return Unauthorized();
 
-        if (!string.IsNullOrWhiteSpace(req.Name)) biz.Name = req.Name.Trim();
-        biz.Greeting = req.Greeting?.Trim();
-        biz.Schedule = req.Schedule?.Trim();
-        biz.Address = req.Address?.Trim();
-        biz.LogoUrl = req.LogoUrl?.Trim();
-        biz.PaymentMobileBank = req.PaymentMobileBank?.Trim();
-        biz.PaymentMobileId = req.PaymentMobileId?.Trim();
-        biz.PaymentMobilePhone = req.PaymentMobilePhone?.Trim();
-        biz.NotificationPhone = req.NotificationPhone?.Trim();
-
-        await _db.SaveChangesAsync(ct);
-
-        return Ok(new
+        try
         {
-            biz.Id,
-            biz.Name,
-            biz.Greeting,
-            biz.Schedule,
-            biz.Address,
-            biz.LogoUrl,
-            biz.PaymentMobileBank,
-            biz.PaymentMobileId,
-            biz.PaymentMobilePhone,
-            biz.NotificationPhone
-        });
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
+
+            var name = !string.IsNullOrWhiteSpace(req.Name) ? req.Name.Trim() : biz.Name;
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                UPDATE "Businesses"
+                SET "Name" = @name, "Greeting" = @greeting, "Schedule" = @schedule,
+                    "Address" = @address, "LogoUrl" = @logo,
+                    "PaymentMobileBank" = @pmBank, "PaymentMobileId" = @pmId,
+                    "PaymentMobilePhone" = @pmPhone, "NotificationPhone" = @notif
+                WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@id)
+            """;
+            AddParam(cmd, "name", name);
+            AddParam(cmd, "greeting", (object?)req.Greeting?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "schedule", (object?)req.Schedule?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "address", (object?)req.Address?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "logo", (object?)req.LogoUrl?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "pmBank", (object?)req.PaymentMobileBank?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "pmId", (object?)req.PaymentMobileId?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "pmPhone", (object?)req.PaymentMobilePhone?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "notif", (object?)req.NotificationPhone?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "id", id.ToString());
+            await cmd.ExecuteNonQueryAsync(ct);
+
+            return Ok(new
+            {
+                id,
+                name,
+                greeting = req.Greeting?.Trim(),
+                schedule = req.Schedule?.Trim(),
+                address = req.Address?.Trim(),
+                logoUrl = req.LogoUrl?.Trim(),
+                paymentMobileBank = req.PaymentMobileBank?.Trim(),
+                paymentMobileId = req.PaymentMobileId?.Trim(),
+                paymentMobilePhone = req.PaymentMobilePhone?.Trim(),
+                notificationPhone = req.NotificationPhone?.Trim()
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"Update failed: {ex.GetType().Name}: {ex.Message}" });
+        }
     }
 
     // PATCH /api/admin/businesses/{id}/toggle — activate/deactivate
+    // Raw ADO.NET because IsActive is integer in production
     [HttpPatch("{id:guid}/toggle")]
     public async Task<IActionResult> Toggle(Guid id, CancellationToken ct)
     {
         if (!IsGlobalAdmin())
             return Unauthorized();
 
-        var biz = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == id, ct);
-        if (biz is null) return NotFound(new { error = "Business not found" });
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
 
-        biz.IsActive = !biz.IsActive;
-        await _db.SaveChangesAsync(ct);
+            using var cmd = conn.CreateCommand();
+            // Read current state
+            cmd.CommandText = """SELECT "Name", "IsActive" FROM "Businesses" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@id) LIMIT 1""";
+            AddParam(cmd, "id", id.ToString());
+            string? bizName = null; bool currentActive = false;
+            using (var r = await cmd.ExecuteReaderAsync(ct))
+            {
+                if (!await r.ReadAsync(ct))
+                    return NotFound(new { error = "Business not found" });
+                bizName = r.IsDBNull(0) ? "" : r.GetString(0);
+                var rawActive = r["IsActive"];
+                currentActive = rawActive switch
+                {
+                    bool b => b, int i => i != 0, long l => l != 0,
+                    string s => s == "1" || s.Equals("true", StringComparison.OrdinalIgnoreCase),
+                    _ => true
+                };
+            }
 
-        return Ok(new { biz.Id, biz.Name, biz.IsActive });
+            // Toggle
+            using var upd = conn.CreateCommand();
+            upd.CommandText = """UPDATE "Businesses" SET "IsActive" = @val WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@id)""";
+            AddParam(upd, "val", currentActive ? 0 : 1);
+            AddParam(upd, "id", id.ToString());
+            await upd.ExecuteNonQueryAsync(ct);
+
+            return Ok(new { id = id.ToString(), name = bizName, isActive = !currentActive });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"Toggle failed: {ex.GetType().Name}: {ex.Message}" });
+        }
     }
 
     // POST /api/admin/businesses/seed

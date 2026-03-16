@@ -245,6 +245,17 @@ try
     app.UseRequestLogging();
     app.UseRateLimiter();
 
+    // Clean URL routes → static files (preserves backward compat with .html)
+    app.Use(async (context, next) =>
+    {
+        var path = context.Request.Path.Value;
+        if (path is "/dashboard" or "/dashboard/")
+            context.Request.Path = "/index.html";
+        else if (path is "/menu" or "/menu/")
+            context.Request.Path = "/menu.html";
+        await next();
+    });
+
     app.UseDefaultFiles();
     app.UseStaticFiles();
 

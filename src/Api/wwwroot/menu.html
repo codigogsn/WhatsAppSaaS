@@ -3,58 +3,138 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>WhatsAppSaaS - Menu Manager</title>
+  <title>CODIGO — Menu Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; margin: 0; padding: 16px; background: #f5f6fa; color: #333; }
-    table { border-collapse: collapse; width: 100%; margin-top: 12px; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-    th, td { border-bottom: 1px solid #eee; padding: 8px 12px; vertical-align: top; text-align: left; }
-    th { background: #f8f9fa; font-weight: 600; font-size: 13px; color: #555; }
-    button { padding: 6px 10px; cursor: pointer; border: 1px solid #ddd; border-radius: 4px; background: #fff; font-size: 13px; }
-    button:hover { background: #f0f0f0; }
-    button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; }
-    select, input, textarea { padding: 6px 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
-    .muted { color:#888; }
-    .small { font-size: 12px; }
+    :root {
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      --radius: 14px; --radius-sm: 8px; --radius-xl: 20px; --transition: .2s ease;
+      --bg: #f0f2f5; --surface: #ffffff; --surface-2: #f8f9fb; --card: #ffffff;
+      --text: #1a1a2e; --text-secondary: #555770; --muted: #8b8fa3;
+      --border: #e4e7ec; --border-light: #f0f1f3;
+      --accent: #4f6ef7; --accent-hover: #3b5de7; --accent-subtle: #eef1fe;
+      --success: #10b981; --success-bg: #ecfdf5;
+      --warning: #f59e0b; --warning-bg: #fffbeb;
+      --danger: #ef4444; --danger-bg: #fef2f2;
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.04); --shadow: 0 1px 3px rgba(0,0,0,.06), 0 1px 2px rgba(0,0,0,.04);
+      --shadow-md: 0 4px 12px rgba(0,0,0,.07); --glow: none;
+    }
+    [data-theme="dark"] {
+      --bg: #0f1117; --surface: #1a1d27; --surface-2: #22252f; --card: #1e2130;
+      --text: #e8eaed; --text-secondary: #a0a4b8; --muted: #6b7084;
+      --border: #2d3042; --border-light: #252838;
+      --accent: #6c8cff; --accent-hover: #8da4ff; --accent-subtle: rgba(108,140,255,.12);
+      --success: #34d399; --success-bg: rgba(52,211,153,.1);
+      --warning: #fbbf24; --warning-bg: rgba(251,191,36,.1);
+      --danger: #f87171; --danger-bg: rgba(248,113,113,.1);
+      --shadow-sm: 0 1px 2px rgba(0,0,0,.2); --shadow: 0 1px 3px rgba(0,0,0,.3);
+      --shadow-md: 0 4px 12px rgba(0,0,0,.3); --glow: 0 0 0 1px rgba(108,140,255,.08);
+    }
+    * { box-sizing: border-box; margin: 0; }
+    body { font-family: var(--font); background: var(--bg); color: var(--text); margin: 0; padding: 0; line-height: 1.5; transition: background var(--transition), color var(--transition); }
+    a { color: var(--accent); text-decoration: none; } a:hover { text-decoration: underline; }
+    .muted { color: var(--muted); } .small { font-size: 12px; }
+    .ok { color: var(--success); } .danger { color: var(--danger); }
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom: 8px; }
-    .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; background:#eee; margin: 2px; font-size: 12px; }
-    .pill button { padding: 0 4px; border: none; background: none; color: #c62828; cursor: pointer; font-weight: bold; }
-    .card { border:1px solid #e8e8e8; border-radius:10px; padding:16px; background:#fff; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.04); }
-    .ok { color:#2e7d32; }
-    .danger { color:#c62828; }
-    h2 { margin: 0 0 8px 0; }
-    a { color: #1a73e8; }
-    .top { display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom: 16px; }
+
+    /* Header */
+    .brand-header { background: linear-gradient(135deg, #1a1d2e 0%, #2a2d42 100%); padding: 20px 24px; color: #fff; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .brand-left { display: flex; align-items: center; gap: 16px; }
+    .brand-logo { font-size: 22px; font-weight: 800; letter-spacing: 2px; }
+    .brand-divider { width: 1px; height: 32px; background: rgba(255,255,255,.2); }
+    .brand-product { display: flex; flex-direction: column; gap: 1px; }
+    .brand-product-name { font-size: 15px; font-weight: 600; color: rgba(255,255,255,.95); }
+    .brand-product-sub { font-size: 11px; color: rgba(255,255,255,.5); letter-spacing: .5px; }
+    .brand-right { display: flex; align-items: center; gap: 12px; }
+    .brand-right .key-input { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15); color: #fff; padding: 7px 12px; border-radius: var(--radius-sm); font-size: 13px; width: 200px; outline: none; }
+    .brand-right .key-input::placeholder { color: rgba(255,255,255,.4); }
+    .brand-right .key-input:focus { border-color: var(--accent); }
+    .brand-right button { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.18); color: #fff; padding: 7px 14px; border-radius: var(--radius-sm); font-size: 13px; cursor: pointer; font-weight: 500; transition: background var(--transition); }
+    .brand-right button:hover { background: rgba(255,255,255,.2); }
+    #keyMsg { color: rgba(255,255,255,.6); }
+    .theme-toggle { background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.15); color: #fff; width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; cursor: pointer; font-size: 18px; padding: 0; line-height: 1; transition: background var(--transition); }
+    .theme-toggle:hover { background: rgba(255,255,255,.22); }
+
+    /* Nav bar */
+    .nav-bar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 12px 24px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; transition: background var(--transition), border var(--transition); }
+    .nav-bar label { font-size: 13px; font-weight: 600; color: var(--text-secondary); }
+    .nav-bar select { min-width: 260px; font-weight: 600; font-size: 14px; padding: 8px 12px; border: 2px solid var(--accent); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); }
+
+    .app-container { max-width: 1200px; margin: 0 auto; padding: 24px 20px 40px; }
+
+    /* Cards */
+    .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 24px; box-shadow: var(--shadow), var(--glow); margin-bottom: 20px; transition: background var(--transition), border var(--transition); }
+    .card h3 { margin: 0 0 4px 0; font-size: 16px; font-weight: 700; color: var(--text); }
+    .card .helper { font-size: 12px; color: var(--muted); margin-bottom: 14px; line-height: 1.4; }
+
+    /* Buttons */
+    button { padding: 7px 14px; cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 500; font-family: var(--font); transition: background var(--transition), border var(--transition); }
+    button:hover { background: var(--surface-2); }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+    /* Inputs */
+    select, input, textarea { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font); background: var(--surface); color: var(--text); transition: border var(--transition), background var(--transition); outline: none; }
+    select:focus, input:focus, textarea:focus { border-color: var(--accent); }
+
+    /* Tables */
+    table { border-collapse: collapse; width: 100%; margin-top: 14px; background: var(--card); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow-sm); }
+    th, td { border-bottom: 1px solid var(--border-light); padding: 10px 14px; vertical-align: top; text-align: left; }
+    th { background: var(--surface-2); font-weight: 600; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .5px; }
+    tr:hover { background: var(--surface-2); }
+
+    /* Pills / aliases */
+    .pill { display:inline-block; padding: 3px 10px; border-radius: 999px; background: var(--accent-subtle); color: var(--accent); margin: 2px; font-size: 12px; font-weight: 500; }
+    .pill button { padding: 0 4px; border: none; background: none; color: var(--danger); cursor: pointer; font-weight: bold; font-size: 14px; }
+
+    @media (max-width: 768px) {
+      .brand-header { padding: 16px; }
+      .app-container { padding: 16px 12px 24px; }
+      .card { padding: 16px; }
+    }
   </style>
 </head>
 <body>
-  <div class="top">
-    <div>
-      <h2>Menu Manager</h2>
-      <div class="muted small">Productos, precios y alias que el bot usa para interpretar pedidos | <a href="/">← Volver al Dashboard</a></div>
+  <!-- Branded Header -->
+  <div class="brand-header">
+    <div class="brand-left">
+      <div class="brand-logo">CODIGO</div>
+      <div class="brand-divider"></div>
+      <div class="brand-product">
+        <div class="brand-product-name">Menu Manager</div>
+        <div class="brand-product-sub">Productos, precios y alias para el bot</div>
+      </div>
     </div>
-    <div class="row">
-      <label class="muted small">Admin Key:</label>
-      <input id="adminKey" style="width:200px;" placeholder="Admin Key" />
+    <div class="brand-right">
+      <input id="adminKey" class="key-input" placeholder="Admin Key" />
       <button onclick="saveKey()">Guardar</button>
-      <span id="keyMsg" class="muted small"></span>
+      <span id="keyMsg" class="small"></span>
+      <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
+        <span id="themeIcon">&#9790;</span>
+      </button>
     </div>
   </div>
 
-  <div class="row" style="margin-bottom:16px;">
-    <label style="font-weight:600;">Negocio:</label>
-    <select id="businessSelect" onchange="onBizSelect()" style="min-width:260px; font-weight:600; font-size:14px; padding:8px 10px; border:2px solid #1a73e8; border-radius:6px;">
+  <!-- Nav bar -->
+  <div class="nav-bar">
+    <label>Negocio:</label>
+    <select id="businessSelect" onchange="onBizSelect()">
       <option value="">(Seleccionar negocio)</option>
     </select>
     <button onclick="loadBusinesses()">&#x21bb;</button>
     <span id="bizStatus" class="small"></span>
     <span id="msg" class="muted small"></span>
+    <span style="flex:1;"></span>
+    <a href="/" class="small" style="font-weight:500;">← Dashboard</a>
   </div>
+
+  <div class="app-container">
 
   <!-- Categories -->
   <div class="card">
-    <h3 style="margin-top:0;">Categorias del Menu</h3>
-    <small class="muted">Agrupa tus productos (ej: Hamburguesas, Bebidas, Combos). El bot muestra estas categorias al armar pedidos.</small>
+    <h3>Categorias del Menu</h3>
+    <div class="helper">Agrupa tus productos (ej: Hamburguesas, Bebidas, Combos). El bot muestra estas categorias al armar pedidos.</div>
     <div class="row">
       <input id="newCatName" placeholder="Nombre categoria" />
       <input id="newCatOrder" type="number" value="0" style="width:60px;" placeholder="Orden" />
@@ -68,8 +148,8 @@
 
   <!-- Items -->
   <div class="card">
-    <h3 style="margin-top:0;">Productos del Menu</h3>
-    <small class="muted">Cada producto necesita nombre, precio y categoria. Agrega <strong>alias</strong> para que el bot reconozca variaciones (ej: "coca" para "Coca Cola").</small>
+    <h3>Productos del Menu</h3>
+    <div class="helper">Cada producto necesita nombre, precio y categoria. Agrega <strong>alias</strong> para que el bot reconozca variaciones (ej: "coca" para "Coca Cola").</div>
     <div class="row">
       <select id="newItemCat"></select>
       <input id="newItemName" placeholder="Nombre" />
@@ -84,14 +164,35 @@
     </table>
   </div>
 
+  </div><!-- /.app-container -->
+
 <script>
+// Theme system (shared with dashboard via localStorage)
+(function initTheme(){
+  const saved = localStorage.getItem('THEME');
+  if (saved) { applyTheme(saved); return; }
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(prefersDark ? 'dark' : 'light');
+})();
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  const icon = document.getElementById('themeIcon');
+  if (icon) icon.textContent = t === 'dark' ? '\u2600' : '\u263E';
+}
+function toggleTheme(){
+  const current = document.documentElement.getAttribute('data-theme') || 'light';
+  const next = current === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('THEME', next);
+  applyTheme(next);
+}
+
 function esc(s){ return (s??'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 function getKey(){ return localStorage.getItem('ADMIN_KEY') || ''; }
 function saveKey(){
   const v = document.getElementById('adminKey').value.trim();
-  if(!v){ localStorage.removeItem('ADMIN_KEY'); document.getElementById('keyMsg').innerHTML='<span class="danger">Borrada</span>'; return; }
+  if(!v){ localStorage.removeItem('ADMIN_KEY'); document.getElementById('keyMsg').innerHTML='<span style="color:var(--danger);">Borrada</span>'; return; }
   localStorage.setItem('ADMIN_KEY',v);
-  document.getElementById('keyMsg').innerHTML='<span class="ok">OK</span>';
+  document.getElementById('keyMsg').innerHTML='<span style="color:var(--success);">OK</span>';
   loadBusinesses();
 }
 function hdrs(){ const k=getKey(); return k?{'X-Admin-Key':k,'Content-Type':'application/json'}:{'Content-Type':'application/json'}; }
@@ -106,48 +207,37 @@ async function loadBusinesses(){
   const key = getKey();
   const sel = document.getElementById('businessSelect');
   const statusEl = document.getElementById('bizStatus');
-  if (!key) { if(statusEl) statusEl.innerHTML='<span style="color:#c62828;">Sin admin key</span>'; return; }
+  if (!key) { if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">Sin admin key</span>'; return; }
   try {
     if(statusEl) statusEl.innerHTML='<span class="muted">Cargando...</span>';
     const res = await fetch('/api/admin/businesses', { headers: {'X-Admin-Key': key} });
     if (!res.ok) {
       let detail = 'HTTP ' + res.status;
       try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
-      console.warn('loadBusinesses:', detail);
-      if(statusEl) statusEl.innerHTML='<span style="color:#c62828;">' + esc(detail) + '</span>';
+      if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">' + esc(detail) + '</span>';
       return;
     }
     const list = await res.json();
-    if (!Array.isArray(list)) {
-      console.warn('loadBusinesses: not array', list);
-      if(statusEl) statusEl.innerHTML='<span style="color:#c62828;">Respuesta inesperada</span>';
-      return;
-    }
+    if (!Array.isArray(list)) { if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">Respuesta inesperada</span>'; return; }
     const saved = localStorage.getItem('BUSINESS_ID') || '';
     sel.innerHTML = '<option value="">(Seleccionar negocio)</option>';
-    for (const b of list) {
+    const visible = list.filter(b => b.isActive && !b.isJunk);
+    for (const b of visible) {
       const opt = document.createElement('option');
       opt.value = b.id;
-      const status = b.isActive ? '' : ' [INACTIVO]';
-      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')' + status;
-      if (!b.isActive) opt.style.color = '#c62828';
+      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')';
       if (b.id === saved) opt.selected = true;
       sel.appendChild(opt);
     }
-    // Show status of selected business
-    const selected = list.find(b => b.id === sel.value);
+    const selected = visible.find(b => b.id === sel.value);
     if (selected && statusEl) {
-      statusEl.innerHTML = selected.isActive
-        ? '<span style="color:#2e7d32; font-weight:600;">Activo</span>'
-        : '<span style="color:#c62828; font-weight:600;">Inactivo</span>';
+      statusEl.innerHTML = '<span style="color:var(--success); font-weight:600;">Activo</span>';
     } else if (statusEl) {
-      statusEl.innerHTML = list.length ? '<span style="color:#2e7d32;">' + list.length + ' negocio(s)</span>' : '<span class="muted">0 negocios</span>';
+      statusEl.innerHTML = visible.length ? '<span style="color:var(--success);">' + visible.length + ' negocio(s)</span>' : '<span class="muted">0 negocios</span>';
     }
-    // Auto-load if a business is selected
     if (sel.value) loadAll();
   } catch(e) {
-    console.error('loadBusinesses error:', e);
-    if(statusEl) statusEl.innerHTML='<span style="color:#c62828;">Error: ' + esc(e.message) + '</span>';
+    if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">Error: ' + esc(e.message) + '</span>';
   }
 }
 
@@ -173,7 +263,6 @@ async function loadCategories(){
   tbody.innerHTML = '';
   const sel = document.getElementById('newItemCat');
   sel.innerHTML = '';
-
   for(const c of cats){
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -183,7 +272,7 @@ async function loadCategories(){
       <td>${c.itemCount}</td>
       <td>
         <button onclick="toggleCategory('${c.id}',${!c.isActive})">${c.isActive ? 'Desactivar' : 'Activar'}</button>
-        <button onclick="deleteCategory('${c.id}')" style="color:#c62828;">Eliminar</button>
+        <button onclick="deleteCategory('${c.id}')" style="color:var(--danger);">Eliminar</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -215,7 +304,7 @@ async function loadItems(){
         <input id="alias_${i.id}" placeholder="alias" style="width:80px;font-size:11px;" />
         <button onclick="addAlias('${i.id}')" style="font-size:11px;">+</button>
       </td>
-      <td><button onclick="deleteItem('${i.id}')" style="color:#c62828;">Eliminar</button></td>
+      <td><button onclick="deleteItem('${i.id}')" style="color:var(--danger);">Eliminar</button></td>
     `;
     tbody.appendChild(tr);
   }
@@ -283,13 +372,11 @@ async function toggleItem(id, isAvailable){
   await fetch(`/api/admin/menu/items/${id}/availability`, { method:'PATCH', headers:hdrs(), body: JSON.stringify({isAvailable}) });
   await loadAll();
 }
-
 async function deleteItem(id){
   if(!confirm('Eliminar item?')) return;
   await fetch(`/api/admin/menu/items/${id}`, {method:'DELETE', headers:hdrs()});
   await loadAll();
 }
-
 async function addAlias(itemId){
   const input = document.getElementById(`alias_${itemId}`);
   const alias = input.value.trim();
@@ -298,7 +385,6 @@ async function addAlias(itemId){
   input.value = '';
   await loadAll();
 }
-
 async function deleteAlias(id){
   await fetch(`/api/admin/menu/aliases/${id}`, {method:'DELETE', headers:hdrs()});
   await loadAll();
