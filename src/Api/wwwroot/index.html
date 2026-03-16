@@ -290,15 +290,73 @@
     .proof-badge-pending { background:var(--warning-bg); color:#b45309; }
     .proof-badge-verified { background:var(--success-bg); color:var(--success); }
 
-    /* ═══ Toast ═══ */
+    /* ═══ Toast — top-right notification ═══ */
     .new-order-toast {
-      position: fixed; bottom: 24px; right: 24px; z-index: 200;
-      background: var(--success); color: #fff; padding: 14px 22px; border-radius: var(--radius);
-      font-size: 14px; font-weight: 600; box-shadow: var(--shadow-lg);
-      transform: translateY(80px); opacity: 0; transition: transform .3s, opacity .3s;
+      position: fixed; top: 80px; right: 24px; z-index: 200;
+      background: var(--card); color: var(--text); border: 1px solid var(--success);
+      padding: 14px 20px; border-radius: var(--radius); min-width: 260px;
+      font-size: 14px; font-weight: 600; box-shadow: var(--shadow-lg), 0 0 20px rgba(16,185,129,.15);
+      transform: translateX(120%); opacity: 0; transition: transform .35s cubic-bezier(.22,1,.36,1), opacity .3s;
       pointer-events: none;
     }
-    .new-order-toast.show { transform: translateY(0); opacity: 1; }
+    .new-order-toast.show { transform: translateX(0); opacity: 1; }
+
+    /* ═══ iOS-style toggle switch ═══ */
+    .toggle-switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+    .toggle-switch input { display: none; }
+    .toggle-track {
+      width: 44px; height: 24px; border-radius: 12px; position: relative;
+      background: var(--border); transition: background .2s ease;
+    }
+    .toggle-track::after {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 20px; height: 20px; border-radius: 50%;
+      background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2);
+      transition: transform .2s cubic-bezier(.4,.0,.2,1);
+    }
+    .toggle-switch input:checked + .toggle-track { background: var(--accent); }
+    .toggle-switch input:checked + .toggle-track::after { transform: translateX(20px); }
+    .toggle-label { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .3px; }
+    .toggle-switch input:checked ~ .toggle-label { color: var(--accent); }
+
+    /* Sound mute button */
+    .sound-toggle {
+      background: none; border: 1px solid var(--border); border-radius: 50%;
+      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+      cursor: pointer; font-size: 15px; color: var(--muted); padding: 0;
+      transition: all var(--transition);
+    }
+    .sound-toggle:hover { background: var(--surface-2); color: var(--text); }
+    .sound-toggle.muted-sound { color: var(--danger); border-color: rgba(239,68,68,.3); }
+
+    /* ═══ Micro-interactions ═══ */
+    button { transition: all .18s ease; }
+    button:hover { transform: translateY(-1px); }
+    button:active { transform: translateY(0) scale(.97); }
+    button.primary:hover { box-shadow: 0 4px 14px var(--accent-glow); }
+
+    .card { transition: all .2s ease; }
+    .kpi .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md), var(--glow); }
+
+    /* New order row animation */
+    @keyframes orderSlideIn {
+      from { opacity: 0; transform: translateY(-8px); background: var(--success-bg); }
+      60% { opacity: 1; transform: translateY(0); background: var(--success-bg); }
+      to { opacity: 1; background: transparent; }
+    }
+    tr.new-order-row { animation: orderSlideIn 1.8s ease-out; }
+
+    /* KPI pulse for new orders */
+    @keyframes kpiPulse {
+      0% { box-shadow: var(--shadow), 0 0 0 0 rgba(16,185,129,.3); }
+      50% { box-shadow: var(--shadow), 0 0 0 6px rgba(16,185,129,0); }
+      100% { box-shadow: var(--shadow); }
+    }
+    .kpi-pulse { animation: kpiPulse .8s ease-out; }
+
+    /* Analytics smooth expand */
+    #extAnalytics .kpi, #extAnalytics > div { animation: fadeSlideDown .3s ease-out; }
+    @keyframes fadeSlideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 
     /* ═══ Business selector ═══ */
     .biz-selector-area { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -371,11 +429,19 @@
     </div>
     <button class="primary" onclick="openCreateBiz()">+ Nuevo Negocio</button>
     <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
+    <button onclick="window.location.href='/menu'" id="btnMenuMgr" style="display:none;">Menu Manager</button>
     <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
     <span id="selectedBizStatus" class="small"></span>
     <span style="flex:1;"></span>
     <span class="muted small">API: <code id="baseUrl"></code></span>
-    <a href="/menu.html" class="small" style="font-weight:500;">Menu Manager</a>
+    <label class="toggle-switch" title="Auto-refresh cada 10s">
+      <input type="checkbox" id="autoRefreshToggle" onchange="onAutoToggle(this.checked)">
+      <span class="toggle-track"></span>
+      <span class="toggle-label">Auto</span>
+    </label>
+    <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Sonido de notificaciones">
+      <span id="soundIcon">&#128264;</span>
+    </button>
   </div>
 
   <div class="app-container">
@@ -745,8 +811,6 @@
       <input id="take" type="number" value="50" min="1" max="200" style="width:60px;" />
 
       <button class="primary" onclick="load()">Cargar</button>
-      <button id="btnAuto" onclick="startAutoRefresh()">Auto 10s</button>
-      <button onclick="stopAutoRefresh()">Stop</button>
 
       <button onclick="downloadOrdersCsv()">CSV Orders</button>
       <button onclick="downloadCustomersCsv()">CSV Customers</button>
@@ -801,38 +865,86 @@ const knownOrders = new Set();
 let initialLoadDone = false;
 let _loadInProgress = false;
 let _autoRefreshActive = false;
+let _soundEnabled = localStorage.getItem('SOUND_ENABLED') !== 'false'; // default ON
+let _newOrderIds = new Set(); // track new order IDs for row highlighting
+
+// ── Sound mute/unmute ──
+function toggleSound() {
+  _soundEnabled = !_soundEnabled;
+  localStorage.setItem('SOUND_ENABLED', _soundEnabled);
+  updateSoundIcon();
+}
+function updateSoundIcon() {
+  const btn = document.getElementById('soundToggle');
+  const icon = document.getElementById('soundIcon');
+  if (!btn || !icon) return;
+  if (_soundEnabled) {
+    icon.textContent = '\u{1F50A}';
+    btn.classList.remove('muted-sound');
+    btn.title = 'Sonido activado';
+  } else {
+    icon.textContent = '\u{1F507}';
+    btn.classList.add('muted-sound');
+    btn.title = 'Sonido silenciado';
+  }
+}
+
+// ── Auto-refresh toggle ──
+function onAutoToggle(checked) {
+  if (checked) startAutoRefresh();
+  else stopAutoRefresh();
+}
+function syncAutoToggleUI() {
+  const cb = document.getElementById('autoRefreshToggle');
+  if (cb) cb.checked = _autoRefreshActive;
+}
 
 // ── New order notification ──
 function playNewOrderSound() {
+  if (!_soundEnabled) return;
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    // Two-tone chime: short ascending beeps
-    [520, 660].forEach((freq, i) => {
+    // Clean two-tone chime
+    [523, 698].forEach((freq, i) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
       osc.frequency.value = freq;
-      gain.gain.value = 0.3;
+      gain.gain.setValueAtTime(0.25, ctx.currentTime + i * 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.14 + 0.2);
       osc.connect(gain);
       gain.connect(ctx.destination);
-      osc.start(ctx.currentTime + i * 0.15);
-      osc.stop(ctx.currentTime + i * 0.15 + 0.12);
+      osc.start(ctx.currentTime + i * 0.14);
+      osc.stop(ctx.currentTime + i * 0.14 + 0.25);
     });
   } catch(e) { /* audio not available */ }
 }
 
 function showNewOrderToast(count) {
   const el = document.getElementById('newOrderToast');
-  el.textContent = count === 1 ? '\ud83d\udfe2 Nuevo pedido recibido' : `\ud83d\udfe2 ${count} nuevos pedidos recibidos`;
+  el.innerHTML = '<span style="margin-right:8px;">\u{1F7E2}</span>' +
+    (count === 1 ? 'Nuevo pedido recibido' : count + ' nuevos pedidos');
   el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), 3000);
+  setTimeout(() => el.classList.remove('show'), 4000);
+}
+
+function triggerBrowserNotification(count) {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    new Notification('CODIGO — WhatsApp Agent', {
+      body: count === 1 ? 'Nuevo pedido recibido' : count + ' nuevos pedidos recibidos',
+      icon: '/favicon.ico', tag: 'new-order'
+    });
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission();
+  }
 }
 
 function checkNewOrders(data) {
   const currentIds = new Set(data.map(o => o.id));
+  _newOrderIds = new Set(); // reset for this cycle
 
   if (!initialLoadDone) {
-    // First load: seed known orders, no sound
     currentIds.forEach(id => knownOrders.add(id));
     initialLoadDone = true;
     return;
@@ -842,15 +954,20 @@ function checkNewOrders(data) {
   for (const o of data) {
     if (!knownOrders.has(o.id) && o.status === 'Pending') {
       newCount++;
+      _newOrderIds.add(o.id);
     }
   }
 
-  // Add all current IDs to known set (including non-Pending)
   currentIds.forEach(id => knownOrders.add(id));
 
   if (newCount > 0) {
     playNewOrderSound();
     showNewOrderToast(newCount);
+    // Pulse the "Pedidos Hoy" KPI card
+    const kpiCard = document.getElementById('kpiOrdersToday')?.closest('.card');
+    if (kpiCard) { kpiCard.classList.remove('kpi-pulse'); void kpiCard.offsetWidth; kpiCard.classList.add('kpi-pulse'); }
+    // Browser notification if tab is hidden
+    if (document.hidden) triggerBrowserNotification(newCount);
   }
 }
 
@@ -882,9 +999,11 @@ function onBusinessSelect(){
 function updateBizAdminButton(){
   const bid = getBusinessId();
   const btn = document.getElementById('btnBizAdmin');
+  const menuBtn = document.getElementById('btnMenuMgr');
   const statusEl = document.getElementById('selectedBizStatus');
   if (bid && businessList.length > 0) {
     btn.style.display = '';
+    menuBtn.style.display = '';
     const biz = businessList.find(b => b.id === bid);
     if (biz) {
       statusEl.innerHTML = biz.isActive
@@ -895,6 +1014,7 @@ function updateBizAdminButton(){
     }
   } else {
     btn.style.display = 'none';
+    menuBtn.style.display = 'none';
     statusEl.innerHTML = '';
   }
 }
@@ -1398,24 +1518,15 @@ function startAutoRefresh() {
   console.log('[AUTOREFRESH] started — interval=10s');
   load();
   timer = setInterval(function autoTick() {
-    console.log('[AUTOREFRESH] tick', new Date().toLocaleTimeString());
-    if (_loadInProgress) {
-      console.log('[AUTOREFRESH] skipped — previous load still in progress');
-      return;
-    }
+    if (_loadInProgress) return;
     load();
   }, 10000);
-  document.getElementById('btnAuto').textContent = 'Auto ●';
-  document.getElementById('btnAuto').style.color = '#2e7d32';
+  syncAutoToggleUI();
 }
 function stopAutoRefresh() {
-  if (timer) {
-    clearInterval(timer); timer = null;
-    console.log('[AUTOREFRESH] stopped — interval cleared');
-  }
+  if (timer) { clearInterval(timer); timer = null; }
   _autoRefreshActive = false;
-  const btn = document.getElementById('btnAuto');
-  if (btn) { btn.textContent = 'Auto 10s'; btn.style.color = ''; }
+  syncAutoToggleUI();
 }
 
 // ── Load ──
@@ -1494,6 +1605,8 @@ async function load() {
     const tr = document.createElement('tr');
     tr.style.cursor = 'pointer';
     tr.setAttribute('data-detail', o.id);
+    // Animate newly detected orders
+    if (_newOrderIds.has(o.id)) tr.classList.add('new-order-row');
     tr.onclick = function(e) {
       if (e.target.tagName === 'SELECT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'OPTION') return;
       const detail = document.getElementById('detail-' + o.id);
@@ -2048,6 +2161,11 @@ updateLoginUI();
 const today = new Date().toISOString().slice(0,10);
 document.getElementById('dateFrom').value = today;
 
+// Init controls state
+updateSoundIcon();
+syncAutoToggleUI();
+// Request browser notification permission early
+if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
 // Load businesses then orders
 loadBusinesses().then(() => load());
 </script>

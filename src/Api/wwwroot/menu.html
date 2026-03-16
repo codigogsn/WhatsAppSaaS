@@ -76,10 +76,13 @@
     .card .helper { font-size: 12px; color: var(--muted); margin-bottom: 14px; line-height: 1.4; }
 
     /* Buttons */
-    button { padding: 8px 16px; cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 500; font-family: var(--font); transition: all var(--transition); }
-    button:hover { background: var(--surface-2); }
+    button { padding: 8px 16px; cursor: pointer; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); font-size: 13px; font-weight: 500; font-family: var(--font); transition: all .18s ease; }
+    button:hover { background: var(--surface-2); transform: translateY(-1px); }
+    button:active { transform: translateY(0) scale(.97); }
     button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
-    button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+    button.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); box-shadow: 0 4px 14px var(--accent-glow); }
+    .card { transition: all .2s ease; }
+    .card:hover { box-shadow: var(--shadow-md), var(--glow); }
 
     /* Inputs */
     select, input, textarea { padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font); background: var(--input-bg); color: var(--text); transition: border var(--transition), background var(--transition), box-shadow var(--transition); outline: none; }
