@@ -219,7 +219,7 @@ public class AdminAnalyticsController : ControllerBase
             var bizFilterShort = businessId.HasValue ? """ WHERE "BusinessId" = @bid""" : "";
             var bizFilterAnd = businessId.HasValue ? """ AND "BusinessId" = @bid""" : "";
 
-            // ── 1) Peak Hour (completed orders, today) ──
+            // ── 1) Peak Hour (last 7 days for robustness — today alone is often empty) ──
             string? peakHourLabel = null;
             int peakHourOrders = 0;
             {
@@ -228,10 +228,10 @@ public class AdminAnalyticsController : ControllerBase
                     SELECT EXTRACT(HOUR FROM "CreatedAtUtc") AS hr, COUNT(*) AS cnt
                     FROM "Orders"
                     WHERE "CheckoutCompleted"::boolean = true
-                      AND "CreatedAtUtc" >= @today{bizFilterAnd}
+                      AND "CreatedAtUtc" >= @week{bizFilterAnd}
                     GROUP BY hr ORDER BY cnt DESC LIMIT 1
                 """;
-                AddParam(cmd, "today", DateTime.UtcNow.Date);
+                AddParam(cmd, "week", DateTime.UtcNow.AddDays(-7));
                 if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
                 using var r = await cmd.ExecuteReaderAsync(ct);
                 if (await r.ReadAsync(ct))
@@ -242,7 +242,7 @@ public class AdminAnalyticsController : ControllerBase
                 }
             }
 
-            // ── 2+3) Best / Worst weekday (all time or last 30 days) ──
+            // ── 2+3) Best / Worst weekday by revenue (last 30 days) ──
             string? bestWeekday = null, worstWeekday = null;
             decimal bestWeekdayRevenue = 0, worstWeekdayRevenue = 0;
             {
@@ -290,14 +290,15 @@ public class AdminAnalyticsController : ControllerBase
             }
 
             // ── 5) Conversations started (last 30 days) ──
-            // ConversationStates tracks all conversations; use UpdatedAtUtc as proxy
+            // Use total orders created (any status) as proxy for order-intent conversations.
+            // This is more reliable than ConversationStates count which includes
+            // greetings-only sessions and gets purged by TTL.
             int conversationsStarted = 0;
             {
                 using var cmd = conn.CreateCommand();
-                var csBizFilter = businessId.HasValue ? """ AND "BusinessId" = @bid""" : "";
                 cmd.CommandText = $"""
-                    SELECT COUNT(*) FROM "ConversationStates"
-                    WHERE "UpdatedAtUtc" >= @month{csBizFilter}
+                    SELECT COUNT(*) FROM "Orders"
+                    WHERE "CreatedAtUtc" >= @month{bizFilterAnd}
                 """;
                 AddParam(cmd, "month", DateTime.UtcNow.AddDays(-30));
                 if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
@@ -305,6 +306,10 @@ public class AdminAnalyticsController : ControllerBase
             }
 
             // ── 6) Conversion rate ──
+            // Formula: completed orders / total orders created (last 30d)
+            // This measures "order fulfillment rate" — always 0-100%.
+            // Total orders = all order records (intent expressed, checkout started).
+            // Completed = CheckoutCompleted=true (order confirmed and finalized).
             int confirmedOrders30d = 0;
             {
                 using var cmd = conn.CreateCommand();
@@ -317,43 +322,66 @@ public class AdminAnalyticsController : ControllerBase
                 if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
                 confirmedOrders30d = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
             }
+            // Clamp to 0-100% — mathematically guaranteed since confirmed ≤ total
             var conversionRate = conversationsStarted == 0 ? 0m
-                : Math.Round((decimal)confirmedOrders30d / conversationsStarted * 100, 1);
+                : Math.Min(100m, Math.Round((decimal)confirmedOrders30d / conversationsStarted * 100, 1));
 
             // ── 7) Bot vs Human handoff ──
+            // Count active handoff conversations from ConversationStates JSON
             int handoffCount = 0;
+            int totalConversations30d = 0;
             {
                 using var cmd = conn.CreateCommand();
                 var csBizFilter = businessId.HasValue ? """ AND "BusinessId" = @bid""" : "";
-                // Count conversations where StateJson contains humanHandoffRequested:true
-                // or humanHandoffAtUtc is set (even if later resolved)
                 cmd.CommandText = $"""
-                    SELECT COUNT(*) FROM "ConversationStates"
+                    SELECT
+                      COUNT(*) AS total,
+                      COALESCE(SUM(CASE WHEN "StateJson" LIKE '%"humanHandoffRequested":true%'
+                        OR "StateJson" LIKE '%"humanHandoffAtUtc":"%' THEN 1 ELSE 0 END), 0) AS handoffs
+                    FROM "ConversationStates"
                     WHERE "UpdatedAtUtc" >= @month{csBizFilter}
-                      AND ("StateJson" LIKE '%"humanHandoffRequested":true%'
-                        OR "StateJson" LIKE '%"humanHandoffAtUtc":"%')
                 """;
                 AddParam(cmd, "month", DateTime.UtcNow.AddDays(-30));
                 if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);
-                handoffCount = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                if (await r.ReadAsync(ct))
+                {
+                    totalConversations30d = Convert.ToInt32(r["total"]);
+                    handoffCount = Convert.ToInt32(r["handoffs"]);
+                }
             }
-            int botResolved = Math.Max(0, conversationsStarted - handoffCount);
-            var botPct = conversationsStarted == 0 ? 0m
-                : Math.Round((decimal)botResolved / conversationsStarted * 100, 1);
-            var humanPct = conversationsStarted == 0 ? 0m
-                : Math.Round((decimal)handoffCount / conversationsStarted * 100, 1);
+            int botResolved = Math.Max(0, totalConversations30d - handoffCount);
+            var botPct = totalConversations30d == 0 ? 0m
+                : Math.Min(100m, Math.Round((decimal)botResolved / totalConversations30d * 100, 1));
+            var humanPct = totalConversations30d == 0 ? 0m
+                : Math.Min(100m, Math.Round((decimal)handoffCount / totalConversations30d * 100, 1));
 
             // ── 8) New vs returning customers (last 30 days) ──
+            // Uses actual Orders table to verify purchases, not just Customer metadata.
+            // New = distinct customers whose FIRST completed order is within the 30d window.
+            // Returning = distinct customers who had a completed order BEFORE the window
+            //             AND also have a completed order WITHIN the window.
             int newCustomers30d = 0, returningCustomers30d = 0;
             {
                 using var cmd = conn.CreateCommand();
                 var month = DateTime.UtcNow.AddDays(-30);
+                // Subquery: for each customer (by phone), find their earliest order
+                // and check if they also ordered in this period.
                 cmd.CommandText = $"""
+                    WITH customer_orders AS (
+                        SELECT "From",
+                               MIN("CreatedAtUtc") AS first_order,
+                               MAX("CreatedAtUtc") AS last_order,
+                               COUNT(*) AS order_count
+                        FROM "Orders"
+                        WHERE "CheckoutCompleted"::boolean = true{bizFilterAnd}
+                        GROUP BY "From"
+                    )
                     SELECT
-                      COALESCE(SUM(CASE WHEN "FirstSeenAtUtc" >= @month THEN 1 ELSE 0 END), 0) AS new_cust,
-                      COALESCE(SUM(CASE WHEN "FirstSeenAtUtc" < @month AND "LastPurchaseAtUtc" >= @month THEN 1 ELSE 0 END), 0) AS ret_cust
-                    FROM "Customers"
-                    WHERE 1=1{bizFilterShort.Replace("WHERE", "AND")}
+                      COALESCE(SUM(CASE WHEN first_order >= @month THEN 1 ELSE 0 END), 0) AS new_cust,
+                      COALESCE(SUM(CASE WHEN first_order < @month AND last_order >= @month THEN 1 ELSE 0 END), 0) AS ret_cust
+                    FROM customer_orders
+                    WHERE last_order >= @month
                 """;
                 AddParam(cmd, "month", month);
                 if (businessId.HasValue) AddParam(cmd, "bid", businessId.Value);

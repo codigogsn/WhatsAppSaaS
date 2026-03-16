@@ -470,18 +470,18 @@
 
     <!-- Row A: Operations -->
     <div class="kpi" style="margin-top:10px;">
-      <div class="card"><div class="label">Hora Pico (hoy)</div><div class="value" id="exPeakHour" style="font-size:14px;">-</div><div class="muted small" id="exPeakHourCount"></div></div>
-      <div class="card"><div class="label">Mejor Día</div><div class="value" id="exBestDay" style="font-size:14px;">-</div><div class="muted small" id="exBestDayRev"></div></div>
-      <div class="card"><div class="label">Peor Día</div><div class="value" id="exWorstDay" style="font-size:14px;">-</div><div class="muted small" id="exWorstDayRev"></div></div>
-      <div class="card"><div class="label">Prom. Items/Pedido</div><div class="value" id="exAvgItems">-</div></div>
+      <div class="card"><div class="label">Hora Pico (7d)</div><div class="value" id="exPeakHour" style="font-size:14px;">—</div><div class="muted small" id="exPeakHourCount"></div></div>
+      <div class="card"><div class="label">Mejor Día (30d)</div><div class="value" id="exBestDay" style="font-size:14px;">—</div><div class="muted small" id="exBestDayRev"></div></div>
+      <div class="card"><div class="label">Peor Día (30d)</div><div class="value" id="exWorstDay" style="font-size:14px;">—</div><div class="muted small" id="exWorstDayRev"></div></div>
+      <div class="card"><div class="label">Prom. Items/Pedido</div><div class="value" id="exAvgItems">—</div></div>
     </div>
 
     <!-- Row B: Funnel -->
     <div class="kpi">
-      <div class="card"><div class="label">Conversaciones (30d)</div><div class="value" id="exConversations">-</div></div>
-      <div class="card"><div class="label">Conversión</div><div class="value" id="exConversion">-</div></div>
-      <div class="card"><div class="label">Bot vs Humano</div><div class="value" id="exBotHuman" style="font-size:13px;">-</div></div>
-      <div class="card"><div class="label">Nuevos / Recurrentes</div><div class="value" id="exNewRet" style="font-size:13px;">-</div></div>
+      <div class="card"><div class="label">Pedidos Iniciados (30d)</div><div class="value" id="exConversations">—</div></div>
+      <div class="card"><div class="label">Tasa de Completado (30d)</div><div class="value" id="exConversion">—</div><div class="muted small">pedidos completados / iniciados</div></div>
+      <div class="card"><div class="label">Bot vs Humano (30d)</div><div class="value" id="exBotHuman" style="font-size:13px;">—</div><div class="muted small">% conversaciones resueltas por bot</div></div>
+      <div class="card"><div class="label">Clientes Nuevos / Recurrentes (30d)</div><div class="value" id="exNewRet" style="font-size:13px;">—</div><div class="muted small">basado en historial de pedidos</div></div>
     </div>
 
     <!-- Row C: Hourly charts (simple bar) -->
@@ -1061,22 +1061,23 @@ async function loadExtended(){
     if (!res.ok) { console.warn('Extended analytics:', res.status); return; }
     const d = await res.json();
 
-    // Row A
-    document.getElementById('exPeakHour').textContent = d.peakHour || '-';
-    document.getElementById('exPeakHourCount').textContent = d.peakHourOrders ? d.peakHourOrders + ' pedidos' : '';
-    document.getElementById('exBestDay').textContent = d.bestWeekday || '-';
-    document.getElementById('exBestDayRev').textContent = d.bestWeekdayRevenue ? '$' + fmtMoney(d.bestWeekdayRevenue) : '';
-    document.getElementById('exWorstDay').textContent = d.worstWeekday || '-';
-    document.getElementById('exWorstDayRev').textContent = d.worstWeekdayRevenue ? '$' + fmtMoney(d.worstWeekdayRevenue) : '';
-    document.getElementById('exAvgItems').textContent = d.avgItemsPerOrder ?? '-';
+    // Row A — use "—" for empty data, never misleading zeros
+    document.getElementById('exPeakHour').textContent = d.peakHour || 'Sin pedidos aún';
+    document.getElementById('exPeakHourCount').textContent = d.peakHourOrders ? d.peakHourOrders + ' pedidos en 7 días' : '';
+    document.getElementById('exBestDay').textContent = d.bestWeekday || '—';
+    document.getElementById('exBestDayRev').textContent = d.bestWeekday ? '$' + fmtMoney(d.bestWeekdayRevenue) : '';
+    document.getElementById('exWorstDay').textContent = d.worstWeekday || '—';
+    document.getElementById('exWorstDayRev').textContent = d.worstWeekday ? '$' + fmtMoney(d.worstWeekdayRevenue) : '';
+    document.getElementById('exAvgItems').textContent = d.avgItemsPerOrder > 0 ? d.avgItemsPerOrder : '—';
 
-    // Row B
-    document.getElementById('exConversations').textContent = d.conversationsStarted ?? 0;
-    document.getElementById('exConversion').textContent = (d.conversionRate ?? 0) + '%';
-    document.getElementById('exBotHuman').textContent =
-      'Bot ' + (d.botResolvedPct ?? 0) + '% / Humano ' + (d.humanHandoffPct ?? 0) + '%';
-    document.getElementById('exNewRet').textContent =
-      (d.newCustomers ?? 0) + ' nuevos / ' + (d.returningCustomers ?? 0) + ' recurrentes';
+    // Row B — safe fallbacks, never absurd numbers
+    document.getElementById('exConversations').textContent = d.conversationsStarted > 0 ? d.conversationsStarted : '—';
+    document.getElementById('exConversion').textContent = d.conversationsStarted > 0 ? d.conversionRate + '%' : '—';
+    document.getElementById('exBotHuman').textContent = (d.botResolvedPct != null && (d.botResolvedPct > 0 || d.humanHandoffPct > 0))
+      ? 'Bot ' + d.botResolvedPct + '% / Humano ' + d.humanHandoffPct + '%' : '—';
+    const hasNewRet = (d.newCustomers > 0 || d.returningCustomers > 0);
+    document.getElementById('exNewRet').textContent = hasNewRet
+      ? d.newCustomers + ' nuevos / ' + d.returningCustomers + ' recurrentes' : '—';
 
     // Row C: Hourly charts
     renderHourlyChart('chartOrdersHour', d.ordersByHour || [], '#1a73e8');
