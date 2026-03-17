@@ -14,6 +14,23 @@ public sealed class MenuRepository : IMenuRepository
 {
     private readonly AppDbContext _db;
 
+    /// <summary>
+    /// Safely reads a decimal value from a DB reader, handling text-typed columns
+    /// (from SQLite-generated migrations) by parsing the string value.
+    /// </summary>
+    private static decimal SafeGetDecimal(System.Data.Common.DbDataReader r, int ordinal)
+    {
+        if (r.IsDBNull(ordinal)) return 0m;
+        try { return r.GetDecimal(ordinal); }
+        catch (InvalidCastException)
+        {
+            // Column is text-typed (pre-migration) — parse manually
+            var raw = r.GetValue(ordinal)?.ToString();
+            return decimal.TryParse(raw, System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var val) ? val : 0m;
+        }
+    }
+
     public MenuRepository(AppDbContext db) => _db = db;
 
     private static bool ParseBool(object raw) => raw switch
@@ -99,7 +116,7 @@ public sealed class MenuRepository : IMenuRepository
                 Id = ir.GetGuid(ir.GetOrdinal("Id")),
                 CategoryId = ir.GetGuid(ir.GetOrdinal("CategoryId")),
                 Name = ir.GetString(ir.GetOrdinal("Name")),
-                Price = ir.GetDecimal(ir.GetOrdinal("Price")),
+                Price = SafeGetDecimal(ir, ir.GetOrdinal("Price")),
                 Description = ir.IsDBNull(descOrd) ? null : ir.GetString(descOrd),
                 IsAvailable = ParseBool(ir["IsAvailable"]),
                 SortOrder = ir.GetInt32(ir.GetOrdinal("SortOrder")),
@@ -190,7 +207,7 @@ public sealed class MenuRepository : IMenuRepository
                 Id = reader.GetGuid(reader.GetOrdinal("Id")),
                 CategoryId = reader.GetGuid(reader.GetOrdinal("CategoryId")),
                 Name = reader.GetString(reader.GetOrdinal("Name")),
-                Price = reader.GetDecimal(reader.GetOrdinal("Price")),
+                Price = SafeGetDecimal(reader, reader.GetOrdinal("Price")),
                 Description = reader.IsDBNull(descOrd) ? null : reader.GetString(descOrd),
                 IsAvailable = ParseBool(reader["IsAvailable"]),
                 SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder")),

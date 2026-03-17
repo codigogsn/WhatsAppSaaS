@@ -5,95 +5,79 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace WhatsAppSaaS.Infrastructure.Persistence.Migrations
 {
     /// <summary>
-    /// Fixes cash-change columns created by SQLite-generated migration (AddCashChangeFields).
-    /// On PostgreSQL: converts boolean columns from INTEGER to boolean,
-    /// and decimal columns from TEXT to numeric.
-    /// Idempotent — skips columns already correctly typed.
+    /// Comprehensive column-type fix for PostgreSQL production schema.
+    /// All SQLite-generated migrations created decimal columns as TEXT and boolean
+    /// columns as INTEGER. This migration converts them to native PostgreSQL types.
+    /// Idempotent: each ALTER is guarded by an information_schema check.
+    /// No-op on SQLite.
     /// </summary>
     public partial class FixCashColumnsForPostgres : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            if (migrationBuilder.ActiveProvider == "Npgsql.EntityFrameworkCore.PostgreSQL")
-            {
-                migrationBuilder.Sql("""
-                    DO $$
-                    BEGIN
-                        -- Orders.CashChangeRequired: INTEGER → boolean
-                        IF EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'Orders'
-                              AND column_name = 'CashChangeRequired'
-                              AND data_type <> 'boolean'
-                        ) THEN
-                            ALTER TABLE "Orders"
-                                ALTER COLUMN "CashChangeRequired" TYPE boolean
-                                USING CASE WHEN "CashChangeRequired"::text = '0' THEN false ELSE true END;
-                        END IF;
+            if (migrationBuilder.ActiveProvider != "Npgsql.EntityFrameworkCore.PostgreSQL")
+                return;
 
-                        -- Orders.CashChangeReturned: INTEGER → boolean
-                        IF EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'Orders'
-                              AND column_name = 'CashChangeReturned'
-                              AND data_type <> 'boolean'
-                        ) THEN
-                            ALTER TABLE "Orders"
-                                ALTER COLUMN "CashChangeReturned" TYPE boolean
-                                USING CASE WHEN "CashChangeReturned"::text = '0' THEN false ELSE true END;
-                        END IF;
+            // Helper SQL: convert a column from text to numeric, safely handling NULL and empty strings
+            static string TextToNumeric(string table, string column) => $"""
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = '{table}' AND column_name = '{column}' AND data_type = 'text'
+                ) THEN
+                    ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE numeric
+                    USING CASE WHEN btrim("{column}") = '' OR "{column}" IS NULL THEN NULL ELSE "{column}"::numeric END;
+                END IF;
+            """;
 
-                        -- Orders.CashTenderedAmount: TEXT → numeric
-                        IF EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'Orders'
-                              AND column_name = 'CashTenderedAmount'
-                              AND data_type = 'text'
-                        ) THEN
-                            ALTER TABLE "Orders"
-                                ALTER COLUMN "CashTenderedAmount" TYPE numeric
-                                USING CASE WHEN "CashTenderedAmount" IS NULL OR "CashTenderedAmount" = '' THEN NULL ELSE "CashTenderedAmount"::numeric END;
-                        END IF;
+            // Helper SQL: convert a column from integer/text to boolean
+            static string IntToBool(string table, string column) => $"""
+                IF EXISTS (
+                    SELECT 1 FROM information_schema.columns
+                    WHERE table_name = '{table}' AND column_name = '{column}' AND data_type <> 'boolean'
+                ) THEN
+                    ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE boolean
+                    USING CASE
+                        WHEN "{column}" IS NULL THEN false
+                        WHEN "{column}"::text IN ('1','true','t','True','TRUE') THEN true
+                        ELSE false
+                    END;
+                END IF;
+            """;
 
-                        -- Orders.CashBcvRateUsed: TEXT → numeric
-                        IF EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'Orders'
-                              AND column_name = 'CashBcvRateUsed'
-                              AND data_type = 'text'
-                        ) THEN
-                            ALTER TABLE "Orders"
-                                ALTER COLUMN "CashBcvRateUsed" TYPE numeric
-                                USING CASE WHEN "CashBcvRateUsed" IS NULL OR "CashBcvRateUsed" = '' THEN NULL ELSE "CashBcvRateUsed"::numeric END;
-                        END IF;
+            migrationBuilder.Sql($"""
+                DO $$
+                BEGIN
+                    -- ═══ Orders: decimal columns stored as text ═══
+                    {TextToNumeric("Orders", "SubtotalAmount")}
+                    {TextToNumeric("Orders", "TotalAmount")}
+                    {TextToNumeric("Orders", "DeliveryFee")}
+                    {TextToNumeric("Orders", "LocationLat")}
+                    {TextToNumeric("Orders", "LocationLng")}
 
-                        -- Orders.CashChangeAmount: TEXT → numeric
-                        IF EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'Orders'
-                              AND column_name = 'CashChangeAmount'
-                              AND data_type = 'text'
-                        ) THEN
-                            ALTER TABLE "Orders"
-                                ALTER COLUMN "CashChangeAmount" TYPE numeric
-                                USING CASE WHEN "CashChangeAmount" IS NULL OR "CashChangeAmount" = '' THEN NULL ELSE "CashChangeAmount"::numeric END;
-                        END IF;
+                    -- ═══ Orders: cash-change decimal columns stored as text ═══
+                    {TextToNumeric("Orders", "CashTenderedAmount")}
+                    {TextToNumeric("Orders", "CashBcvRateUsed")}
+                    {TextToNumeric("Orders", "CashChangeAmount")}
+                    {TextToNumeric("Orders", "CashChangeAmountBs")}
 
-                        -- Orders.CashChangeAmountBs: TEXT → numeric
-                        IF EXISTS (
-                            SELECT 1 FROM information_schema.columns
-                            WHERE table_name = 'Orders'
-                              AND column_name = 'CashChangeAmountBs'
-                              AND data_type = 'text'
-                        ) THEN
-                            ALTER TABLE "Orders"
-                                ALTER COLUMN "CashChangeAmountBs" TYPE numeric
-                                USING CASE WHEN "CashChangeAmountBs" IS NULL OR "CashChangeAmountBs" = '' THEN NULL ELSE "CashChangeAmountBs"::numeric END;
-                        END IF;
-                    END $$;
-                    """);
-            }
-            // SQLite: no-op (INTEGER/TEXT are the native representations)
+                    -- ═══ Orders: cash-change boolean columns stored as integer ═══
+                    {IntToBool("Orders", "CashChangeRequired")}
+                    {IntToBool("Orders", "CashChangeReturned")}
+
+                    -- ═══ OrderItems: decimal columns stored as text ═══
+                    {TextToNumeric("OrderItems", "UnitPrice")}
+                    {TextToNumeric("OrderItems", "LineTotal")}
+
+                    -- ═══ MenuItems: price stored as text ═══
+                    {TextToNumeric("MenuItems", "Price")}
+
+                    -- ═══ Customers: TotalSpent stored as text ═══
+                    {TextToNumeric("Customers", "TotalSpent")}
+
+                    -- ═══ Products: Price stored as text (legacy table) ═══
+                    {TextToNumeric("Products", "Price")}
+                END $$;
+            """);
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)
