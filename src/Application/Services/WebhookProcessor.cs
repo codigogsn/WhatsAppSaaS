@@ -139,36 +139,38 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (message.Type == "location")
                     {
                         state.GpsPinReceived = true;
+                        state.DeliveryDataConfirmed = true; // location implies delivery data is confirmed
 
                         if (state.Items.Count > 0 && state.CheckoutFormSent)
                         {
-                            // Delivery data already confirmed — auto-finalize the order
-                            if (state.DeliveryDataConfirmed)
-                            {
-                                var autoFinalizeReply = await FinalizeOrderIfPossibleAsync(
-                                    state, message.From, phoneNumberId, businessContext, cancellationToken);
+                            // Always try to finalize — FinalizeOrderIfPossibleAsync
+                            // checks all missing fields and will either finalize or
+                            // return the exact missing fields message
+                            var autoFinalizeReply = await FinalizeOrderIfPossibleAsync(
+                                state, message.From, phoneNumberId, businessContext, cancellationToken);
 
-                                if (autoFinalizeReply is not null)
-                                {
-                                    await SendAsync(new OutgoingMessage
-                                    {
-                                        To = message.From,
-                                        Body = autoFinalizeReply,
-                                        PhoneNumberId = phoneNumberId,
-                                        AccessToken = businessContext.AccessToken
-                                    }, businessContext.BusinessId, conversationId, cancellationToken);
-                                }
-                            }
-                            else
+                            if (autoFinalizeReply is not null)
                             {
                                 await SendAsync(new OutgoingMessage
                                 {
                                     To = message.From,
-                                    Body = Msg.GpsReceived,
+                                    Body = autoFinalizeReply,
                                     PhoneNumberId = phoneNumberId,
                                     AccessToken = businessContext.AccessToken
                                 }, businessContext.BusinessId, conversationId, cancellationToken);
                             }
+                            // null means finalization already sent all messages (e.g. receipt)
+                        }
+                        else if (state.Items.Count > 0)
+                        {
+                            // Location received but checkout not started yet — acknowledge and continue
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.GpsReceived,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
                         }
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
@@ -857,10 +859,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 }
                             }
 
-                            // Advance to next step
-                            var cashReply2 = BuildOrderReplyFromState(state, _bcvRate);
-                            if (!state.AwaitingCashPayout)
+                            // Advance to next step — send payout prompt immediately if change required
+                            if (state.AwaitingCashPayout)
                             {
+                                // Send payout data prompt in same turn (BUG 1 fix: no extra user message needed)
+                                await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashPayoutDataPrompt, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                            }
+                            else
+                            {
+                                // No change or exact payment — continue checkout
+                                var cashReply2 = BuildOrderReplyFromState(state, _bcvRate);
                                 await SendAsync(new OutgoingMessage { To = message.From, Body = cashReply2.Body, Buttons = cashReply2.Buttons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
                             }
                             state.LastActivityUtc = DateTime.UtcNow;
@@ -912,7 +920,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     state.AwaitingCashPayout = false;
                                     state.CashFlowCompleted = true;
 
+                                    // Send payout confirmation
                                     await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashPayoutReceived, Buttons = Msg.CashPayoutButtons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                                    // BUG 2 fix: immediately advance to checkout form after payout data
+                                    // BuildOrderReplyFromState will set CheckoutFormSent and return the form
+                                    var checkoutReply = BuildOrderReplyFromState(state, _bcvRate);
+                                    await SendAsync(new OutgoingMessage { To = message.From, Body = checkoutReply.Body, Buttons = checkoutReply.Buttons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+
                                     state.LastActivityUtc = DateTime.UtcNow;
                                     await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                                     continue;
