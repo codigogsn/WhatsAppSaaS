@@ -1727,7 +1727,7 @@ public class WebhookProcessorTests
         state.Address.Should().Be("alto hatillo");
         state.PaymentMethod.Should().Be("pago_movil");
 
-        sentMessages.Should().Contain(m => m.Body.Contains("CONFIRMAR"));
+        sentMessages.Should().Contain(m => m.Body.Contains("Datos recibidos") && m.Buttons != null && m.Buttons.Count > 0);
     }
 
     [Fact]

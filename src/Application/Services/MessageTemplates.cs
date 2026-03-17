@@ -190,7 +190,13 @@ internal static class Msg
          + "Luego escribe *CONFIRMAR*.";
 
     internal static string CheckoutDataReceived
-        => "\u2705 Datos recibidos. Escribe *CONFIRMAR* para finalizar.";
+        => "\u2705 Datos recibidos. \u00bfQu\u00e9 deseas hacer?";
+
+    internal static readonly List<ReplyButton> CheckoutDataButtons = new()
+    {
+        new("btn_confirmar", "Confirmar"),
+        new("btn_editar_datos", "Editar datos")
+    };
 
     internal static string MissingFields(List<string> missing)
     {

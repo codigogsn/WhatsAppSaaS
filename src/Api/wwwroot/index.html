@@ -241,6 +241,8 @@
     .status-actions button { font-size: 12px; padding: 6px 14px; border-radius: var(--radius-sm); background: var(--accent); color: #fff; border: none; font-weight: 600; cursor: pointer; transition: background var(--transition); }
     .status-actions button:hover { background: var(--accent-hover); }
     .obs-tag { background: var(--warning-bg); color: #b45309; padding: 2px 6px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .obs-box { margin-top: 10px; padding: 10px 14px; border-radius: var(--radius-sm); font-size: 13px; background: var(--warning-bg); border: 1px solid rgba(245,158,11,.15); color: var(--text); line-height: 1.5; }
+    .obs-label { color: var(--warning); font-weight: 700; }
     .human-tag { background: var(--danger-bg); color: var(--danger); padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; letter-spacing: .3px; animation: pulse 2s infinite; }
     @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.6;} }
 
@@ -1804,7 +1806,7 @@ async function load() {
             <div class="detail-section-title">Pedido</div>
             <div class="detail-section-content">
               <ul class="items-list">${itemsHtml || '<li class="muted">Sin items</li>'}</ul>
-              ${hasObs ? `<div style="margin-top:10px; background:#fff8e1; padding:8px 12px; border-radius:6px; font-size:13px;"><b style="color:#f57f17;">Obs:</b> ${esc(o.specialInstructions)}</div>` : ''}
+              ${hasObs ? `<div class="obs-box"><b class="obs-label">Obs:</b> ${esc(o.specialInstructions)}</div>` : ''}
             </div>
           </div>
 

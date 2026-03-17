@@ -448,6 +448,31 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // A-edit-data) "Editar datos" — re-prompt the checkout form
+                    if (t is "editar datos" && state.CheckoutFormSent && state.Items.Count > 0)
+                    {
+                        // Reset checkout data fields so the form is re-sent
+                        state.CustomerName = null;
+                        state.CustomerIdNumber = null;
+                        state.CustomerPhone = null;
+                        state.Address = null;
+                        state.CheckoutFormSent = false;
+                        state.DeliveryDataConfirmed = false;
+
+                        var editReply = BuildOrderReplyFromState(state, _bcvRate);
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = editReply.Body,
+                            Buttons = editReply.Buttons,
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
                     // B) Restart intent: greeting / menu request / new-order intent
                     //    HIGHEST PRIORITY — clears stale checkout state
                     if (IsRestartIntent(t))
@@ -853,6 +878,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         {
                             To = message.From,
                             Body = Msg.CheckoutDataReceived,
+                            Buttons = Msg.CheckoutDataButtons,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -1249,7 +1275,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return Msg.CheckoutForm;
         }
 
-        return Msg.CheckoutDataReceived;
+        return new BotReply(Msg.CheckoutDataReceived, Msg.CheckoutDataButtons);
     }
 
     private async Task<string?> FinalizeOrderIfPossibleAsync(
@@ -1609,7 +1635,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
             // Try to extract name/phone/address from the text
             if (TryParseFashionCheckoutData(rawText, state))
             {
-                await SendReply(Msg.CheckoutDataReceived);
+                await SendAsync(new OutgoingMessage
+                {
+                    To = from, Body = Msg.CheckoutDataReceived, Buttons = Msg.CheckoutDataButtons,
+                    PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                }, bizId, conversationId, ct);
                 return;
             }
         }
@@ -1963,6 +1993,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             "btn_efectivo"   => "efectivo",
             "btn_pago_movil" => "pago movil",
             "btn_zelle"      => "zelle",
+            "btn_editar_datos" => "editar datos",
             _ => null
         };
 
