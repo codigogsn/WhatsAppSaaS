@@ -392,23 +392,49 @@ public sealed class OrdersController : ControllerBase
         {
             try
             {
-                var biz = await _context.Businesses.AsNoTracking()
-                    .Where(b => b.Id == order.BusinessId)
-                    .Select(b => new { b.AccessToken })
-                    .FirstOrDefaultAsync();
+                // Use raw SQL to avoid EF bool/decimal type mismatch on Businesses table
+                string? accessToken = null;
+                if (order.BusinessId.HasValue)
+                {
+                    var conn = _context.Database.GetDbConnection();
+                    if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+                    using var cmd = conn.CreateCommand();
+                    cmd.CommandText = """SELECT "AccessToken" FROM "Businesses" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@bid) LIMIT 1""";
+                    var p = cmd.CreateParameter(); p.ParameterName = "bid"; p.Value = order.BusinessId.Value.ToString();
+                    cmd.Parameters.Add(p);
+                    var result = await cmd.ExecuteScalarAsync();
+                    accessToken = result as string;
+                }
+
+                var orderCode = order.Id.ToString("N")[..8].ToUpperInvariant();
+                var body = FormatCashChangeNotification(
+                    order.CustomerName, orderCode,
+                    order.CashChangeAmountBs ?? order.CashChangeAmount ?? 0,
+                    req?.Reference);
+
+                _logger.LogInformation("Sending cash change WhatsApp to {To} via {PhoneNumberId} for order {OrderId}",
+                    order.From, order.PhoneNumberId, id);
 
                 await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
                 {
                     To = order.From,
                     PhoneNumberId = order.PhoneNumberId,
-                    AccessToken = biz?.AccessToken,
-                    Body = FormatCashChangeNotification(order.CashChangeAmountBs ?? 0, req?.Reference)
+                    AccessToken = accessToken,
+                    Body = body
                 });
+
+                _logger.LogInformation("Cash change WhatsApp sent successfully for order {OrderId}", id);
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Failed WhatsApp cash change notification for {OrderId}", id);
+                _logger.LogError(ex, "Failed WhatsApp cash change notification for {OrderId}. To={To}, Phone={PhoneId}",
+                    id, order.From, order.PhoneNumberId);
             }
+        }
+        else
+        {
+            _logger.LogWarning("Cannot send cash change WhatsApp for order {OrderId}: From={From}, PhoneNumberId={PhoneId}",
+                id, order.From, order.PhoneNumberId);
         }
 
         return Ok(new { success = true, id = order.Id, cashChangeReturnedAtUtc = order.CashChangeReturnedAtUtc });
@@ -569,11 +595,21 @@ public sealed class OrdersController : ControllerBase
         }
     }
 
-    private static string FormatCashChangeNotification(decimal amountBs, string? reference)
+    private static string FormatCashChangeNotification(string? customerName, string orderCode, decimal amount, string? reference)
     {
-        var msg = $"\u2705 Tu vuelto por *Bs. {amountBs:N2}* ha sido devuelto. \u00a1Gracias!";
-        if (!string.IsNullOrWhiteSpace(reference)) msg += $"\nReferencia: {reference}";
-        return msg;
+        var name = string.IsNullOrWhiteSpace(customerName) ? "estimado cliente" : customerName.Trim();
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("\u2705 *Vuelto enviado*");
+        sb.AppendLine();
+        sb.AppendLine($"Hola, {name}.");
+        sb.AppendLine($"Te confirmamos que el vuelto de tu pedido *#{orderCode}* ya fue transferido.");
+        sb.AppendLine();
+        sb.AppendLine($"\ud83d\udcb5 *Monto devuelto:* Bs. {amount:N2}");
+        if (!string.IsNullOrWhiteSpace(reference))
+            sb.AppendLine($"\ud83c\udfe6 *Referencia:* {reference}");
+        sb.AppendLine();
+        sb.Append("Gracias por tu compra.");
+        return sb.ToString();
     }
 
     private static readonly HashSet<string> AllowedProofTypes = new(StringComparer.OrdinalIgnoreCase)
