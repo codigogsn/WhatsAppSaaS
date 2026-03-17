@@ -7,150 +7,184 @@ using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace Api.Controllers;
 
+/// <summary>
+/// CSV exports. Uses raw ADO.NET because production Businesses.IsActive is
+/// integer, not boolean — EF queries throw InvalidCastException.
+/// </summary>
 [ApiController]
 [Route("api/admin/exports")]
 [EnableRateLimiting("admin")]
 public class AdminExportsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
+    private readonly ILogger<AdminExportsController> _logger;
 
-    public AdminExportsController(AppDbContext db)
+    public AdminExportsController(AppDbContext db, IConfiguration config, ILogger<AdminExportsController> logger)
     {
         _db = db;
+        _config = config;
+        _logger = logger;
     }
 
-    private async Task<Guid?> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
+    private bool IsAuthorized()
     {
-        if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || string.IsNullOrWhiteSpace(headerKey))
-            return null;
+        if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk) || string.IsNullOrWhiteSpace(hk))
+            return false;
+        var key = hk.ToString().Trim();
+        var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
+        if (!string.IsNullOrWhiteSpace(globalKey) && key == globalKey) return true;
+        string?[] legacy = [Environment.GetEnvironmentVariable("WHATSAPP_ADMIN_KEY"), _config["WhatsApp:AdminKey"]];
+        return legacy.Any(s => !string.IsNullOrWhiteSpace(s) && key == s!.Trim());
+    }
 
-        var biz = await _db.Businesses
-            .AsNoTracking()
-            .Where(b => b.Id == businessId && b.IsActive)
-            .Select(b => new { b.Id, b.AdminKey })
-            .FirstOrDefaultAsync(ct);
-
-        if (biz is null || biz.AdminKey != headerKey.ToString())
-            return null;
-
-        return biz.Id;
+    private async Task<bool> IsAuthorizedForBusinessAsync(Guid businessId, CancellationToken ct)
+    {
+        if (IsAuthorized()) return true; // global admin
+        if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk) || string.IsNullOrWhiteSpace(hk))
+            return false;
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(ct);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT "AdminKey" FROM "Businesses"
+                WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@bid)
+                LIMIT 1
+            """;
+            var p = cmd.CreateParameter(); p.ParameterName = "bid"; p.Value = businessId.ToString();
+            cmd.Parameters.Add(p);
+            var result = await cmd.ExecuteScalarAsync(ct);
+            return result is not null and not DBNull && result.ToString()?.Trim() == hk.ToString().Trim();
+        }
+        catch { return false; }
     }
 
     // GET /api/admin/exports/orders.csv?take=5000&businessId=xxx
     [HttpGet("orders.csv")]
     public async Task<IActionResult> ExportOrdersCsv([FromQuery] int? take = null, [FromQuery] Guid? businessId = null, CancellationToken ct = default)
     {
-        var max = ClampTake(take);
-
-        var q = _db.Orders.AsNoTracking().AsQueryable();
-
-        if (businessId.HasValue)
+        try
         {
-            var bizId = await AuthorizeBusinessAsync(businessId.Value, ct);
-            if (bizId is null) return Unauthorized();
-            q = q.Where(o => o.BusinessId == bizId);
+            if (businessId.HasValue)
+            {
+                if (!await IsAuthorizedForBusinessAsync(businessId.Value, ct)) return Unauthorized();
+            }
+            else if (!IsAuthorized()) return Unauthorized();
+
+            var max = ClampTake(take);
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(ct);
+
+            var bizFilter = businessId.HasValue ? """ WHERE "BusinessId" = @bid""" : "";
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"""
+                SELECT "Id", "CreatedAtUtc", "Status", "CustomerPhone", "CustomerName",
+                       "PaymentMethod", "SubtotalAmount", "TotalAmount", "Address",
+                       "ReceiverName", "AdditionalNotes"
+                FROM "Orders"{bizFilter}
+                ORDER BY "CreatedAtUtc" DESC
+                LIMIT @take
+            """;
+            if (businessId.HasValue)
+            {
+                var bp = cmd.CreateParameter(); bp.ParameterName = "bid"; bp.Value = businessId.Value;
+                cmd.Parameters.Add(bp);
+            }
+            var tp = cmd.CreateParameter(); tp.ParameterName = "take"; tp.Value = max;
+            cmd.Parameters.Add(tp);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("OrderId,CreatedAtUtc,Status,CustomerPhone,CustomerName,PaymentMethod,SubtotalAmount,TotalAmount,Address,ReceiverName,AdditionalNotes");
+
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                string? Col(int i) => reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString();
+                sb.Append(Escape(Col(0))); sb.Append(',');
+                sb.Append(Escape(Col(1))); sb.Append(',');
+                sb.Append(Escape(Col(2))); sb.Append(',');
+                sb.Append(Escape(Col(3))); sb.Append(',');
+                sb.Append(Escape(Col(4))); sb.Append(',');
+                sb.Append(Escape(Col(5))); sb.Append(',');
+                sb.Append(Escape(Col(6))); sb.Append(',');
+                sb.Append(Escape(Col(7))); sb.Append(',');
+                sb.Append(Escape(Col(8))); sb.Append(',');
+                sb.Append(Escape(Col(9))); sb.Append(',');
+                sb.Append(Escape(Col(10)));
+                sb.Append('\n');
+            }
+
+            return File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", "orders.csv");
         }
-
-        var orders = await q
-            .OrderByDescending(o => o.CreatedAtUtc)
-            .Take(max)
-            .ToListAsync(ct);
-
-        var sb = new StringBuilder();
-
-        sb.AppendLine("OrderId,CreatedAtUtc,Status,CustomerPhone,CustomerName,PaymentMethod,SubtotalAmount,TotalAmount,Address,ReceiverName,AdditionalNotes");
-
-        foreach (var o in orders)
+        catch (Exception ex)
         {
-            sb.Append(Escape(o.Id.ToString())); sb.Append(',');
-            sb.Append(Escape(ToIsoUtc(o.CreatedAtUtc))); sb.Append(',');
-            sb.Append(Escape(o.Status.ToString())); sb.Append(',');
-            sb.Append(Escape(o.CustomerPhone)); sb.Append(',');
-            sb.Append(Escape(o.CustomerName)); sb.Append(',');
-            sb.Append(Escape(o.PaymentMethod)); sb.Append(',');
-            sb.Append(Escape(ToDecimalString(o.SubtotalAmount))); sb.Append(',');
-            sb.Append(Escape(ToDecimalString(o.TotalAmount))); sb.Append(',');
-            sb.Append(Escape(o.Address)); sb.Append(',');
-            sb.Append(Escape(o.ReceiverName)); sb.Append(',');
-            sb.Append(Escape(o.AdditionalNotes));
-            sb.Append('\n');
+            _logger.LogError(ex, "CSV orders export failed");
+            return StatusCode(500, new { error = $"Export failed: {ex.GetType().Name}: {ex.Message}" });
         }
-
-        return File(
-            Encoding.UTF8.GetBytes(sb.ToString()),
-            "text/csv",
-            "orders.csv"
-        );
     }
 
     // GET /api/admin/exports/customers.csv?businessId=xxx
     [HttpGet("customers.csv")]
     public async Task<IActionResult> ExportCustomersCsv([FromQuery] int? take = null, [FromQuery] Guid? businessId = null, CancellationToken ct = default)
     {
-        var max = ClampTake(take);
-
-        var q = _db.Orders.AsNoTracking()
-            .Where(o => o.CustomerPhone != null && o.CustomerPhone != "");
-
-        if (businessId.HasValue)
+        try
         {
-            var bizId = await AuthorizeBusinessAsync(businessId.Value, ct);
-            if (bizId is null) return Unauthorized();
-            q = q.Where(o => o.BusinessId == bizId);
-        }
-
-        var orders = await q.ToListAsync(ct);
-
-        var customers = orders
-            .GroupBy(o => (o.CustomerPhone ?? "").Trim())
-            .Select(g =>
+            if (businessId.HasValue)
             {
-                var phone = g.Key;
+                if (!await IsAuthorizedForBusinessAsync(businessId.Value, ct)) return Unauthorized();
+            }
+            else if (!IsAuthorized()) return Unauthorized();
 
-                var name = g
-                    .Select(x => (x.CustomerName ?? "").Trim())
-                    .FirstOrDefault(n => !string.IsNullOrWhiteSpace(n)) ?? "";
+            var max = ClampTake(take);
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(ct);
 
-                var ordersCount = g.Count();
-                var totalSpent = g.Sum(x => x.TotalAmount ?? 0m);
-                var firstSeen = g.Min(x => x.CreatedAtUtc);
-                var lastSeen = g.Max(x => x.CreatedAtUtc);
+            var bizFilter = businessId.HasValue ? """ AND o."BusinessId" = @bid""" : "";
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"""
+                SELECT o."CustomerPhone", MIN(o."CustomerName") AS name,
+                       COUNT(*) AS orders_count, COALESCE(SUM(o."TotalAmount"), 0) AS total_spent,
+                       MIN(o."CreatedAtUtc") AS first_seen, MAX(o."CreatedAtUtc") AS last_seen
+                FROM "Orders" o
+                WHERE o."CustomerPhone" IS NOT NULL AND o."CustomerPhone" != ''{bizFilter}
+                GROUP BY o."CustomerPhone"
+                ORDER BY total_spent DESC
+                LIMIT @take
+            """;
+            if (businessId.HasValue)
+            {
+                var bp = cmd.CreateParameter(); bp.ParameterName = "bid"; bp.Value = businessId.Value;
+                cmd.Parameters.Add(bp);
+            }
+            var tp = cmd.CreateParameter(); tp.ParameterName = "take"; tp.Value = max;
+            cmd.Parameters.Add(tp);
 
-                return new
-                {
-                    Phone = phone,
-                    Name = name,
-                    OrdersCount = ordersCount,
-                    TotalSpent = totalSpent,
-                    FirstSeen = firstSeen,
-                    LastSeen = lastSeen
-                };
-            })
-            .OrderByDescending(x => x.TotalSpent)
-            .Take(max)
-            .ToList();
+            var sb = new StringBuilder();
+            sb.AppendLine("Phone,Name,OrdersCount,TotalSpent,FirstSeenAtUtc,LastSeenAtUtc,LastPurchaseAtUtc");
 
-        var sb = new StringBuilder();
+            using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                string? Col(int i) => reader.IsDBNull(i) ? null : reader.GetValue(i)?.ToString();
+                sb.Append(Escape(Col(0))); sb.Append(',');
+                sb.Append(Escape(Col(1))); sb.Append(',');
+                sb.Append(Escape(Col(2))); sb.Append(',');
+                sb.Append(Escape(Col(3))); sb.Append(',');
+                sb.Append(Escape(Col(4))); sb.Append(',');
+                sb.Append(Escape(Col(5))); sb.Append(',');
+                sb.Append(Escape(Col(5))); // LastPurchaseAtUtc = LastSeen
+                sb.Append('\n');
+            }
 
-        sb.AppendLine("Phone,Name,OrdersCount,TotalSpent,FirstSeenAtUtc,LastSeenAtUtc,LastPurchaseAtUtc");
-
-        foreach (var c in customers)
-        {
-            sb.Append(Escape(c.Phone)); sb.Append(',');
-            sb.Append(Escape(c.Name)); sb.Append(',');
-            sb.Append(c.OrdersCount); sb.Append(',');
-            sb.Append(ToDecimalString(c.TotalSpent)); sb.Append(',');
-            sb.Append(ToIsoUtc(c.FirstSeen)); sb.Append(',');
-            sb.Append(ToIsoUtc(c.LastSeen)); sb.Append(',');
-            sb.Append(ToIsoUtc(c.LastSeen));
-            sb.Append('\n');
+            return File(Encoding.UTF8.GetBytes(sb.ToString()), "text/csv", "customers.csv");
         }
-
-        return File(
-            Encoding.UTF8.GetBytes(sb.ToString()),
-            "text/csv",
-            "customers.csv"
-        );
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CSV customers export failed");
+            return StatusCode(500, new { error = $"Export failed: {ex.GetType().Name}: {ex.Message}" });
+        }
     }
 
     private static int ClampTake(int? take)

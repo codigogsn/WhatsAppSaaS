@@ -43,6 +43,7 @@
       --glow: none;
       --header-bg: linear-gradient(135deg, #1e1636 0%, #2d1f5e 50%, #1e1636 100%);
       --input-bg: var(--surface);
+      --logo-color: #c4b5fd;
     }
     [data-theme="dark"] {
       --bg: #0c0a14;
@@ -73,6 +74,7 @@
       --glow: 0 0 0 1px rgba(167,139,250,.07);
       --header-bg: linear-gradient(135deg, #0c0a14 0%, #1a1240 50%, #0c0a14 100%);
       --input-bg: #1e1a35;
+      --logo-color: #ffffff;
     }
 
     /* ═══ Base ═══ */
@@ -102,7 +104,7 @@
       border-bottom: 1px solid rgba(167,139,250,.15);
     }
     .brand-left { display: flex; align-items: center; gap: 16px; }
-    .brand-logo { font-size: 20px; font-weight: 800; letter-spacing: 3px; color: #c4b5fd; }
+    .brand-logo { font-size: 20px; font-weight: 800; letter-spacing: 3px; color: var(--logo-color, #c4b5fd); }
     .brand-divider { width: 1px; height: 30px; background: rgba(167,139,250,.25); }
     .brand-product { display: flex; flex-direction: column; gap: 1px; }
     .brand-product-name { font-size: 14px; font-weight: 600; color: rgba(255,255,255,.9); }
@@ -970,16 +972,16 @@ function playNewOrderSound() {
 function showOrderToast(order) {
   const stack = document.getElementById('toastStack');
   if (!stack) return;
-  // Limit to 4 toasts max
   while (stack.children.length >= 4) stack.removeChild(stack.firstChild);
 
   const el = document.createElement('div');
   el.className = 'order-toast';
+  el.style.cursor = 'pointer';
   const items = (order.items || []).slice(0, 2).map(i => i.quantity + 'x ' + i.name).join(', ');
   const totalStr = order.totalAmount != null ? '$' + fmtMoney(order.totalAmount) : '';
 
   el.innerHTML = `
-    <button class="order-toast-close" onclick="dismissToast(this.parentElement)">&times;</button>
+    <button class="order-toast-close" onclick="event.stopPropagation();dismissToast(this.parentElement)">&times;</button>
     <div class="order-toast-title">Nuevo Pedido</div>
     <div class="order-toast-customer">${esc(order.customerName || order.customerPhone || 'Cliente')}</div>
     ${items ? '<div class="order-toast-items">' + esc(items) + (order.items && order.items.length > 2 ? '...' : '') + '</div>' : ''}
@@ -988,12 +990,37 @@ function showOrderToast(order) {
       <span class="order-toast-time">justo ahora</span>
     </div>
   `;
+  // Click toast → expand order detail row + mark as read
+  el.onclick = function() {
+    const detail = document.getElementById('detail-' + order.id);
+    if (detail) { detail.classList.add('open'); detail.scrollIntoView({behavior:'smooth', block:'center'}); }
+    markOrderRead(order.id);
+    dismissToast(el);
+  };
   stack.appendChild(el);
-  // Trigger animation
   requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
-  // Auto-dismiss after 6s
+  // Auto-dismiss after 8s, pause on hover
+  let timer = setTimeout(() => dismissToast(el), 8000);
+  el.onmouseenter = () => clearTimeout(timer);
+  el.onmouseleave = () => { timer = setTimeout(() => dismissToast(el), 4000); };
+}
+
+function showErrorToast(title, message) {
+  const stack = document.getElementById('toastStack');
+  if (!stack) return;
+  const el = document.createElement('div');
+  el.className = 'order-toast';
+  el.style.borderLeftColor = 'var(--danger)';
+  el.innerHTML = `
+    <button class="order-toast-close" onclick="dismissToast(this.parentElement)">&times;</button>
+    <div class="order-toast-title" style="color:var(--danger);">${esc(title)}</div>
+    <div class="order-toast-customer">${esc(message)}</div>
+  `;
+  stack.appendChild(el);
+  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
   setTimeout(() => dismissToast(el), 6000);
 }
+
 function dismissToast(el) {
   if (!el || !el.parentElement) return;
   el.classList.remove('show');
@@ -2033,27 +2060,31 @@ async function openProofNewTab(orderId){
 }
 
 async function downloadOrdersCsv(){
-  const bid = getBusinessId();
-  const eqs = new URLSearchParams({take: 5000});
-  if (bid) eqs.set('businessId', bid);
-  const res = await fetch('/api/admin/exports/orders.csv?' + eqs.toString(), { headers: adminHeaders() });
-  if (!res.ok) { alert('Error descargando orders.csv: ' + await res.text()); return; }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'orders.csv';
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  try {
+    const bid = getBusinessId();
+    const eqs = new URLSearchParams({take: 5000});
+    if (bid) eqs.set('businessId', bid);
+    const res = await fetch('/api/admin/exports/orders.csv?' + eqs.toString(), { headers: adminHeaders() });
+    if (!res.ok) { showErrorToast('CSV Export Failed', 'Could not generate orders CSV. Please try again.'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'orders.csv';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  } catch(e) { showErrorToast('CSV Export Failed', 'Network error: ' + e.message); }
 }
 
 async function downloadCustomersCsv(){
-  const bid = getBusinessId();
-  const cqs = new URLSearchParams({take: 5000});
-  if (bid) cqs.set('businessId', bid);
-  const res = await fetch('/api/admin/exports/customers.csv?' + cqs.toString(), { headers: adminHeaders() });
-  if (!res.ok) { alert('Error descargando customers.csv: ' + await res.text()); return; }
-  const blob = await res.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'customers.csv';
-  document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  try {
+    const bid = getBusinessId();
+    const cqs = new URLSearchParams({take: 5000});
+    if (bid) cqs.set('businessId', bid);
+    const res = await fetch('/api/admin/exports/customers.csv?' + cqs.toString(), { headers: adminHeaders() });
+    if (!res.ok) { showErrorToast('CSV Export Failed', 'Could not generate customers CSV. Please try again.'); return; }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'customers.csv';
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  } catch(e) { showErrorToast('CSV Export Failed', 'Network error: ' + e.message); }
 }
 
 // ── JWT Auth ──

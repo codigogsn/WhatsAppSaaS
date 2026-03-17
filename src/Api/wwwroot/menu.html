@@ -22,6 +22,7 @@
       --shadow-md: 0 4px 16px rgba(28,24,50,.08); --glow: none;
       --header-bg: linear-gradient(135deg, #1e1636 0%, #2d1f5e 50%, #1e1636 100%);
       --input-bg: var(--surface);
+      --logo-color: #c4b5fd;
     }
     [data-theme="dark"] {
       --bg: #0c0a14; --surface: #16132a; --surface-2: #1e1a35; --card: #1a1630;
@@ -36,6 +37,7 @@
       --shadow-md: 0 4px 20px rgba(0,0,0,.4); --glow: 0 0 0 1px rgba(167,139,250,.07);
       --header-bg: linear-gradient(135deg, #0c0a14 0%, #1a1240 50%, #0c0a14 100%);
       --input-bg: #1e1a35;
+      --logo-color: #ffffff;
     }
     * { box-sizing: border-box; margin: 0; }
     body { font-family: var(--font); background: var(--bg); color: var(--text); margin: 0; padding: 0; line-height: 1.5; transition: background var(--transition), color var(--transition); }
@@ -47,7 +49,7 @@
     /* Header */
     .brand-header { background: var(--header-bg); padding: 18px 28px; color: #fff; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; border-bottom: 1px solid rgba(167,139,250,.15); }
     .brand-left { display: flex; align-items: center; gap: 16px; }
-    .brand-logo { font-size: 20px; font-weight: 800; letter-spacing: 3px; color: #c4b5fd; }
+    .brand-logo { font-size: 20px; font-weight: 800; letter-spacing: 3px; color: var(--logo-color, #c4b5fd); }
     .brand-divider { width: 1px; height: 30px; background: rgba(167,139,250,.25); }
     .brand-product { display: flex; flex-direction: column; gap: 1px; }
     .brand-product-name { font-size: 14px; font-weight: 600; color: rgba(255,255,255,.9); }
