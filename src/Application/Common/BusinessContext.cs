@@ -16,4 +16,6 @@ public sealed record BusinessContext(
     string? RestaurantType = null,
     string? MenuPdfUrl = null,
     string? CurrencyReference = null,
-    string VerticalType = "restaurant");
+    string VerticalType = "restaurant",
+    string? ZelleRecipient = null,
+    string? ZelleInstructions = null);

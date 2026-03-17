@@ -796,8 +796,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         {
                             state.PaymentMethod = payMethod;
 
-                            // Trigger evidence request for pago_movil / divisas
-                            if (payMethod is "pago_movil" or "divisas")
+                            // Trigger evidence request for pago_movil / divisas / zelle
+                            if (payMethod is "pago_movil" or "divisas" or "zelle")
                             {
                                 if (!state.PaymentEvidenceRequested)
                                 {
@@ -806,6 +806,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     if (payMethod == "pago_movil")
                                     {
                                         await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, state.Items, cancellationToken);
+                                    }
+                                    else if (payMethod == "zelle")
+                                    {
+                                        await SendZelleDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
                                     }
                                     else
                                     {
@@ -851,26 +855,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             state.GpsPinReceived = true;
                         }
 
-                        if (state.PaymentMethod is "pago_movil" or "divisas")
+                        if (state.PaymentMethod is "pago_movil" or "divisas" or "zelle")
                         {
                             if (!state.PaymentEvidenceRequested)
                             {
                                 state.PaymentEvidenceRequested = true;
 
                                 if (state.PaymentMethod == "pago_movil")
-                                {
                                     await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, state.Items, cancellationToken);
-                                }
+                                else if (state.PaymentMethod == "zelle")
+                                    await SendZelleDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
                                 else
-                                {
-                                    await SendAsync(new OutgoingMessage
-                                    {
-                                        To = message.From,
-                                        Body = Msg.DivisasProofRequest,
-                                        PhoneNumberId = phoneNumberId,
-                                        AccessToken = businessContext.AccessToken
-                                    }, businessContext.BusinessId, conversationId, cancellationToken);
-                                }
+                                    await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.DivisasProofRequest, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
                             }
                         }
 
@@ -1196,6 +1192,28 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }, biz.BusinessId, conversationId, ct);
     }
 
+    private async Task SendZelleDetailsAsync(
+        string to, string phoneNumberId, BusinessContext biz, string conversationId, CancellationToken ct)
+    {
+        var recipient = biz.ZelleRecipient;
+        if (string.IsNullOrWhiteSpace(recipient))
+        {
+            // Fallback: send generic proof request if no Zelle config
+            await SendAsync(new OutgoingMessage
+            {
+                To = to, Body = Msg.ZelleProofRequest,
+                PhoneNumberId = phoneNumberId, AccessToken = biz.AccessToken
+            }, biz.BusinessId, conversationId, ct);
+            return;
+        }
+
+        await SendAsync(new OutgoingMessage
+        {
+            To = to, Body = Msg.ZelleDetails(recipient, biz.ZelleInstructions),
+            PhoneNumberId = phoneNumberId, AccessToken = biz.AccessToken
+        }, biz.BusinessId, conversationId, ct);
+    }
+
     private static string? FirstNonEmpty(params string?[] values)
     {
         foreach (var v in values)
@@ -1392,7 +1410,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Track order for post-confirm proof capture (pago_movil/divisas without proof)
         state.LastOrderId = order.Id;
-        if (order.PaymentMethod is "pago_movil" or "divisas"
+        if (order.PaymentMethod is "pago_movil" or "divisas" or "zelle"
             && string.IsNullOrWhiteSpace(order.PaymentProofMediaId))
         {
             state.AwaitingPostConfirmProof = true;

@@ -316,7 +316,7 @@ public class WebhookProcessorTests
         reply.Body.Should().Contain("C\u00e9dula:");
         reply.Body.Should().Contain("Tel\u00e9fono:");
         reply.Body.Should().Contain("Direcci\u00f3n:");
-        reply.Body.Should().Contain("CONFIRMAR");
+        reply.Body.Should().Contain("Confirmar");
     }
 
     [Fact]
@@ -1172,7 +1172,7 @@ public class WebhookProcessorTests
         // The modification response (first message) should mention the clean item name
         var modResponse = sentBodies.First();
         modResponse.Should().Contain("3 Hamburguesa Clasica");
-        modResponse.Should().Contain("CONFIRMAR");
+        modResponse.Should().Contain("Confirmar");
         modResponse.Should().NotContain("hamburgueAs");
         modResponse.Should().NotContain("porfavor");
     }
@@ -1793,7 +1793,7 @@ public class WebhookProcessorTests
         reply.Should().Contain("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
         reply.Should().Contain("\u2022 \ud83d\udcb5 Pago:");
         reply.Should().NotContain("\u2022 \ud83d\udc64 Nombre:"); // Name already filled
-        reply.Should().Contain("Luego escribe *CONFIRMAR*.");
+        reply.Should().Contain("Luego presiona *Confirmar*.");
         reply.Should().Contain("l\u00edneas separadas");
     }
 
@@ -1849,7 +1849,7 @@ public class WebhookProcessorTests
         result.Should().Contain("A\u00fan falta informaci\u00f3n para confirmar.");
         result.Should().Contain("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
         result.Should().Contain("l\u00edneas separadas");
-        result.Should().Contain("Luego escribe *CONFIRMAR*.");
+        result.Should().Contain("Luego presiona *Confirmar*.");
     }
 
     [Fact]

@@ -187,7 +187,7 @@ internal static class Msg
          + "\ud83c\udfe1 *Direcci\u00f3n:*\n\n"
          + "Puedes responder copiando y pegando esta planilla\n"
          + "o enviando los datos en l\u00edneas separadas.\n\n"
-         + "Luego escribe *CONFIRMAR*.";
+         + "Luego presiona *Confirmar*.";
 
     internal static string CheckoutDataReceived
         => "\u2705 Datos recibidos. \u00bfQu\u00e9 deseas hacer?";
@@ -209,7 +209,7 @@ internal static class Msg
         sb.AppendLine("Puedes responder copiando y pegando esta planilla");
         sb.AppendLine("o enviando los datos en l\u00edneas separadas.");
         sb.AppendLine();
-        sb.Append("Luego escribe *CONFIRMAR*.");
+        sb.Append("Luego presiona *Confirmar*.");
         return sb.ToString();
     }
 
@@ -219,7 +219,7 @@ internal static class Msg
         => "\u00a1De acuerdo! Por favor comparte la ubicaci\u00f3n de entrega.";
 
     internal static string GpsReceived
-        => "\u2705 Ubicaci\u00f3n recibida. Escribe *CONFIRMAR* para finalizar.";
+        => "\u2705 Ubicaci\u00f3n recibida. Presiona *Confirmar* cuando est\u00e9s listo.";
 
     internal static string PaymentProofReceived
         => "\u2705 Comprobante recibido. Tu pago qued\u00f3 pendiente de verificaci\u00f3n.";
@@ -236,6 +236,15 @@ internal static class Msg
 
     internal static string DivisasProofRequest
         => "Para *DIVISAS*, env\u00eda una *foto de los billetes* \ud83d\udcf8";
+
+    internal static string ZelleDetails(string recipient, string? instructions = null)
+        => "\ud83d\udcb3 *DATOS PARA PAGO ZELLE*\n\n"
+         + $"\u2022 *Enviar a:* {recipient}"
+         + (!string.IsNullOrWhiteSpace(instructions) ? $"\n\u2022 *Instrucciones:* {instructions}" : "")
+         + "\n\nRealiza el pago y env\u00eda el *comprobante* (screenshot) \ud83d\udcf8";
+
+    internal static string ZelleProofRequest
+        => "Env\u00eda el *comprobante de Zelle* (screenshot) \ud83d\udcf8";
 
     // ── Order confirmation / receipt ──
 
@@ -425,28 +434,28 @@ internal static class Msg
     // ── Order modifications ──
 
     internal static string ItemAdded(int qty, string name)
-        => $"\u2705 Listo, agregu\u00e9 *{qty} {name}* a tu pedido. Escribe *CONFIRMAR* para finalizar.";
+        => $"\u2705 Listo, agregu\u00e9 *{qty} {name}* a tu pedido. Presiona *Confirmar* cuando est\u00e9s listo.";
 
     internal static string ItemRemoved(string name)
         => $"\u2705 Listo, elimin\u00e9 *{name}* del pedido.";
 
     internal static string ItemReduced(int remaining, string name)
-        => $"\u2705 Listo, ahora tienes *{remaining} {name}*. Escribe *CONFIRMAR* para finalizar.";
+        => $"\u2705 Listo, ahora tienes *{remaining} {name}*. Presiona *Confirmar* cuando est\u00e9s listo.";
 
     internal static string ItemNotFound(string name)
         => $"No tienes *{name}* en el pedido.";
 
     internal static string ItemReplaced(int qty, string name)
-        => $"\u2705 Listo, ahora son *{qty} {name}*. Escribe *CONFIRMAR* para finalizar.";
+        => $"\u2705 Listo, ahora son *{qty} {name}*. Presiona *Confirmar* cuando est\u00e9s listo.";
 
     internal static string ItemSwapped(string oldItem, string newItem)
-        => $"\u2705 Listo, cambi\u00e9 *{oldItem}* por *{newItem}*. Escribe *CONFIRMAR* para finalizar.";
+        => $"\u2705 Listo, cambi\u00e9 *{oldItem}* por *{newItem}*. Presiona *Confirmar* cuando est\u00e9s listo.";
 
     internal static string EmptyCart
         => "\n\nTu pedido est\u00e1 vac\u00edo. \u00bfQu\u00e9 deseas ordenar?";
 
     internal static string ConfirmPrompt
-        => "Escribe *CONFIRMAR* para finalizar.";
+        => "Presiona *Confirmar* cuando est\u00e9s listo.";
 
     // ── Human handoff ──
 
@@ -459,7 +468,7 @@ internal static class Msg
     // ── Checkout flow: fill-in-the-form ──
 
     internal static string StillFillingForm
-        => "Env\u00eda los datos que faltan y luego escribe *CONFIRMAR*.";
+        => "Env\u00eda los datos que faltan y luego presiona *Confirmar*.";
 
     // ── Business hours / closed state ──
 
@@ -507,7 +516,7 @@ internal static class Msg
         => $"Listo, agregue *{item}* a tu pedido.";
 
     internal static string SuggestionDeclined
-        => "Perfecto, asi queda tu pedido. Escribe *CONFIRMAR* para finalizar.";
+        => "Perfecto, asi queda tu pedido. Presiona *Confirmar* cuando est\u00e9s listo.";
 
     // ── Conversation recovery (ambiguous/stall responses) ──
 
@@ -534,7 +543,7 @@ internal static class Msg
             sb.AppendLine();
         }
         sb.AppendLine();
-        sb.Append("Puedes *agregar*, *quitar* o *cambiar* productos, o escribe *CONFIRMAR* para finalizar.");
+        sb.Append("Puedes *agregar*, *quitar* o *cambiar* productos, o presiona *Confirmar* para finalizar.");
         return sb.ToString();
     }
 
@@ -618,13 +627,13 @@ internal static class Msg
          + "\ud83d\udc64 *Nombre:*\n"
          + "\ud83d\udcf1 *Tel\u00e9fono:*\n"
          + "\ud83c\udfe1 *Direcci\u00f3n de env\u00edo:*\n\n"
-         + "Responde con tus datos y luego escribe *CONFIRMAR*.";
+         + "Responde con tus datos y luego presiona *Confirmar*.";
 
     internal static string FashionCheckoutFormPickup
         => "\ud83d\udcdd *DATOS PARA TU PEDIDO*\n\n"
          + "\ud83d\udc64 *Nombre:*\n"
          + "\ud83d\udcf1 *Tel\u00e9fono:*\n\n"
-         + "Responde con tus datos y luego escribe *CONFIRMAR*.";
+         + "Responde con tus datos y luego presiona *Confirmar*.";
 
     internal static string FashionReceipt(
         string orderNumber,

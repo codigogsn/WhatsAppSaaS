@@ -27,6 +27,10 @@ public class Business
     public string? PaymentMobileId { get; set; }
     public string? PaymentMobilePhone { get; set; }
 
+    // Per-business Zelle config
+    public string? ZelleRecipient { get; set; }  // email or phone
+    public string? ZelleInstructions { get; set; }
+
     // WhatsApp number to receive staff notifications (E.164 format, e.g. "+584141234567")
     public string? NotificationPhone { get; set; }
 

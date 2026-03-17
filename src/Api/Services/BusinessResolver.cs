@@ -118,12 +118,9 @@ public class BusinessResolver : IBusinessResolver
             await conn.OpenAsync(ct);
 
         await using var cmd = conn.CreateCommand();
+        // SELECT * to automatically pick up new columns (e.g. Zelle fields)
         cmd.CommandText = """
-            SELECT "Id", "PhoneNumberId", "AccessToken", "Name",
-                   "PaymentMobileBank", "PaymentMobileId", "PaymentMobilePhone",
-                   "Greeting", "Schedule", "Address", "LogoUrl", "NotificationPhone",
-                   "RestaurantType", "CurrencyReference", "VerticalType", "MenuPdfUrl"
-            FROM "Businesses"
+            SELECT * FROM "Businesses"
             WHERE "PhoneNumberId" = @pid AND "IsActive" = true
             LIMIT 1
             """;
@@ -137,32 +134,29 @@ public class BusinessResolver : IBusinessResolver
         if (!await reader.ReadAsync(ct))
             return null;
 
-        // Read Id as string to support both TEXT and UUID column types in legacy/new schemas
-        var rawId = reader.GetValue(0)?.ToString() ?? "";
+        // Build column lookup for safe access (handles missing columns in legacy schemas)
+        var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (var i = 0; i < reader.FieldCount; i++) cols.Add(reader.GetName(i));
+        string? Col(string name) => cols.Contains(name) && reader[name] is not DBNull ? reader[name]?.ToString() : null;
+
+        var rawId = Col("Id") ?? "";
         if (!Guid.TryParse(rawId, out var bizId))
         {
             Log.Warning("BUSINESS RESOLVE: invalid Id format for phoneNumberId={PhoneNumberId}, rawId={RawId}", id, rawId);
             return null;
         }
-        var bizPhone = reader.GetString(1);
-        var bizToken = reader.GetString(2);
-        var bizName = reader.IsDBNull(3) ? "" : reader.GetString(3);
-        var pmBank = reader.IsDBNull(4) ? null : reader.GetString(4);
-        var pmId = reader.IsDBNull(5) ? null : reader.GetString(5);
-        var pmPhone = reader.IsDBNull(6) ? null : reader.GetString(6);
-        var greeting = reader.IsDBNull(7) ? null : reader.GetString(7);
-        var schedule = reader.IsDBNull(8) ? null : reader.GetString(8);
-        var address = reader.IsDBNull(9) ? null : reader.GetString(9);
-        var logoUrl = reader.IsDBNull(10) ? null : reader.GetString(10);
-        var notificationPhone = reader.IsDBNull(11) ? null : reader.GetString(11);
-        var restaurantType = reader.IsDBNull(12) ? null : reader.GetString(12);
-        var currencyReference = reader.IsDBNull(13) ? null : reader.GetString(13);
-        var verticalType = reader.IsDBNull(14) ? "restaurant" : reader.GetString(14);
-        var menuPdfUrl = reader.IsDBNull(15) ? null : reader.GetString(15);
 
-        return new BusinessContext(bizId, bizPhone, bizToken, bizName,
-            greeting, schedule, address, logoUrl, pmBank, pmId, pmPhone, notificationPhone, restaurantType,
-            menuPdfUrl ?? _menuPdfUrl, currencyReference, verticalType);
+        return new BusinessContext(bizId,
+            Col("PhoneNumberId") ?? id,
+            Col("AccessToken") ?? "",
+            Col("Name") ?? "",
+            Col("Greeting"), Col("Schedule"), Col("Address"), Col("LogoUrl"),
+            Col("PaymentMobileBank"), Col("PaymentMobileId"), Col("PaymentMobilePhone"),
+            Col("NotificationPhone"), Col("RestaurantType"),
+            Col("MenuPdfUrl") ?? _menuPdfUrl,
+            Col("CurrencyReference"),
+            Col("VerticalType") ?? "restaurant",
+            Col("ZelleRecipient"), Col("ZelleInstructions"));
     }
 
     public static string? EnvResolve(params string[] keys)
