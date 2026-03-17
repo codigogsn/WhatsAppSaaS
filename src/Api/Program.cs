@@ -404,6 +404,90 @@ static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
                 db.Database.Migrate();
                 Log.Information("MIGRATE OK (Postgres)");
             }
+
+            // Step 3: Fix SQLite-generated column types (idempotent)
+            // SQLite migrations create decimal as TEXT and bool as INTEGER.
+            // This converts them to native PostgreSQL types.
+            try
+            {
+                Log.Information("SCHEMA FIX: checking column types...");
+                using var fixCmd = conn.CreateCommand();
+                fixCmd.CommandText = """
+                    DO $$
+                    DECLARE
+                        fixed int := 0;
+                    BEGIN
+                        -- Helper: convert text → numeric
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='SubtotalAmount' AND data_type='text') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "SubtotalAmount" TYPE numeric USING CASE WHEN btrim("SubtotalAmount")='' THEN NULL ELSE "SubtotalAmount"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='TotalAmount' AND data_type='text') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "TotalAmount" TYPE numeric USING CASE WHEN btrim("TotalAmount")='' THEN NULL ELSE "TotalAmount"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='DeliveryFee' AND data_type='text') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "DeliveryFee" TYPE numeric USING CASE WHEN btrim("DeliveryFee")='' THEN NULL ELSE "DeliveryFee"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='LocationLat' AND data_type='text') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "LocationLat" TYPE numeric USING CASE WHEN btrim("LocationLat")='' THEN NULL ELSE "LocationLat"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='LocationLng' AND data_type='text') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "LocationLng" TYPE numeric USING CASE WHEN btrim("LocationLng")='' THEN NULL ELSE "LocationLng"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashTenderedAmount' AND data_type='text') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "CashTenderedAmount" TYPE numeric USING CASE WHEN btrim("CashTenderedAmount")='' THEN NULL ELSE "CashTenderedAmount"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashBcvRateUsed' AND data_type='text') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "CashBcvRateUsed" TYPE numeric USING CASE WHEN btrim("CashBcvRateUsed")='' THEN NULL ELSE "CashBcvRateUsed"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeAmount' AND data_type='text') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "CashChangeAmount" TYPE numeric USING CASE WHEN btrim("CashChangeAmount")='' THEN NULL ELSE "CashChangeAmount"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeAmountBs' AND data_type='text') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "CashChangeAmountBs" TYPE numeric USING CASE WHEN btrim("CashChangeAmountBs")='' THEN NULL ELSE "CashChangeAmountBs"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeRequired' AND data_type<>'boolean') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "CashChangeRequired" TYPE boolean USING CASE WHEN "CashChangeRequired"::text IN ('1','true','t') THEN true ELSE false END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeReturned' AND data_type<>'boolean') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "CashChangeReturned" TYPE boolean USING CASE WHEN "CashChangeReturned"::text IN ('1','true','t') THEN true ELSE false END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='OrderItems' AND column_name='UnitPrice' AND data_type='text') THEN
+                            ALTER TABLE "OrderItems" ALTER COLUMN "UnitPrice" TYPE numeric USING CASE WHEN btrim("UnitPrice")='' THEN NULL ELSE "UnitPrice"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='OrderItems' AND column_name='LineTotal' AND data_type='text') THEN
+                            ALTER TABLE "OrderItems" ALTER COLUMN "LineTotal" TYPE numeric USING CASE WHEN btrim("LineTotal")='' THEN NULL ELSE "LineTotal"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='MenuItems' AND column_name='Price' AND data_type='text') THEN
+                            ALTER TABLE "MenuItems" ALTER COLUMN "Price" TYPE numeric USING CASE WHEN btrim("Price")='' THEN NULL ELSE "Price"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Customers' AND column_name='TotalSpent' AND data_type='text') THEN
+                            ALTER TABLE "Customers" ALTER COLUMN "TotalSpent" TYPE numeric USING CASE WHEN btrim("TotalSpent")='' THEN NULL ELSE "TotalSpent"::numeric END;
+                            fixed := fixed + 1;
+                        END IF;
+                        RAISE NOTICE 'Schema fix: % columns converted', fixed;
+                    END $$;
+                """;
+                fixCmd.ExecuteNonQuery();
+                Log.Information("SCHEMA FIX: column type conversion complete");
+            }
+            catch (Exception schemaEx)
+            {
+                Log.Error(schemaEx, "SCHEMA FIX: column type conversion failed (non-fatal)");
+            }
         }
         finally
         {
