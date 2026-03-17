@@ -1716,7 +1716,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
         order.DeliveryFee = state.DeliveryType == "delivery" ? Msg.DeliveryFeeUsd : 0m;
         order.RecalculateTotal();
 
+        _logger.LogInformation("FinalizeOrder: saving order {OrderId} — Payment={Pay} Cash={Cash} Change={Change} Items={Items}",
+            order.Id, order.PaymentMethod, order.CashCurrency, order.CashChangeRequired, order.Items.Count);
+
         await _orderRepository.AddOrderAsync(order, ct);
+
+        _logger.LogInformation("FinalizeOrder: order {OrderId} saved successfully", order.Id);
 
         // Staff notification: order confirmed
         if (_notificationService is not null)
