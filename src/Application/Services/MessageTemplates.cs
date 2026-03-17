@@ -251,6 +251,15 @@ internal static class Msg
          + "o enviando los datos en l\u00edneas separadas.\n\n"
          + "Luego presiona *Confirmar*.";
 
+    internal static string CheckoutFormPickup
+        => "\ud83d\udcdd *DATOS PARA PICKUP*\n\n"
+         + "\ud83d\udc64 *Nombre:*\n"
+         + "\ud83e\udeaa *C\u00e9dula:*\n"
+         + "\ud83d\udcf1 *Tel\u00e9fono:*\n\n"
+         + "Puedes responder copiando y pegando esta planilla\n"
+         + "o enviando los datos en l\u00edneas separadas.\n\n"
+         + "Luego presiona *Confirmar*.";
+
     internal static string CheckoutDataReceived
         => "\u2705 Datos recibidos. \u00bfQu\u00e9 deseas hacer?";
 
@@ -463,16 +472,21 @@ internal static class Msg
         // Estimated preparation time
         sb.AppendLine("\u23f1 Tiempo estimado: 30 minutos");
 
-        sb.AppendLine($"\ud83c\udfe1 Direcci\u00f3n: {address}");
+        if (deliveryType != "pickup" && !string.IsNullOrWhiteSpace(address))
+            sb.AppendLine($"\ud83c\udfe1 Direcci\u00f3n: {address}");
         sb.AppendLine($"\ud83d\udcb5 Pago: {paymentText}");
-        // Payment instruction for pago movil
-        if (paymentText.Contains("PAGO M\u00d3VIL", StringComparison.OrdinalIgnoreCase))
+        // Payment instruction for pago movil / zelle
+        if (paymentText.Contains("PAGO M\u00d3VIL", StringComparison.OrdinalIgnoreCase)
+            || paymentText.Contains("ZELLE", StringComparison.OrdinalIgnoreCase))
             sb.AppendLine("Cuando env\u00edes el comprobante tu pedido entrar\u00e1 en preparaci\u00f3n.");
         sb.AppendLine($"\ud83d\ude97 {FormatDeliveryType(deliveryType)}");
 
         sb.AppendLine();
         sb.AppendLine("Tu pedido est\u00e1 siendo preparado \ud83d\udc68\u200d\ud83c\udf73");
-        sb.Append("Te avisaremos cuando salga para delivery \ud83d\ude97");
+        if (deliveryType == "pickup")
+            sb.Append("Te avisaremos cuando est\u00e9 listo para retirar \ud83c\udfea");
+        else
+            sb.Append("Te avisaremos cuando salga para delivery \ud83d\ude97");
 
         return sb.ToString();
     }

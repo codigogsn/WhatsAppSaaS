@@ -262,7 +262,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     {
                         var shouldCaptureProof = !state.PaymentEvidenceReceived
                             && (state.PaymentEvidenceRequested
-                                || (state.Items.Count > 0 && state.PaymentMethod is "pago_movil" or "divisas")
+                                || (state.Items.Count > 0 && state.PaymentMethod is "pago_movil" or "divisas" or "zelle")
                                 || state.AwaitingPostConfirmProof);
 
                         if (shouldCaptureProof && message.Type is "image" or "document")
@@ -1597,7 +1597,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (!state.CheckoutFormSent)
         {
             state.CheckoutFormSent = true;
-            return Msg.CheckoutForm;
+            return state.DeliveryType == "pickup" ? Msg.CheckoutFormPickup : Msg.CheckoutForm;
         }
 
         return new BotReply(Msg.CheckoutDataReceived, Msg.CheckoutDataButtons);
@@ -1622,7 +1622,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("\u2022 \ud83d\udc64 Nombre:");
         if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("\u2022 \ud83e\udeaa C\u00e9dula:");
         if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("\u2022 \ud83d\udcf1 Tel\u00e9fono:");
-        if (string.IsNullOrWhiteSpace(state.Address)) missing.Add("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
+        if (state.DeliveryType != "pickup" && string.IsNullOrWhiteSpace(state.Address)) missing.Add("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
         if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("\u2022 \ud83d\udcb5 Pago:");
 
         // GPS requirement is vertical-specific (e.g. restaurant delivery needs it, pickup doesn't)
