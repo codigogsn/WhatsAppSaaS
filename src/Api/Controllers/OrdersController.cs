@@ -371,73 +371,125 @@ public sealed class OrdersController : ControllerBase
     }
 
     // PATCH /api/orders/{id}/cash-change-returned
+    // Full raw ADO.NET — EF reads on Orders fail due to integer/text column type mismatches
     [HttpPatch("{id:guid}/cash-change-returned")]
     public async Task<IActionResult> MarkCashChangeReturned(Guid id, [FromBody] CashChangeReturnedRequest? req = null)
     {
         if (!IsAdmin()) return Unauthorized();
 
-        var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
-        if (order is null) return NotFound(new { error = "Order not found" });
-        if (!order.CashChangeRequired) return BadRequest(new { error = "No change required for this order" });
-        if (order.CashChangeReturned) return Ok(new { success = true, alreadyReturned = true });
-
-        order.CashChangeReturned = true;
-        order.CashChangeReturnedAtUtc = DateTime.UtcNow;
-        order.CashChangeReturnedBy = "dashboard";
-        order.CashChangeReturnedReference = req?.Reference;
-        await _context.SaveChangesAsync();
-
-        // Send WhatsApp confirmation to customer
-        if (!string.IsNullOrWhiteSpace(order.From) && !string.IsNullOrWhiteSpace(order.PhoneNumberId))
+        try
         {
-            try
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+
+            // Step 1: Read order fields with raw SQL (immune to type mismatches)
+            string? fromPhone = null, phoneNumberId = null, customerName = null, businessIdStr = null;
+            bool cashChangeRequired = false, cashChangeReturned = false;
+            decimal cashChangeAmountBs = 0, cashChangeAmount = 0;
+
+            using (var readCmd = conn.CreateCommand())
             {
-                // Use raw SQL to avoid EF bool/decimal type mismatch on Businesses table
-                string? accessToken = null;
-                if (order.BusinessId.HasValue)
+                readCmd.CommandText = """
+                    SELECT "From", "PhoneNumberId", "CustomerName", CAST("BusinessId" AS TEXT),
+                           "CashChangeRequired", "CashChangeReturned",
+                           "CashChangeAmountBs", "CashChangeAmount"
+                    FROM "Orders" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@oid) LIMIT 1
+                """;
+                var p = readCmd.CreateParameter(); p.ParameterName = "oid"; p.Value = id.ToString();
+                readCmd.Parameters.Add(p);
+
+                using var reader = await readCmd.ExecuteReaderAsync();
+                if (!await reader.ReadAsync())
+                    return NotFound(new { error = "Order not found" });
+
+                fromPhone = reader.IsDBNull(0) ? null : reader.GetString(0);
+                phoneNumberId = reader.IsDBNull(1) ? null : reader.GetString(1);
+                customerName = reader.IsDBNull(2) ? null : reader.GetString(2);
+                businessIdStr = reader.IsDBNull(3) ? null : reader.GetString(3);
+
+                var rawReq = reader.IsDBNull(4) ? null : reader.GetValue(4);
+                cashChangeRequired = rawReq switch { bool b => b, int i => i != 0, long l => l != 0,
+                    string s => s is "1" or "true" or "True", _ => false };
+
+                var rawRet = reader.IsDBNull(5) ? null : reader.GetValue(5);
+                cashChangeReturned = rawRet switch { bool b => b, int i => i != 0, long l => l != 0,
+                    string s => s is "1" or "true" or "True", _ => false };
+
+                if (!reader.IsDBNull(6))
+                    decimal.TryParse(reader.GetValue(6)?.ToString(), System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out cashChangeAmountBs);
+                if (!reader.IsDBNull(7))
+                    decimal.TryParse(reader.GetValue(7)?.ToString(), System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out cashChangeAmount);
+            }
+
+            if (!cashChangeRequired)
+                return BadRequest(new { error = "No change required for this order" });
+            if (cashChangeReturned)
+                return Ok(new { success = true, alreadyReturned = true });
+
+            // Step 2: Update with raw SQL
+            var now = DateTime.UtcNow;
+            using (var updCmd = conn.CreateCommand())
+            {
+                updCmd.CommandText = """
+                    UPDATE "Orders"
+                    SET "CashChangeReturned" = true,
+                        "CashChangeReturnedAtUtc" = @ts,
+                        "CashChangeReturnedBy" = 'dashboard',
+                        "CashChangeReturnedReference" = @ref
+                    WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@oid)
+                """;
+                var p1 = updCmd.CreateParameter(); p1.ParameterName = "oid"; p1.Value = id.ToString(); updCmd.Parameters.Add(p1);
+                var p2 = updCmd.CreateParameter(); p2.ParameterName = "ts"; p2.Value = now; updCmd.Parameters.Add(p2);
+                var p3 = updCmd.CreateParameter(); p3.ParameterName = "ref"; p3.Value = (object?)req?.Reference ?? DBNull.Value; updCmd.Parameters.Add(p3);
+                await updCmd.ExecuteNonQueryAsync();
+            }
+
+            _logger.LogInformation("CASH CHANGE RETURNED: OrderId={OrderId} Ref={Ref}", id, req?.Reference);
+
+            // Step 3: Send WhatsApp notification
+            if (!string.IsNullOrWhiteSpace(fromPhone) && !string.IsNullOrWhiteSpace(phoneNumberId))
+            {
+                try
                 {
-                    var conn = _context.Database.GetDbConnection();
-                    if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
-                    using var cmd = conn.CreateCommand();
-                    cmd.CommandText = """SELECT "AccessToken" FROM "Businesses" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@bid) LIMIT 1""";
-                    var p = cmd.CreateParameter(); p.ParameterName = "bid"; p.Value = order.BusinessId.Value.ToString();
-                    cmd.Parameters.Add(p);
-                    var result = await cmd.ExecuteScalarAsync();
-                    accessToken = result as string;
+                    string? accessToken = null;
+                    if (!string.IsNullOrWhiteSpace(businessIdStr))
+                    {
+                        using var tokenCmd = conn.CreateCommand();
+                        tokenCmd.CommandText = """SELECT "AccessToken" FROM "Businesses" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@bid) LIMIT 1""";
+                        var tp = tokenCmd.CreateParameter(); tp.ParameterName = "bid"; tp.Value = businessIdStr; tokenCmd.Parameters.Add(tp);
+                        var tokenResult = await tokenCmd.ExecuteScalarAsync();
+                        accessToken = tokenResult as string;
+                    }
+
+                    var orderCode = id.ToString("N")[..8].ToUpperInvariant();
+                    var amount = cashChangeAmountBs > 0 ? cashChangeAmountBs : cashChangeAmount;
+                    var body = FormatCashChangeNotification(customerName, orderCode, amount, req?.Reference);
+
+                    _logger.LogInformation("Sending cash change WhatsApp to {To} for order {OrderId}", fromPhone, id);
+                    await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
+                    {
+                        To = fromPhone, PhoneNumberId = phoneNumberId, AccessToken = accessToken, Body = body
+                    });
+                    _logger.LogInformation("Cash change WhatsApp sent for order {OrderId}", id);
                 }
-
-                var orderCode = order.Id.ToString("N")[..8].ToUpperInvariant();
-                var body = FormatCashChangeNotification(
-                    order.CustomerName, orderCode,
-                    order.CashChangeAmountBs ?? order.CashChangeAmount ?? 0,
-                    req?.Reference);
-
-                _logger.LogInformation("Sending cash change WhatsApp to {To} via {PhoneNumberId} for order {OrderId}",
-                    order.From, order.PhoneNumberId, id);
-
-                await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
+                catch (Exception whatsEx)
                 {
-                    To = order.From,
-                    PhoneNumberId = order.PhoneNumberId,
-                    AccessToken = accessToken,
-                    Body = body
-                });
+                    _logger.LogError(whatsEx, "WhatsApp send failed for cash change return, OrderId={OrderId}", id);
+                }
+            }
 
-                _logger.LogInformation("Cash change WhatsApp sent successfully for order {OrderId}", id);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed WhatsApp cash change notification for {OrderId}. To={To}, Phone={PhoneId}",
-                    id, order.From, order.PhoneNumberId);
-            }
+            return Ok(new { success = true, id, cashChangeReturnedAtUtc = now });
         }
-        else
+        catch (Exception ex)
         {
-            _logger.LogWarning("Cannot send cash change WhatsApp for order {OrderId}: From={From}, PhoneNumberId={PhoneId}",
-                id, order.From, order.PhoneNumberId);
+            _logger.LogError(ex, "CASH CHANGE RETURN FAILED: OrderId={OrderId} Ref={Ref} Ex={ExType}: {ExMsg}",
+                id, req?.Reference, ex.GetType().Name, ex.Message);
+            if (ex.InnerException != null)
+                _logger.LogError("INNER: {Inner}", ex.InnerException.Message);
+            return StatusCode(500, new { error = $"Failed: {ex.GetType().Name}: {ex.Message}" });
         }
-
-        return Ok(new { success = true, id = order.Id, cashChangeReturnedAtUtc = order.CashChangeReturnedAtUtc });
     }
 
     public sealed class CashChangeReturnedRequest
