@@ -410,7 +410,7 @@ static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
             // This converts them to native PostgreSQL types.
             try
             {
-                Log.Information("SCHEMA FIX: checking column types...");
+                Log.Information("SCHEMA FIX: executing column type conversions...");
                 using var fixCmd = conn.CreateCommand();
                 fixCmd.CommandText = """
                     DO $$
@@ -482,11 +482,47 @@ static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
                     END $$;
                 """;
                 fixCmd.ExecuteNonQuery();
-                Log.Information("SCHEMA FIX: column type conversion complete");
+                Log.Information("SCHEMA FIX: column type conversion complete — verifying...");
+
+                // Verify critical columns are now correct types
+                using var verifyCmd = conn.CreateCommand();
+                verifyCmd.CommandText = """
+                    SELECT table_name, column_name, data_type
+                    FROM information_schema.columns
+                    WHERE (table_name, column_name) IN (
+                        ('Orders','SubtotalAmount'),('Orders','TotalAmount'),('Orders','DeliveryFee'),
+                        ('Orders','CashChangeRequired'),('Orders','CashChangeReturned'),
+                        ('Orders','CashTenderedAmount'),('Orders','CashChangeAmount'),
+                        ('OrderItems','UnitPrice'),('OrderItems','LineTotal'),
+                        ('MenuItems','Price'),('Customers','TotalSpent')
+                    )
+                    ORDER BY table_name, column_name
+                """;
+                using var vr = verifyCmd.ExecuteReader();
+                while (vr.Read())
+                {
+                    var tbl = vr.GetString(0);
+                    var col = vr.GetString(1);
+                    var dtype = vr.GetString(2);
+                    var ok = dtype is "numeric" or "boolean";
+                    if (ok)
+                        Log.Information("SCHEMA VERIFY: {Table}.{Column} = {Type} ✓", tbl, col, dtype);
+                    else
+                        Log.Error("SCHEMA VERIFY: {Table}.{Column} = {Type} ✗ STILL WRONG", tbl, col, dtype);
+                }
+            }
+            catch (Npgsql.PostgresException pgEx)
+            {
+                Log.Fatal(pgEx, "SCHEMA FIX FAILED (Postgres): SqlState={SqlState} Table={Table} Column={Column} " +
+                    "Constraint={Constraint} MessageText={Msg} Detail={Detail} Hint={Hint}",
+                    pgEx.SqlState, pgEx.TableName, pgEx.ColumnName,
+                    pgEx.ConstraintName, pgEx.MessageText, pgEx.Detail, pgEx.Hint);
+                throw; // HARD FAIL — app must not start with broken schema
             }
             catch (Exception schemaEx)
             {
-                Log.Error(schemaEx, "SCHEMA FIX: column type conversion failed (non-fatal)");
+                Log.Fatal(schemaEx, "SCHEMA FIX FAILED: {Type}: {Message}", schemaEx.GetType().Name, schemaEx.Message);
+                throw; // HARD FAIL
             }
         }
         finally

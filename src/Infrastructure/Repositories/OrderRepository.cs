@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -8,10 +9,12 @@ namespace WhatsAppSaaS.Infrastructure.Repositories;
 public sealed class OrderRepository : IOrderRepository
 {
     private readonly AppDbContext _db;
+    private readonly ILogger<OrderRepository> _logger;
 
-    public OrderRepository(AppDbContext db)
+    public OrderRepository(AppDbContext db, ILogger<OrderRepository> logger)
     {
         _db = db;
+        _logger = logger;
     }
 
     public async Task AddOrderAsync(Order order, CancellationToken ct = default)
@@ -76,9 +79,70 @@ public sealed class OrderRepository : IOrderRepository
                 customer.LastDeliveryAddress = order.Address;
         }
 
+        // Data guards — ensure monetary fields are never null for EF
+        order.SubtotalAmount ??= 0m;
+        order.DeliveryFee ??= 0m;
+        order.TotalAmount ??= (order.SubtotalAmount ?? 0m) + (order.DeliveryFee ?? 0m);
+
         _db.Orders.Add(order);
 
-        await _db.SaveChangesAsync(ct);
+        // Pre-save diagnostic log
+        _logger.LogInformation(
+            "ORDER SAVE: Id={Id} Biz={Biz} Status={Status} Items={Items} " +
+            "Sub={Sub} Fee={Fee} Total={Total} Payment={Pay} Delivery={Del} " +
+            "Name={Name} Phone={Phone} Addr={Addr} GPS={Lat},{Lng} " +
+            "Cash={CashCur} Tendered={Tend} ChangeReq={ChgReq} ChgAmt={ChgAmt}",
+            order.Id, order.BusinessId, order.Status, order.Items.Count,
+            order.SubtotalAmount, order.DeliveryFee, order.TotalAmount,
+            order.PaymentMethod, order.DeliveryType,
+            order.CustomerName, order.CustomerPhone, order.Address,
+            order.LocationLat, order.LocationLng,
+            order.CashCurrency, order.CashTenderedAmount,
+            order.CashChangeRequired, order.CashChangeAmount);
+
+        foreach (var item in order.Items)
+        {
+            _logger.LogInformation("  ITEM: {Qty}x {Name} @ {Price} = {Total}",
+                item.Quantity, item.Name, item.UnitPrice, item.LineTotal);
+        }
+
+        // Log EF change tracker entries
+        foreach (var entry in _db.ChangeTracker.Entries())
+        {
+            _logger.LogDebug("  TRACKED: {Entity} [{State}]", entry.Entity.GetType().Name, entry.State);
+        }
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            _logger.LogInformation("ORDER SAVE: SUCCESS Id={Id}", order.Id);
+        }
+        catch (DbUpdateException dbEx)
+        {
+            var inner = dbEx.InnerException;
+            if (inner is Npgsql.PostgresException pgEx)
+            {
+                _logger.LogError(pgEx,
+                    "ORDER SAVE FAILED (Postgres): SqlState={SqlState} Table={Table} Column={Column} " +
+                    "Constraint={Constraint} DataType={DataType} Message={Msg} Detail={Detail} Hint={Hint} Where={Where}",
+                    pgEx.SqlState, pgEx.TableName, pgEx.ColumnName,
+                    pgEx.ConstraintName, pgEx.Data["DataTypeName"],
+                    pgEx.MessageText, pgEx.Detail, pgEx.Hint, pgEx.Where);
+            }
+            else
+            {
+                _logger.LogError(dbEx, "ORDER SAVE FAILED (DbUpdate): {Type}: {Message}",
+                    inner?.GetType().Name ?? dbEx.GetType().Name,
+                    inner?.Message ?? dbEx.Message);
+            }
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ORDER SAVE FAILED (unexpected): {Type}: {Message}",
+                ex.GetType().Name, ex.Message);
+            throw;
+        }
     }
 
     public async Task<Order?> GetLastCompletedOrderAsync(string fromPhone, Guid businessId, CancellationToken ct = default)
