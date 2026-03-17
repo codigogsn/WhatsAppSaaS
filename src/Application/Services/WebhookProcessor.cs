@@ -449,6 +449,27 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                         }
 
+                        // Guard: if checkout form was sent but NO customer field is filled yet,
+                        // the user tapped a premature Confirmar — re-show the checkout form
+                        if (state.CheckoutFormSent
+                            && string.IsNullOrWhiteSpace(state.CustomerName)
+                            && string.IsNullOrWhiteSpace(state.CustomerIdNumber)
+                            && string.IsNullOrWhiteSpace(state.CustomerPhone)
+                            && string.IsNullOrWhiteSpace(state.Address))
+                        {
+                            var formReply = BuildOrderReplyFromState(state, _bcvRate);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = formReply.Body,
+                                Buttons = formReply.Buttons,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
                         // Finalize the order (existing behavior)
                         var confirmReply = await FinalizeOrderIfPossibleAsync(state, message.From, phoneNumberId, businessContext, cancellationToken);
 
@@ -938,13 +959,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     state.AwaitingCashPayout = false;
                                     state.CashFlowCompleted = true;
 
-                                    // Send payout confirmation
-                                    await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashPayoutReceived, Buttons = Msg.CashPayoutButtons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                                    // BUG 2 fix: immediately advance to checkout form after payout data
-                                    // BuildOrderReplyFromState will set CheckoutFormSent and return the form
+                                    // Payout data acknowledged — transition directly to checkout form.
+                                    // No Confirmar/Editar buttons here: payout is not a confirmation step.
+                                    // BuildOrderReplyFromState will set CheckoutFormSent and return the form.
                                     var checkoutReply = BuildOrderReplyFromState(state, _bcvRate);
-                                    await SendAsync(new OutgoingMessage { To = message.From, Body = checkoutReply.Body, Buttons = checkoutReply.Buttons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                                    var checkoutBody = "\u2705 Datos de vuelto recibidos.\n\n" + checkoutReply.Body;
+                                    await SendAsync(new OutgoingMessage { To = message.From, Body = checkoutBody, Buttons = checkoutReply.Buttons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
 
                                     state.LastActivityUtc = DateTime.UtcNow;
                                     await _stateStore.SaveAsync(conversationId, state, cancellationToken);

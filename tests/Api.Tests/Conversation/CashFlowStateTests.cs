@@ -256,4 +256,125 @@ public class CashFlowStateTests
         reply.Body.Should().Contain("Nombre:");
         state.CheckoutFormSent.Should().BeTrue();
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  POST-PAYOUT TRANSITION — no premature buttons
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void BuildOrderReplyFromState_AfterCashPayoutCompleted_ReturnsCheckoutForm()
+    {
+        // Simulates the state right after payout data is accepted and CashFlowCompleted=true
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "efectivo";
+        state.CashCurrency = "USD";
+        state.CashTenderedAmount = 20m;
+        state.CashChangeRequired = true;
+        state.CashChangeAmount = 7m;
+        state.CashChangeAmountBs = 3100m;
+        state.CashPayoutBank = "Venezuela";
+        state.CashPayoutIdNumber = "26063230";
+        state.CashPayoutPhone = "04141627985";
+        state.AwaitingCashPayout = false;
+        state.CashFlowCompleted = true;
+        // CheckoutFormSent NOT yet true — BuildOrderReplyFromState should set it
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Should return the checkout form (Nombre/Cédula/Teléfono/Dirección)
+        reply.Body.Should().Contain("Nombre:");
+        state.CheckoutFormSent.Should().BeTrue();
+        // Should NOT contain "Datos de vuelto recibidos" — that's the payout confirmation
+        reply.Body.Should().NotContain("Datos de vuelto recibidos");
+        // Should NOT have Confirmar/Editar buttons — checkout form is text-only
+        reply.Buttons.Should().BeNull();
+    }
+
+    [Fact]
+    public void BuildOrderReplyFromState_CashPayoutCompleted_CheckoutFormAlreadySent_ShowsDataReceived()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "efectivo";
+        state.CashFlowCompleted = true;
+        state.CheckoutFormSent = true;
+        // Customer data already filled
+        state.CustomerName = "Juan";
+        state.CustomerIdNumber = "12345";
+        state.CustomerPhone = "04141234567";
+        state.Address = "Calle 1";
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Should show the REAL "Datos recibidos" with confirm/edit buttons
+        reply.Body.Should().Contain("Datos recibidos");
+        reply.Buttons.Should().NotBeNull();
+        reply.Buttons.Should().HaveCountGreaterThan(0);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  PREMATURE CONFIRM GUARD
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void BuildOrderReplyFromState_CheckoutFormSent_NoCustomerData_ReturnsDataReceivedNotMissing()
+    {
+        // Simulates: CheckoutFormSent=true but NO customer fields filled
+        // (user tapped premature Confirmar before entering data)
+        // BuildOrderReplyFromState should return "Datos recibidos" (the default post-checkout state)
+        // The confirm handler separately guards against this scenario.
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "efectivo";
+        state.CashFlowCompleted = true;
+        state.CheckoutFormSent = true;
+        // ALL customer fields are null
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // BuildOrderReplyFromState returns "Datos recibidos" because CheckoutFormSent=true
+        reply.Body.Should().Contain("Datos recibidos");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SINGLE "DATOS RECIBIDOS" — no duplicates
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void CashPayoutCompleted_BuildOrderReply_OnlyCheckoutForm_NoPayoutConfirm()
+    {
+        // After payout data completion, BuildOrderReplyFromState should only return
+        // the checkout form — no separate payout confirmation with buttons.
+        // This validates the flow produces exactly one prompt, not two.
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "efectivo";
+        state.CashFlowCompleted = true;
+        // CheckoutFormSent NOT set
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Must be the checkout form, not a payout confirmation
+        reply.Body.Should().Contain("Nombre:");
+        reply.Body.Should().NotContain("vuelto");
+        // No interactive buttons — checkout form is text-only (buttons come later after data is filled)
+        reply.Buttons.Should().BeNull();
+    }
 }
