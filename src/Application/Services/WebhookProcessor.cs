@@ -159,36 +159,77 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                         if (state.Items.Count > 0 && state.CheckoutFormSent)
                         {
-                            var autoFinalizeReply = await FinalizeOrderIfPossibleAsync(
-                                state, message.From, phoneNumberId, businessContext, cancellationToken);
-
-                            if (autoFinalizeReply is not null)
+                            try
                             {
-                                _logger.LogInformation("Location finalize reply: {Reply}", autoFinalizeReply.Length > 100 ? autoFinalizeReply[..100] : autoFinalizeReply);
+                                var autoFinalizeReply = await FinalizeOrderIfPossibleAsync(
+                                    state, message.From, phoneNumberId, businessContext, cancellationToken);
+
+                                if (autoFinalizeReply is not null)
+                                {
+                                    _logger.LogInformation("Location finalize reply length={Len} for {ConversationId}", autoFinalizeReply.Length, conversationId);
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = autoFinalizeReply,
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
+                                else
+                                {
+                                    _logger.LogInformation("Location finalize returned null for {ConversationId}", conversationId);
+                                }
+                            }
+                            catch (Exception finEx)
+                            {
+                                _logger.LogError(finEx, "LOCATION FINALIZE FAILED for {ConversationId}. " +
+                                    "State: Name={Name} ID={ID} Phone={Phone} Addr={Addr} Payment={Pay} GPS={GPS}",
+                                    conversationId, state.CustomerName, state.CustomerIdNumber,
+                                    state.CustomerPhone, state.Address, state.PaymentMethod, state.GpsPinReceived);
+
+                                // Send a visible error to the user so they know something went wrong
                                 await SendAsync(new OutgoingMessage
                                 {
                                     To = message.From,
-                                    Body = autoFinalizeReply,
+                                    Body = "\u26a0\ufe0f Hubo un error procesando tu pedido. Por favor intenta nuevamente escribiendo *confirmar*.",
                                     PhoneNumberId = phoneNumberId,
                                     AccessToken = businessContext.AccessToken
                                 }, businessContext.BusinessId, conversationId, cancellationToken);
                             }
-                            else
-                            {
-                                _logger.LogInformation("Location finalize returned null (order created) for {ConversationId}", conversationId);
-                            }
                         }
                         else if (state.Items.Count > 0)
                         {
-                            _logger.LogWarning("Location received but CheckoutFormSent={CFS}, Items={Items} for {ConversationId}",
-                                state.CheckoutFormSent, state.Items.Count, conversationId);
-                            await SendAsync(new OutgoingMessage
+                            // CheckoutFormSent may be false but all data might be present from
+                            // inline parsing. Try finalization anyway to avoid dead-end states.
+                            _logger.LogInformation("Location received with CheckoutFormSent={CFS} — attempting finalize for {ConversationId}",
+                                state.CheckoutFormSent, conversationId);
+                            state.CheckoutFormSent = true; // Ensure checkout form gate is satisfied
+                            try
                             {
-                                To = message.From,
-                                Body = Msg.GpsReceived,
-                                PhoneNumberId = phoneNumberId,
-                                AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                                var fallbackReply = await FinalizeOrderIfPossibleAsync(
+                                    state, message.From, phoneNumberId, businessContext, cancellationToken);
+                                if (fallbackReply is not null)
+                                {
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = fallbackReply,
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
+                            }
+                            catch (Exception fbEx)
+                            {
+                                _logger.LogError(fbEx, "Location fallback finalize failed for {ConversationId}", conversationId);
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = Msg.GpsReceived,
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+                            }
                         }
 
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
