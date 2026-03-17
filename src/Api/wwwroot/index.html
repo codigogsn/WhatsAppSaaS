@@ -1877,6 +1877,30 @@ async function load() {
             </div>
           </div>
 
+          ${o.paymentMethod === 'efectivo' && o.cashCurrency ? `
+          <!-- SECTION 5b: Cash Details -->
+          <div class="detail-section">
+            <div class="detail-section-title">Detalles Efectivo</div>
+            <div class="detail-section-content">
+              <div class="detail-cols">
+                <div><div class="dc-label">Moneda</div><div class="dc-value">${esc(o.cashCurrency)}</div></div>
+                <div><div class="dc-label">Entregado</div><div class="dc-value">${fmtMoney(o.cashTenderedAmount)} ${esc(o.cashCurrency)}</div></div>
+                ${o.cashChangeRequired ? `
+                <div><div class="dc-label">Vuelto</div><div class="dc-value">${fmtMoney(o.cashChangeAmount)} ${esc(o.cashCurrency)}${o.cashChangeAmountBs ? ' (Bs. ' + fmtMoney(o.cashChangeAmountBs) + ')' : ''}</div></div>
+                ` : '<div><div class="dc-label">Vuelto</div><div class="dc-value ok">Sin vuelto</div></div>'}
+              </div>
+              ${o.cashChangeRequired && o.cashPayoutBank ? `
+              <div style="margin-top:8px;font-size:13px;color:var(--text-secondary);">
+                <b>Pago m\u00f3vil:</b> ${esc(o.cashPayoutBank)} / ${esc(o.cashPayoutIdNumber)} / ${esc(o.cashPayoutPhone)}
+              </div>` : ''}
+              ${o.cashChangeRequired ? (o.cashChangeReturned
+                ? '<div style="margin-top:10px;"><span class="pill pill-Completed">VUELTO DEVUELTO</span> <span class="small muted">' + (o.cashChangeReturnedAtUtc ? new Date(o.cashChangeReturnedAtUtc).toLocaleString('es-VE') : '') + '</span>' + (o.cashChangeReturnedReference ? ' <span class="small muted">Ref: ' + esc(o.cashChangeReturnedReference) + '</span>' : '') + '</div>'
+                : '<div style="margin-top:10px;display:flex;gap:8px;align-items:center;"><span class="pill pill-Pending">VUELTO PENDIENTE</span><button onclick="event.stopPropagation();markChangeReturned(\'' + esc(o.id) + '\')" class="primary" style="font-size:12px;padding:5px 14px;">Pago devuelto</button></div>'
+              ) : ''}
+            </div>
+          </div>
+          ` : ''}
+
           <!-- SECTION 6: Estado -->
           <div class="detail-section">
             <div class="detail-section-title">Estado</div>
@@ -1967,6 +1991,18 @@ async function rejectPayment(orderId){
     method: 'PATCH', headers: adminHeaders()
   });
   if (!res.ok) { alert('Error rechazando pago'); return; }
+  await load();
+}
+
+async function markChangeReturned(orderId){
+  const ref = prompt('Referencia de transferencia (opcional):');
+  if (ref === null) return; // user cancelled prompt
+  const res = await fetch('/api/orders/' + orderId + '/cash-change-returned', {
+    method: 'PATCH', headers: {...adminHeaders(), 'Content-Type': 'application/json'},
+    body: JSON.stringify({ reference: ref || null })
+  });
+  if (!res.ok) { showErrorToast('Error', 'No se pudo marcar el vuelto como devuelto'); return; }
+  showOrderToast({ id: orderId, customerName: 'Vuelto devuelto', items: [], totalAmount: null });
   await load();
 }
 

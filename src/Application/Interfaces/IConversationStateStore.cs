@@ -33,6 +33,20 @@ public sealed class ConversationFields
 
     public string? SpecialInstructions { get; set; }
     public bool OrderConfirmed { get; set; }
+
+    // Cash sub-flow state
+    public string? CashCurrency { get; set; }
+    public decimal? CashTenderedAmount { get; set; }
+    public bool CashChangeRequired { get; set; }
+    public decimal? CashChangeAmount { get; set; }
+    public decimal? CashChangeAmountBs { get; set; }
+    public string? CashPayoutBank { get; set; }
+    public string? CashPayoutIdNumber { get; set; }
+    public string? CashPayoutPhone { get; set; }
+    public bool AwaitingCashCurrency { get; set; }
+    public bool AwaitingCashAmount { get; set; }
+    public bool AwaitingCashPayout { get; set; }
+    public bool CashFlowCompleted { get; set; }
     public bool ExtrasOffered { get; set; }
     public bool ObservationPromptSent { get; set; }
     public bool ObservationAnswered { get; set; }
@@ -102,6 +116,18 @@ public sealed class ConversationFields
         ComboAcceptedCount = 0;
         ComboDeclinedCount = 0;
         PendingAmbiguousItems = null;
+        CashCurrency = null;
+        CashTenderedAmount = null;
+        CashChangeRequired = false;
+        CashChangeAmount = null;
+        CashChangeAmountBs = null;
+        CashPayoutBank = null;
+        CashPayoutIdNumber = null;
+        CashPayoutPhone = null;
+        AwaitingCashCurrency = false;
+        AwaitingCashAmount = false;
+        AwaitingCashPayout = false;
+        CashFlowCompleted = false;
         LastActivityUtc = null;
     }
 }

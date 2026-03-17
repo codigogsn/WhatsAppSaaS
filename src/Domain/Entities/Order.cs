@@ -58,7 +58,22 @@ public class Order
     public DateTime? PaymentVerifiedAtUtc { get; set; }
     public string? PaymentVerifiedBy { get; set; }
 
-    // ⏱️ Operational timestamps
+    // Cash payment details
+    public string? CashCurrency { get; set; }
+    public decimal? CashTenderedAmount { get; set; }
+    public decimal? CashBcvRateUsed { get; set; }
+    public bool CashChangeRequired { get; set; }
+    public decimal? CashChangeAmount { get; set; }
+    public decimal? CashChangeAmountBs { get; set; }
+    public string? CashPayoutBank { get; set; }
+    public string? CashPayoutIdNumber { get; set; }
+    public string? CashPayoutPhone { get; set; }
+    public bool CashChangeReturned { get; set; }
+    public DateTime? CashChangeReturnedAtUtc { get; set; }
+    public string? CashChangeReturnedBy { get; set; }
+    public string? CashChangeReturnedReference { get; set; }
+
+    // Operational timestamps
     public DateTime? AcceptedAtUtc { get; set; }
     public DateTime? PreparingAtUtc { get; set; }
     public DateTime? DeliveredAtUtc { get; set; }

@@ -787,6 +787,146 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // C-cash) Cash sub-flow handlers
+                    if (state.PaymentMethod == "efectivo" && !state.CashFlowCompleted)
+                    {
+                        // C-cash-1) Currency selection
+                        if (state.AwaitingCashCurrency && t is "cash_usd" or "cash_eur" or "cash_bs")
+                        {
+                            state.CashCurrency = t switch { "cash_usd" => "USD", "cash_eur" => "EUR", _ => "Bs" };
+                            state.AwaitingCashCurrency = false;
+                            var cashReply1 = BuildOrderReplyFromState(state, _bcvRate);
+                            await SendAsync(new OutgoingMessage { To = message.From, Body = cashReply1.Body, Buttons = cashReply1.Buttons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        // C-cash-2) Tendered amount
+                        if (state.AwaitingCashAmount)
+                        {
+                            var amount = TryParseCashAmount(rawText);
+                            if (amount == null)
+                            {
+                                await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashInsufficientAmount, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                                state.LastActivityUtc = DateTime.UtcNow;
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+
+                            var totalUsd = ComputeOrderTotalUsd(state);
+                            var totalInCurrency = ConvertUsdToCurrency(totalUsd, state.CashCurrency!, _bcvRate);
+
+                            if (amount.Value < totalInCurrency)
+                            {
+                                await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashInsufficientAmount, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                                state.LastActivityUtc = DateTime.UtcNow;
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+
+                            state.CashTenderedAmount = amount.Value;
+                            state.AwaitingCashAmount = false;
+                            var cashChange = amount.Value - totalInCurrency;
+
+                            if (cashChange <= 0.01m)
+                            {
+                                // No change needed
+                                state.CashChangeRequired = false;
+                                state.CashFlowCompleted = true;
+                                await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashNoChange, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                            }
+                            else
+                            {
+                                // Change required
+                                state.CashChangeRequired = true;
+                                state.CashChangeAmount = Math.Round(cashChange, 2);
+                                state.CashChangeAmountBs = ConvertChangeToBolivares(cashChange, state.CashCurrency!, _bcvRate);
+
+                                await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashChangeInfo(cashChange, state.CashCurrency!, state.CashChangeAmountBs), PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                                if (state.CashCurrency == "Bs")
+                                {
+                                    // Bs change — still collect payout data for transfer
+                                    state.AwaitingCashPayout = true;
+                                }
+                                else
+                                {
+                                    // Foreign currency change returned in Bs
+                                    state.AwaitingCashPayout = true;
+                                }
+                            }
+
+                            // Advance to next step
+                            var cashReply2 = BuildOrderReplyFromState(state, _bcvRate);
+                            if (!state.AwaitingCashPayout)
+                            {
+                                await SendAsync(new OutgoingMessage { To = message.From, Body = cashReply2.Body, Buttons = cashReply2.Buttons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                            }
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        // C-cash-3) Payout data collection
+                        if (state.AwaitingCashPayout)
+                        {
+                            // Handle "editar payout" button
+                            if (t == "editar payout")
+                            {
+                                state.CashPayoutBank = null;
+                                state.CashPayoutIdNumber = null;
+                                state.CashPayoutPhone = null;
+                                await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashPayoutDataPrompt, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                                state.LastActivityUtc = DateTime.UtcNow;
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+
+                            // Try to parse payout data from text (bank/CI/phone)
+                            var lines = rawText.Split(new[] { '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                            if (lines.Length >= 2)
+                            {
+                                // Try labeled extraction first
+                                string? bank = null, ci = null, phone = null;
+                                foreach (var line in lines)
+                                {
+                                    var stripped = StripAccents(line.Trim().ToLowerInvariant());
+                                    if (stripped.StartsWith("banco") && line.Contains(':'))
+                                        bank = line[(line.IndexOf(':') + 1)..].Trim();
+                                    else if ((stripped.StartsWith("cedula") || stripped.StartsWith("ci") || stripped.StartsWith("rif")) && line.Contains(':'))
+                                        ci = line[(line.IndexOf(':') + 1)..].Trim();
+                                    else if (stripped.StartsWith("telefono") && line.Contains(':'))
+                                        phone = line[(line.IndexOf(':') + 1)..].Trim();
+                                }
+                                // Fallback: positional (bank, CI, phone)
+                                bank ??= lines.Length >= 1 ? lines[0].Trim() : null;
+                                ci ??= lines.Length >= 2 ? lines[1].Trim() : null;
+                                phone ??= lines.Length >= 3 ? lines[2].Trim() : null;
+
+                                if (!string.IsNullOrWhiteSpace(bank) && !string.IsNullOrWhiteSpace(ci))
+                                {
+                                    state.CashPayoutBank = bank;
+                                    state.CashPayoutIdNumber = ci;
+                                    state.CashPayoutPhone = phone;
+                                    state.AwaitingCashPayout = false;
+                                    state.CashFlowCompleted = true;
+
+                                    await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashPayoutReceived, Buttons = Msg.CashPayoutButtons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                                    state.LastActivityUtc = DateTime.UtcNow;
+                                    await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                    continue;
+                                }
+                            }
+
+                            // Not enough data — re-prompt
+                            await SendAsync(new OutgoingMessage { To = message.From, Body = Msg.CashPayoutDataPrompt, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                    }
+
                     // D0) Standalone payment method at ANY stage with items in cart
                     //     Only for single-line messages — multiline may be a checkout form
                     if (state.Items.Count > 0 && !IsRestartIntent(t) && !rawText.Contains('\n'))
@@ -1214,6 +1354,51 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }, biz.BusinessId, conversationId, ct);
     }
 
+    // ── Cash flow helpers ──
+
+    internal static decimal ComputeOrderTotalUsd(ConversationFields state)
+    {
+        return state.Items.Sum(i => i.UnitPrice * i.Quantity);
+    }
+
+    internal static decimal ConvertUsdToCurrency(decimal usdAmount, string currency, ResolvedRate? bcvRate)
+    {
+        if (currency == "USD" || bcvRate == null) return usdAmount;
+        if (currency == "Bs") return Math.Round(usdAmount * bcvRate.Rate, 2);
+        // EUR: if we have a EUR rate, use it; otherwise approximate
+        if (currency == "EUR" && bcvRate.CurrencyLabel == "EUR")
+            return Math.Round(usdAmount * bcvRate.Rate, 2); // already EUR-based
+        // Fallback: rough 1:1 for EUR
+        return usdAmount;
+    }
+
+    internal static decimal ConvertChangeToBolivares(decimal changeInCurrency, string currency, ResolvedRate? bcvRate)
+    {
+        if (bcvRate == null) return changeInCurrency;
+        if (currency == "Bs") return changeInCurrency;
+        if (currency == "USD") return Math.Round(changeInCurrency * bcvRate.Rate, 2);
+        if (currency == "EUR")
+        {
+            if (bcvRate.CurrencyLabel == "EUR")
+                return Math.Round(changeInCurrency * bcvRate.Rate, 2);
+            // Approximate EUR→Bs via USD rate * ~1.08
+            return Math.Round(changeInCurrency * bcvRate.Rate * 1.08m, 2);
+        }
+        return changeInCurrency;
+    }
+
+    internal static decimal? TryParseCashAmount(string text)
+    {
+        // Clean the input: remove currency symbols, words, whitespace
+        var cleaned = text.Trim().ToLowerInvariant();
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"[^\d,.\s]", "").Trim();
+        cleaned = cleaned.Replace(",", ".");  // handle comma as decimal
+        if (decimal.TryParse(cleaned, System.Globalization.NumberStyles.Any,
+            System.Globalization.CultureInfo.InvariantCulture, out var val) && val > 0)
+            return val;
+        return null;
+    }
+
     private static string? FirstNonEmpty(params string?[] values)
     {
         foreach (var v in values)
@@ -1286,6 +1471,33 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Payment method — after delivery
         if (string.IsNullOrWhiteSpace(state.PaymentMethod))
             return new BotReply(Msg.PaymentMethodPrompt, Msg.PaymentButtons);
+
+        // Cash sub-flow — currency selection, tendered amount, change calculation, payout data
+        if (state.PaymentMethod == "efectivo" && !state.CashFlowCompleted)
+        {
+            // Skip cash flow for in-flight conversations that already passed checkout
+            if (state.CheckoutFormSent)
+            {
+                state.CashFlowCompleted = true;
+            }
+            else if (state.CashCurrency == null)
+            {
+                state.AwaitingCashCurrency = true;
+                return new BotReply(Msg.CashCurrencyPrompt, Msg.CashCurrencyButtons);
+            }
+            else if (state.CashTenderedAmount == null)
+            {
+                state.AwaitingCashAmount = true;
+                var total = ComputeOrderTotalUsd(state);
+                var totalInCurrency = ConvertUsdToCurrency(total, state.CashCurrency, bcvRate);
+                return Msg.CashAmountPrompt(totalInCurrency, state.CashCurrency);
+            }
+            else if (state.CashChangeRequired && state.AwaitingCashPayout)
+            {
+                return Msg.CashPayoutDataPrompt;
+            }
+            // If we get here without completing, the handlers below will advance the flow
+        }
 
         if (!state.CheckoutFormSent)
         {
@@ -1371,6 +1583,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
             PaymentProofMediaId = state.PaymentProofMediaId,
             PaymentProofSubmittedAtUtc = !string.IsNullOrWhiteSpace(state.PaymentProofMediaId) ? DateTime.UtcNow : null,
+
+            // Cash payment details
+            CashCurrency = state.CashCurrency,
+            CashTenderedAmount = state.CashTenderedAmount,
+            CashBcvRateUsed = _bcvRate?.Rate,
+            CashChangeRequired = state.CashChangeRequired,
+            CashChangeAmount = state.CashChangeAmount,
+            CashChangeAmountBs = state.CashChangeAmountBs,
+            CashPayoutBank = state.CashPayoutBank,
+            CashPayoutIdNumber = state.CashPayoutIdNumber,
+            CashPayoutPhone = state.CashPayoutPhone,
 
             Items = state.Items.Select(i =>
             {
@@ -2012,6 +2235,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
             "btn_pago_movil" => "pago movil",
             "btn_zelle"      => "zelle",
             "btn_editar_datos" => "editar datos",
+            "btn_cash_usd"     => "cash_usd",
+            "btn_cash_eur"     => "cash_eur",
+            "btn_cash_bs"      => "cash_bs",
+            "btn_editar_payout" => "editar payout",
             _ => null
         };
 

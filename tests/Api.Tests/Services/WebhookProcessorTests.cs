@@ -308,6 +308,7 @@ public class WebhookProcessorTests
         state.ObservationAnswered = true;
         state.OrderConfirmed = true;
         state.PaymentMethod = "efectivo";
+        state.CashFlowCompleted = true;
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -940,6 +941,7 @@ public class WebhookProcessorTests
         state.ObservationAnswered = true;
         state.OrderConfirmed = true;
         state.PaymentMethod = "efectivo";
+        state.CashFlowCompleted = true;
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -3587,6 +3589,7 @@ public class WebhookProcessorTests
         state.OrderConfirmed = true;
         state.DeliveryType = "delivery";
         state.PaymentMethod = "efectivo";
+        state.CashFlowCompleted = true;
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 

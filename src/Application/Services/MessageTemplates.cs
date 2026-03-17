@@ -177,6 +177,68 @@ internal static class Msg
         new("btn_zelle", "Zelle")
     };
 
+    // ── Cash sub-flow ──
+
+    internal static string CashCurrencyPrompt
+        => "\u00bfCon cu\u00e1l moneda vas a pagar?";
+
+    internal static readonly List<ReplyButton> CashCurrencyButtons = new()
+    {
+        new("btn_cash_usd", "USD"),
+        new("btn_cash_eur", "EUR"),
+        new("btn_cash_bs", "Bol\u00edvares")
+    };
+
+    internal static string CashAmountPrompt(decimal orderTotal, string currency)
+        => $"El total es *{FormatCash(orderTotal, currency)}*.\n\n"
+         + $"\u00bfCon cu\u00e1nto vas a pagar en *{currency}*?";
+
+    internal static string CashInsufficientAmount
+        => "El monto es menor al total. Por favor env\u00eda un monto v\u00e1lido.";
+
+    internal static string CashNoChange
+        => "\u2705 Pago exacto, no hay vuelto.";
+
+    internal static string CashChangeInfo(decimal change, string currency, decimal? changeBs)
+    {
+        var msg = $"Tu vuelto es *{FormatCash(change, currency)}*.";
+        if (changeBs.HasValue && currency != "Bs")
+            msg += $"\nEquivalente a *Bs. {changeBs:N2}*.";
+        msg += "\n\nTu vuelto ser\u00e1 enviado en Bs por pago m\u00f3vil.";
+        return msg;
+    }
+
+    internal static string CashPayoutDataPrompt
+        => "Env\u00edame estos datos para devolverte el vuelto:\n\n"
+         + "\ud83c\udfe6 *Banco:*\n"
+         + "\ud83e\udeaa *C\u00e9dula/RIF:*\n"
+         + "\ud83d\udcf1 *Tel\u00e9fono:*\n\n"
+         + "_Env\u00edalos en l\u00edneas separadas_";
+
+    internal static string CashPayoutReceived
+        => "\u2705 Datos de vuelto recibidos. \u00bfQu\u00e9 deseas hacer?";
+
+    internal static readonly List<ReplyButton> CashPayoutButtons = new()
+    {
+        new("btn_confirmar", "Confirmar"),
+        new("btn_editar_payout", "Editar datos")
+    };
+
+    internal static string CashChangeReturnedNotification(decimal amountBs, string? reference = null)
+    {
+        var msg = $"\u2705 Tu vuelto por *Bs. {amountBs:N2}* ha sido devuelto. \u00a1Gracias!";
+        if (!string.IsNullOrWhiteSpace(reference))
+            msg += $"\nReferencia: {reference}";
+        return msg;
+    }
+
+    private static string FormatCash(decimal amount, string currency) => currency switch
+    {
+        "Bs" => $"Bs. {amount:N2}",
+        "EUR" => $"\u20ac{amount:N2}",
+        _ => $"${amount:N2}"
+    };
+
     // ── Checkout form ──
 
     internal static string CheckoutForm

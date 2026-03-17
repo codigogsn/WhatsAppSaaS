@@ -785,8 +785,9 @@ public class ParserHardeningTests
         await _sut.ProcessAsync(MakePayload("efectivo"), _testBusiness);
 
         state.PaymentMethod.Should().Be("efectivo");
-        state.CheckoutFormSent.Should().BeTrue();
-        sentMessages.Last().Body.Should().Contain("Nombre:");
+        // Cash sub-flow now starts with currency selection before checkout form
+        state.AwaitingCashCurrency.Should().BeTrue();
+        sentMessages.Last().Body.Should().Contain("moneda");
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1068,7 +1069,8 @@ public class ParserHardeningTests
         await _sut.ProcessAsync(MakeButtonPayload("btn_efectivo", "Efectivo"), _testBusiness);
 
         state.PaymentMethod.Should().Be("efectivo");
-        state.CheckoutFormSent.Should().BeTrue("should advance to checkout form");
+        // After selecting efectivo, cash sub-flow asks for currency (not checkout form directly)
+        state.AwaitingCashCurrency.Should().BeTrue("should enter cash currency selection sub-flow");
     }
 
     [Fact]

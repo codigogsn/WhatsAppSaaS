@@ -78,6 +78,11 @@ public sealed class OrdersController : ControllerBase
                 PaymentProofExists = o.PaymentProofMediaId != null,
                 PaymentVerificationStatus = o.PaymentProofMediaId == null ? "none"
                     : o.PaymentVerifiedAtUtc != null ? "verified" : "pending",
+                // Cash payment details
+                o.CashCurrency, o.CashTenderedAmount, o.CashBcvRateUsed,
+                o.CashChangeRequired, o.CashChangeAmount, o.CashChangeAmountBs,
+                o.CashPayoutBank, o.CashPayoutIdNumber, o.CashPayoutPhone,
+                o.CashChangeReturned, o.CashChangeReturnedAtUtc, o.CashChangeReturnedReference,
                 Items = o.Items.Select(i => new { i.Id, i.Name, i.Quantity, i.UnitPrice, i.LineTotal })
             })
             .ToListAsync();
@@ -121,6 +126,10 @@ public sealed class OrdersController : ControllerBase
                 PaymentProofExists = x.PaymentProofMediaId != null,
                 PaymentVerificationStatus = x.PaymentProofMediaId == null ? "none"
                     : x.PaymentVerifiedAtUtc != null ? "verified" : "pending",
+                x.CashCurrency, x.CashTenderedAmount, x.CashBcvRateUsed,
+                x.CashChangeRequired, x.CashChangeAmount, x.CashChangeAmountBs,
+                x.CashPayoutBank, x.CashPayoutIdNumber, x.CashPayoutPhone,
+                x.CashChangeReturned, x.CashChangeReturnedAtUtc, x.CashChangeReturnedReference,
                 Items = x.Items.Select(i => new { i.Id, i.Name, i.Quantity, i.UnitPrice, i.LineTotal })
             })
             .SingleOrDefaultAsync();
@@ -361,6 +370,55 @@ public sealed class OrdersController : ControllerBase
         return Ok(new { success = true, id = order.Id, paymentRejected = true });
     }
 
+    // PATCH /api/orders/{id}/cash-change-returned
+    [HttpPatch("{id:guid}/cash-change-returned")]
+    public async Task<IActionResult> MarkCashChangeReturned(Guid id, [FromBody] CashChangeReturnedRequest? req = null)
+    {
+        if (!IsAdmin()) return Unauthorized();
+
+        var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
+        if (order is null) return NotFound(new { error = "Order not found" });
+        if (!order.CashChangeRequired) return BadRequest(new { error = "No change required for this order" });
+        if (order.CashChangeReturned) return Ok(new { success = true, alreadyReturned = true });
+
+        order.CashChangeReturned = true;
+        order.CashChangeReturnedAtUtc = DateTime.UtcNow;
+        order.CashChangeReturnedBy = "dashboard";
+        order.CashChangeReturnedReference = req?.Reference;
+        await _context.SaveChangesAsync();
+
+        // Send WhatsApp confirmation to customer
+        if (!string.IsNullOrWhiteSpace(order.From) && !string.IsNullOrWhiteSpace(order.PhoneNumberId))
+        {
+            try
+            {
+                var biz = await _context.Businesses.AsNoTracking()
+                    .Where(b => b.Id == order.BusinessId)
+                    .Select(b => new { b.AccessToken })
+                    .FirstOrDefaultAsync();
+
+                await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
+                {
+                    To = order.From,
+                    PhoneNumberId = order.PhoneNumberId,
+                    AccessToken = biz?.AccessToken,
+                    Body = FormatCashChangeNotification(order.CashChangeAmountBs ?? 0, req?.Reference)
+                });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed WhatsApp cash change notification for {OrderId}", id);
+            }
+        }
+
+        return Ok(new { success = true, id = order.Id, cashChangeReturnedAtUtc = order.CashChangeReturnedAtUtc });
+    }
+
+    public sealed class CashChangeReturnedRequest
+    {
+        public string? Reference { get; set; }
+    }
+
     // GET /api/orders/{id}/payment-proof
     [HttpGet("{id:guid}/payment-proof")]
     public async Task<IActionResult> GetPaymentProof(Guid id, CancellationToken ct)
@@ -509,6 +567,13 @@ public sealed class OrdersController : ControllerBase
         {
             _logger.LogWarning(ex, "Failed to delete cached proof for orderId={OrderId}", orderId);
         }
+    }
+
+    private static string FormatCashChangeNotification(decimal amountBs, string? reference)
+    {
+        var msg = $"\u2705 Tu vuelto por *Bs. {amountBs:N2}* ha sido devuelto. \u00a1Gracias!";
+        if (!string.IsNullOrWhiteSpace(reference)) msg += $"\nReferencia: {reference}";
+        return msg;
     }
 
     private static readonly HashSet<string> AllowedProofTypes = new(StringComparer.OrdinalIgnoreCase)
