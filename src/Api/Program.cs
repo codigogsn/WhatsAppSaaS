@@ -455,11 +455,15 @@ static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
                             fixed := fixed + 1;
                         END IF;
                         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeRequired' AND data_type<>'boolean') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "CashChangeRequired" DROP DEFAULT;
                             ALTER TABLE "Orders" ALTER COLUMN "CashChangeRequired" TYPE boolean USING CASE WHEN "CashChangeRequired"::text IN ('1','true','t') THEN true ELSE false END;
+                            ALTER TABLE "Orders" ALTER COLUMN "CashChangeRequired" SET DEFAULT false;
                             fixed := fixed + 1;
                         END IF;
                         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeReturned' AND data_type<>'boolean') THEN
+                            ALTER TABLE "Orders" ALTER COLUMN "CashChangeReturned" DROP DEFAULT;
                             ALTER TABLE "Orders" ALTER COLUMN "CashChangeReturned" TYPE boolean USING CASE WHEN "CashChangeReturned"::text IN ('1','true','t') THEN true ELSE false END;
+                            ALTER TABLE "Orders" ALTER COLUMN "CashChangeReturned" SET DEFAULT false;
                             fixed := fixed + 1;
                         END IF;
                         IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='OrderItems' AND column_name='UnitPrice' AND data_type='text') THEN
