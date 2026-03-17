@@ -182,4 +182,78 @@ public class CashFlowStateTests
         var total = WebhookProcessor.ComputeOrderTotalUsd(state);
         total.Should().Be(16m);
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  WebhookLocation DTO deserialization
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void WebhookLocation_Deserializes_Correctly()
+    {
+        var json = """{"latitude":10.5,"longitude":-66.9,"name":"Test","address":"Addr"}""";
+        var loc = System.Text.Json.JsonSerializer.Deserialize<WhatsAppSaaS.Application.DTOs.WebhookLocation>(json);
+        loc.Should().NotBeNull();
+        loc!.Latitude.Should().BeApproximately(10.5, 0.01);
+        loc.Longitude.Should().BeApproximately(-66.9, 0.01);
+    }
+
+    [Fact]
+    public void WebhookMessage_WithLocation_HasLocationProperty()
+    {
+        var json = """{"from":"123","id":"m1","type":"location","timestamp":"1234","location":{"latitude":10.5,"longitude":-66.9}}""";
+        var msg = System.Text.Json.JsonSerializer.Deserialize<WhatsAppSaaS.Application.DTOs.WebhookMessage>(json);
+        msg.Should().NotBeNull();
+        msg!.Type.Should().Be("location");
+        msg.Location.Should().NotBeNull();
+        msg.Location!.Latitude.Should().BeApproximately(10.5, 0.01);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  Location finalization state tests
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void BuildOrderReplyFromState_AllFieldsComplete_WithGps_ReturnsDataReceived()
+    {
+        // Simulates state after cash flow + customer data + GPS — should be ready for final confirm
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "efectivo";
+        state.CashFlowCompleted = true;
+        state.CheckoutFormSent = true;
+        state.CustomerName = "Juan";
+        state.CustomerIdNumber = "12345678";
+        state.CustomerPhone = "04141234567";
+        state.Address = "Calle 1";
+        state.GpsPinReceived = true;
+        state.LocationText = "10.5,-66.9";
+        state.DeliveryDataConfirmed = true;
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+        // All data present — should show confirm/edit for final confirmation
+        reply.Body.Should().Contain("Datos recibidos");
+    }
+
+    [Fact]
+    public void BuildOrderReplyFromState_DeliveryWithoutGps_StillShowsCheckoutForm()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.OrderConfirmed = true;
+        state.DeliveryType = "delivery";
+        state.PaymentMethod = "efectivo";
+        state.CashFlowCompleted = true;
+        // CheckoutFormSent not set — should send checkout form
+        state.GpsPinReceived = false;
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+        reply.Body.Should().Contain("Nombre:");
+        state.CheckoutFormSent.Should().BeTrue();
+    }
 }

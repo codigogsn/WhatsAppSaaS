@@ -139,18 +139,32 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (message.Type == "location")
                     {
                         state.GpsPinReceived = true;
-                        state.DeliveryDataConfirmed = true; // location implies delivery data is confirmed
+                        state.DeliveryDataConfirmed = true;
+
+                        // Extract coordinates from WhatsApp location message
+                        if (message.Location is { } loc)
+                        {
+                            state.LocationText = $"{loc.Latitude},{loc.Longitude}";
+                            _logger.LogInformation("GPS location received: {Lat},{Lng} for {ConversationId}",
+                                loc.Latitude, loc.Longitude, conversationId);
+                        }
+
+                        _logger.LogInformation(
+                            "Location handler state: Items={Items} CheckoutFormSent={CFS} OrderConfirmed={OC} " +
+                            "PaymentMethod={PM} CashFlowCompleted={CFC} CustomerName={CN} Address={Addr} " +
+                            "GpsPinReceived={GPS} DeliveryType={DT} for {ConversationId}",
+                            state.Items.Count, state.CheckoutFormSent, state.OrderConfirmed,
+                            state.PaymentMethod, state.CashFlowCompleted, state.CustomerName,
+                            state.Address, state.GpsPinReceived, state.DeliveryType, conversationId);
 
                         if (state.Items.Count > 0 && state.CheckoutFormSent)
                         {
-                            // Always try to finalize — FinalizeOrderIfPossibleAsync
-                            // checks all missing fields and will either finalize or
-                            // return the exact missing fields message
                             var autoFinalizeReply = await FinalizeOrderIfPossibleAsync(
                                 state, message.From, phoneNumberId, businessContext, cancellationToken);
 
                             if (autoFinalizeReply is not null)
                             {
+                                _logger.LogInformation("Location finalize reply: {Reply}", autoFinalizeReply.Length > 100 ? autoFinalizeReply[..100] : autoFinalizeReply);
                                 await SendAsync(new OutgoingMessage
                                 {
                                     To = message.From,
@@ -159,11 +173,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     AccessToken = businessContext.AccessToken
                                 }, businessContext.BusinessId, conversationId, cancellationToken);
                             }
-                            // null means finalization already sent all messages (e.g. receipt)
+                            else
+                            {
+                                _logger.LogInformation("Location finalize returned null (order created) for {ConversationId}", conversationId);
+                            }
                         }
                         else if (state.Items.Count > 0)
                         {
-                            // Location received but checkout not started yet — acknowledge and continue
+                            _logger.LogWarning("Location received but CheckoutFormSent={CFS}, Items={Items} for {ConversationId}",
+                                state.CheckoutFormSent, state.Items.Count, conversationId);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -1548,7 +1566,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // GPS requirement is vertical-specific (e.g. restaurant delivery needs it, pickup doesn't)
         if (!state.GpsPinReceived && _verticalStrategy.RequiresGps(state.DeliveryType))
         {
-            // If text fields are all filled, transition to GPS request stage
+            _logger.LogInformation("FinalizeOrder: GPS required but not received. Missing text fields: {Count}", missing.Count);
             if (missing.Count == 0)
             {
                 state.DeliveryDataConfirmed = true;
@@ -1571,9 +1589,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         if (missing.Count > 0)
         {
+            _logger.LogInformation("FinalizeOrder: blocked — missing fields: {Fields}", string.Join(", ", missing));
             return Msg.MissingFields(missing);
         }
 
+        _logger.LogInformation("FinalizeOrder: all fields present, creating order");
         var customerPhoneE164 = NormalizeToE164(state.CustomerPhone) ?? NormalizeToE164(from) ?? state.CustomerPhone;
 
         var order = new Order

@@ -100,6 +100,24 @@ public sealed class WebhookMessage
 
     [JsonPropertyName("interactive")]
     public WebhookInteractive? Interactive { get; set; }
+
+    [JsonPropertyName("location")]
+    public WebhookLocation? Location { get; set; }
+}
+
+public sealed class WebhookLocation
+{
+    [JsonPropertyName("latitude")]
+    public double Latitude { get; set; }
+
+    [JsonPropertyName("longitude")]
+    public double Longitude { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("address")]
+    public string? Address { get; set; }
 }
 
 public sealed class WebhookInteractive
