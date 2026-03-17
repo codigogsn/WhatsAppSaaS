@@ -242,6 +242,7 @@ public sealed class OrdersController : ControllerBase
     }
 
     // PATCH /api/orders/{id}/status  { "status": "Preparing" }
+    // Raw ADO.NET: immune to EF materialization type mismatches on legacy columns
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateStatusRequest request)
     {
@@ -263,140 +264,152 @@ public sealed class OrdersController : ControllerBase
         if (!canonical.TryGetValue(raw, out var newStatus))
             return BadRequest(new { error = "Invalid status", allowed = canonical.Values.OrderBy(x => x).ToArray() });
 
-        // Retry DB (transient EndOfStream / stream read)
-        const int maxAttempts = 3;
-        var delaysMs = new[] { 150, 400, 900 };
-
-        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        try
         {
-            try
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
+
+            // Step 1: Read current order fields with raw SQL
+            string? currentStatus = null, fromPhone = null, phoneNumberId = null, lastNotifiedStatus = null;
+            DateTime? lastNotifiedAtUtc = null;
+            bool found = false;
+
+            using (var readCmd = conn.CreateCommand())
             {
-                var order = await _context.Orders
-                    .Include(o => o.Items)
-                    .SingleOrDefaultAsync(o => o.Id == id);
+                readCmd.CommandText = """
+                    SELECT "Status", "From", "PhoneNumberId", "LastNotifiedStatus", "LastNotifiedAtUtc"
+                    FROM "Orders" WHERE "Id" = @oid LIMIT 1
+                """;
+                AddP(readCmd, "oid", id);
 
-                if (order is null)
-                    return NotFound(new { error = "Order not found" });
-
-                // Idempotencia: si no cambia, no notificar
-                if (string.Equals(order.Status, newStatus, StringComparison.OrdinalIgnoreCase))
+                using var r = await readCmd.ExecuteReaderAsync();
+                if (await r.ReadAsync())
                 {
-                    return Ok(new
-                    {
-                        success = true,
-                        id = order.Id,
-                        status = order.Status,
-                        notified = false,
-                        reason = "status_unchanged",
-                        to = order.From,
-                        phoneNumberId = order.PhoneNumberId
-                    });
+                    found = true;
+                    currentStatus = r["Status"] is not DBNull ? r["Status"]?.ToString() : null;
+                    fromPhone = r["From"] is not DBNull ? r["From"]?.ToString() : null;
+                    phoneNumberId = r["PhoneNumberId"] is not DBNull ? r["PhoneNumberId"]?.ToString() : null;
+                    lastNotifiedStatus = r["LastNotifiedStatus"] is not DBNull ? r["LastNotifiedStatus"]?.ToString() : null;
+                    lastNotifiedAtUtc = r["LastNotifiedAtUtc"] is DBNull ? null
+                        : r["LastNotifiedAtUtc"] is DateTime dt ? dt
+                        : DateTime.TryParse(r["LastNotifiedAtUtc"]?.ToString(), out var p) ? p : null;
                 }
+            }
 
-                order.Status = newStatus;
+            if (!found)
+                return NotFound(new { error = "Order not found" });
 
-                await _context.SaveChangesAsync();
-
-                // WhatsApp notification (best-effort, no tumba la request)
-                var (shouldNotify, message) = MapStatusToMessage(order.Status);
-
-                bool sendOk = false;
-                bool notified = false;
-                string? notifyReason = null;
-
-                // 🛡️ Blindaje anti doble notificación
-                // Solo enviar si shouldNotify AND LastNotifiedStatus != current Status
-                if (shouldNotify &&
-                    !string.IsNullOrWhiteSpace(order.From) &&
-                    !string.IsNullOrWhiteSpace(order.PhoneNumberId))
-                {
-                    if (string.Equals(order.LastNotifiedStatus, order.Status, StringComparison.OrdinalIgnoreCase))
-                    {
-                        notified = false;
-                        sendOk = false;
-                        notifyReason = "already_notified_for_status";
-                    }
-                    else
-                    {
-                        try
-                        {
-                            sendOk = await _whatsAppClient.SendTextMessageAsync(
-                                new OutgoingMessage
-                                {
-                                    To = order.From!,
-                                    PhoneNumberId = order.PhoneNumberId!,
-                                    Body = message
-                                });
-
-                            notified = sendOk;
-
-                            // ✅ Solo si se envió OK, persistimos el guard
-                            if (sendOk)
-                            {
-                                order.LastNotifiedStatus = order.Status;
-                                order.LastNotifiedAtUtc = DateTime.UtcNow;
-
-                                try
-                                {
-                                    await _context.SaveChangesAsync();
-                                }
-                                catch (Exception ex)
-                                {
-                                    // Best-effort: no tumbar el endpoint si falla guardar el guard
-                                    _logger.LogError(ex,
-                                        "WhatsApp sent but failed persisting notification guard for order {OrderId}",
-                                        order.Id);
-                                }
-                            }
-                        }
-                        catch (Exception ex)
-                        {
-                            _logger.LogError(ex, "Failed sending WhatsApp notification for order {OrderId}", order.Id);
-                            notified = false;
-                            sendOk = false;
-                            notifyReason = "send_exception";
-                        }
-                    }
-                }
-                else
-                {
-                    notifyReason = shouldNotify ? "missing_to_or_phoneNumberId" : "shouldNotify_false";
-                }
-
+            // Idempotencia: si no cambia, no notificar
+            if (string.Equals(currentStatus, newStatus, StringComparison.OrdinalIgnoreCase))
+            {
                 return Ok(new
                 {
                     success = true,
-                    id = order.Id,
-                    status = order.Status,
-                    notified,
-                    to = order.From,
-                    phoneNumberId = order.PhoneNumberId,
-                    sendOk,
-                    notifyReason,
-                    lastNotifiedStatus = order.LastNotifiedStatus,
-                    lastNotifiedAtUtc = order.LastNotifiedAtUtc
+                    id,
+                    status = currentStatus,
+                    notified = false,
+                    reason = "status_unchanged",
+                    to = fromPhone,
+                    phoneNumberId
                 });
             }
-            catch (Exception ex) when (IsTransientDb(ex))
+
+            // Step 2: Update status with raw SQL
+            using (var updCmd = conn.CreateCommand())
             {
-                _logger.LogWarning(ex,
-                    "Transient DB error in UpdateStatus attempt {Attempt}/{MaxAttempts} for order {OrderId}",
-                    attempt, maxAttempts, id);
-
-                if (attempt == maxAttempts)
-                {
-                    return StatusCode(503, new
-                    {
-                        error = "DB temporarily unavailable. Please retry.",
-                        code = "db_transient_failure"
-                    });
-                }
-
-                await Task.Delay(delaysMs[Math.Min(attempt - 1, delaysMs.Length - 1)]);
+                updCmd.CommandText = """
+                    UPDATE "Orders" SET "Status" = @status WHERE "Id" = @oid
+                """;
+                AddP(updCmd, "oid", id);
+                AddP(updCmd, "status", newStatus);
+                await updCmd.ExecuteNonQueryAsync();
             }
-        }
 
-        return StatusCode(503, new { error = "DB temporarily unavailable. Please retry." });
+            // Step 3: WhatsApp notification (best-effort)
+            var (shouldNotify, message) = MapStatusToMessage(newStatus);
+
+            bool sendOk = false;
+            bool notified = false;
+            string? notifyReason = null;
+
+            if (shouldNotify &&
+                !string.IsNullOrWhiteSpace(fromPhone) &&
+                !string.IsNullOrWhiteSpace(phoneNumberId))
+            {
+                if (string.Equals(lastNotifiedStatus, newStatus, StringComparison.OrdinalIgnoreCase))
+                {
+                    notifyReason = "already_notified_for_status";
+                }
+                else
+                {
+                    try
+                    {
+                        sendOk = await _whatsAppClient.SendTextMessageAsync(
+                            new OutgoingMessage
+                            {
+                                To = fromPhone!,
+                                PhoneNumberId = phoneNumberId!,
+                                Body = message
+                            });
+
+                        notified = sendOk;
+
+                        if (sendOk)
+                        {
+                            lastNotifiedStatus = newStatus;
+                            lastNotifiedAtUtc = DateTime.UtcNow;
+
+                            try
+                            {
+                                using var guardCmd = conn.CreateCommand();
+                                guardCmd.CommandText = """
+                                    UPDATE "Orders"
+                                    SET "LastNotifiedStatus" = @lns, "LastNotifiedAtUtc" = @lna
+                                    WHERE "Id" = @oid
+                                """;
+                                AddP(guardCmd, "oid", id);
+                                AddP(guardCmd, "lns", newStatus);
+                                AddP(guardCmd, "lna", lastNotifiedAtUtc!);
+                                await guardCmd.ExecuteNonQueryAsync();
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogError(ex,
+                                    "WhatsApp sent but failed persisting notification guard for order {OrderId}", id);
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "Failed sending WhatsApp notification for order {OrderId}", id);
+                        notifyReason = "send_exception";
+                    }
+                }
+            }
+            else
+            {
+                notifyReason = shouldNotify ? "missing_to_or_phoneNumberId" : "shouldNotify_false";
+            }
+
+            return Ok(new
+            {
+                success = true,
+                id,
+                status = newStatus,
+                notified,
+                to = fromPhone,
+                phoneNumberId,
+                sendOk,
+                notifyReason,
+                lastNotifiedStatus,
+                lastNotifiedAtUtc
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "PATCH /api/orders/{Id}/status failed", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 
     // PATCH /api/orders/{id}/verify-payment
