@@ -1550,17 +1550,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return new BotReply(Msg.ObservationQuestion, Msg.ObservationButtons);
         }
 
+        // Delivery step — BEFORE summary so delivery fee is included in total
+        if (string.IsNullOrWhiteSpace(state.DeliveryType))
+            return new BotReply(Msg.PickupOrDelivery, Msg.DeliveryButtons);
+
         // Confirmation gate: show summary + CONFIRMAR/EDITAR/CANCELAR
+        // DeliveryType is now set, so summary includes correct delivery fee
         if (!state.OrderConfirmed)
         {
             return new BotReply(
                 Msg.OrderSummaryWithTotal(state.Items, bcvRate, state.DeliveryType) + "\n\n" + Msg.ConfirmOrderPrompt,
                 Msg.ConfirmButtons);
         }
-
-        // Delivery step — after confirmation
-        if (string.IsNullOrWhiteSpace(state.DeliveryType))
-            return new BotReply(Msg.PickupOrDelivery, Msg.DeliveryButtons);
 
         // Payment method — after delivery
         if (string.IsNullOrWhiteSpace(state.PaymentMethod))

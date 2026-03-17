@@ -3404,30 +3404,30 @@ public class WebhookProcessorTests
             _testBusiness);
 
         state.ObservationAnswered.Should().BeTrue();
-        state.OrderConfirmed.Should().BeFalse("confirmation prompt should be shown");
-        sentMessages.Last().Body.Should().Contain("deseas hacer");
-        sentMessages.Last().Buttons.Should().NotBeNull();
-        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
-
-        // Step 3: Confirm → delivery step
-        sentMessages.Clear();
-        await _sut.ProcessAsync(
-            CreateTextMessagePayload("5511999999999", "confirmar"),
-            _testBusiness);
-
-        state.OrderConfirmed.Should().BeTrue();
+        // New flow: after observation → delivery/pickup (before summary)
         sentMessages.Last().Body.Should().Contain("lo quieres");
         sentMessages.Last().Buttons.Should().NotBeNull();
         sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Delivery");
-        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Pickup");
 
-        // Step 4: Answer delivery → payment step
+        // Step 3: Answer delivery → summary with confirm
         sentMessages.Clear();
         await _sut.ProcessAsync(
             CreateTextMessagePayload("5511999999999", "delivery"),
             _testBusiness);
 
         state.DeliveryType.Should().Be("delivery");
+        state.OrderConfirmed.Should().BeFalse("confirmation prompt should be shown");
+        sentMessages.Last().Body.Should().Contain("RESUMEN");
+        sentMessages.Last().Buttons.Should().NotBeNull();
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
+
+        // Step 4: Confirm → payment step
+        sentMessages.Clear();
+        await _sut.ProcessAsync(
+            CreateTextMessagePayload("5511999999999", "confirmar"),
+            _testBusiness);
+
+        state.OrderConfirmed.Should().BeTrue();
         sentMessages.Last().Body.Should().Contain("pagar");
     }
 

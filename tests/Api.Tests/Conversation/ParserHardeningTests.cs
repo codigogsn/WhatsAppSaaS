@@ -663,16 +663,16 @@ public class ParserHardeningTests
             .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
             .ReturnsAsync(true);
 
-        // Order → observation question → NO → confirmation
+        // Order → observation question → NO → delivery/pickup (new flow order)
         await _sut.ProcessAsync(MakePayload("1 hamburguesa"), _testBusiness);
         sentMessages.Clear();
         await _sut.ProcessAsync(MakePayload("no"), _testBusiness);
 
         state.ObservationAnswered.Should().BeTrue();
-        sentMessages.Last().Body.Should().Contain("RESUMEN");
-        sentMessages.Last().Body.Should().Contain("deseas hacer");
+        // After observation, next step is delivery/pickup selection (before summary)
+        sentMessages.Last().Body.Should().Contain("lo quieres");
         sentMessages.Last().Buttons.Should().NotBeNull();
-        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
+        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Delivery");
     }
 
     [Fact]
@@ -698,10 +698,8 @@ public class ParserHardeningTests
 
         state.ObservationAnswered.Should().BeTrue();
         state.SpecialInstructions.Should().Contain("sin cebolla");
-        // After observation, should show confirmation gate
-        sentMessages.Last().Body.Should().Contain("deseas hacer");
-        sentMessages.Last().Buttons.Should().NotBeNull();
-        sentMessages.Last().Buttons!.Select(b => b.Title).Should().Contain("Confirmar");
+        // After observation, should show delivery/pickup selection (before summary)
+        sentMessages.Last().Body.Should().Contain("lo quieres");
     }
 
     [Fact]
@@ -872,6 +870,7 @@ public class ParserHardeningTests
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
         state.ExtrasOffered = true;
         state.ObservationAnswered = true;
+        state.DeliveryType = "delivery";
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
@@ -958,7 +957,7 @@ public class ParserHardeningTests
     }
 
     [Fact]
-    public async Task ObservationButton_No_AdvancesToConfirmation()
+    public async Task ObservationButton_No_AdvancesToDeliverySelection()
     {
         var state = new ConversationFields { MenuSent = true };
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
@@ -968,25 +967,28 @@ public class ParserHardeningTests
         await _sut.ProcessAsync(MakeButtonPayload("btn_obs_no", "No"), _testBusiness);
 
         state.ObservationAnswered.Should().BeTrue("tapping No should skip observation");
+        // New flow: after observation → delivery/pickup (before summary)
         _whatsAppClientMock.Verify(x => x.SendTextMessageAsync(
-            It.Is<OutgoingMessage>(m => m.Body.Contains("RESUMEN DE TU PEDIDO")),
+            It.Is<OutgoingMessage>(m => m.Body.Contains("lo quieres")),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task ConfirmButton_AdvancesToDeliveryStep()
+    public async Task ConfirmButton_AdvancesToPaymentStep()
     {
         var state = new ConversationFields { MenuSent = true };
         state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 1, UnitPrice = 6.50m });
         state.ExtrasOffered = true;
         state.ObservationAnswered = true;
+        state.DeliveryType = "delivery"; // delivery now set BEFORE confirm
         SetupState(state);
 
         await _sut.ProcessAsync(MakeButtonPayload("btn_confirmar", "Confirmar"), _testBusiness);
 
         state.OrderConfirmed.Should().BeTrue("tapping Confirmar should confirm the order");
+        // New flow: after confirm → payment (delivery was already chosen)
         _whatsAppClientMock.Verify(x => x.SendTextMessageAsync(
-            It.Is<OutgoingMessage>(m => m.Buttons != null && m.Buttons.Any(b => b.Id == "btn_delivery")),
+            It.Is<OutgoingMessage>(m => m.Buttons != null && m.Buttons.Any(b => b.Id == "btn_efectivo")),
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
