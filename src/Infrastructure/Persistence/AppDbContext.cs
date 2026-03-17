@@ -56,12 +56,6 @@ public class AppDbContext : DbContext
             b.Property(x => x.CheckoutCompleted).IsRequired();
             b.Property(x => x.CheckoutCompletedAtUtc);
 
-            // Cash fields — integer↔bool conversion for SQLite-generated columns
-            b.Property(x => x.CashChangeRequired).HasConversion(v => v ? 1 : 0, v => v == 1);
-            b.Property(x => x.CashChangeReturned).HasConversion(v => v ? 1 : 0, v => v == 1);
-            b.Property(x => x.CheckoutFormSent).HasConversion(v => v ? 1 : 0, v => v == 1);
-            b.Property(x => x.CheckoutCompleted).HasConversion(v => v ? 1 : 0, v => v == 1);
-
             // Payment proof
             b.Property(x => x.PaymentProofMediaId);
             b.Property(x => x.PaymentProofSubmittedAtUtc);
