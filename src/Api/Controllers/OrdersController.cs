@@ -32,111 +32,209 @@ public sealed class OrdersController : ControllerBase
     }
 
     // GET /api/orders?take=50&status=Pending&businessId=xxx
+    // Raw ADO.NET: immune to EF bool/decimal type mismatches on legacy columns
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] int take = 50, [FromQuery] string? status = null, [FromQuery] Guid? businessId = null)
     {
         if (take < 1) take = 1;
         if (take > 200) take = 200;
 
-        var q = _context.Orders.AsNoTracking().Include(o => o.Items).AsQueryable();
+        try
+        {
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
 
-        if (businessId.HasValue)
-            q = q.Where(o => o.BusinessId == businessId.Value);
+            var where = "WHERE 1=1";
+            if (businessId.HasValue) where += " AND o.\"BusinessId\" = @bid";
+            if (!string.IsNullOrWhiteSpace(status)) where += " AND o.\"Status\" = @status";
 
-        if (!string.IsNullOrWhiteSpace(status))
-            q = q.Where(o => o.Status == status);
+            // Query orders
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"""
+                SELECT * FROM "Orders" o {where}
+                ORDER BY o."CreatedAtUtc" DESC LIMIT @take
+            """;
+            AddP(cmd, "take", take);
+            if (businessId.HasValue) AddP(cmd, "bid", businessId.Value);
+            if (!string.IsNullOrWhiteSpace(status)) AddP(cmd, "status", status);
 
-        var data = await q
-            .OrderByDescending(o => o.CreatedAtUtc)
-            .Take(take)
-            .Select(o => new
+            var orders = new List<(Dictionary<string, object?> Data, string Id)>();
+            using (var r = await cmd.ExecuteReaderAsync())
             {
-                o.Id,
-                o.Status,
-                o.CustomerName,
-                o.CustomerIdNumber,
-                o.CustomerPhone,
-                o.Address,
-                o.PaymentMethod,
-                o.DeliveryType,
-                o.CreatedAtUtc,
-                o.LocationLat,
-                o.LocationLng,
-                o.LocationText,
-                o.CheckoutFormSent,
-                o.CheckoutCompleted,
-                o.CheckoutCompletedAtUtc,
-                o.LastNotifiedStatus,
-                o.LastNotifiedAtUtc,
-                o.SpecialInstructions,
-                o.SubtotalAmount,
-                o.TotalAmount,
-                o.PaymentProofMediaId,
-                o.PaymentProofSubmittedAtUtc,
-                o.PaymentVerifiedAtUtc,
-                o.PaymentVerifiedBy,
-                PaymentProofExists = o.PaymentProofMediaId != null,
-                PaymentVerificationStatus = o.PaymentProofMediaId == null ? "none"
-                    : o.PaymentVerifiedAtUtc != null ? "verified" : "pending",
-                // Cash payment details
-                o.CashCurrency, o.CashTenderedAmount, o.CashBcvRateUsed,
-                o.CashChangeRequired, o.CashChangeAmount, o.CashChangeAmountBs,
-                o.CashPayoutBank, o.CashPayoutIdNumber, o.CashPayoutPhone,
-                o.CashChangeReturned, o.CashChangeReturnedAtUtc, o.CashChangeReturnedReference,
-                Items = o.Items.Select(i => new { i.Id, i.Name, i.Quantity, i.UnitPrice, i.LineTotal })
-            })
-            .ToListAsync();
+                var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (var i = 0; i < r.FieldCount; i++) cols.Add(r.GetName(i));
+                while (await r.ReadAsync())
+                {
+                    var row = MapOrderRow(r, cols);
+                    var id = cols.Contains("Id") && r["Id"] is not DBNull ? r["Id"]?.ToString() ?? "" : "";
+                    orders.Add((row, id));
+                }
+            }
 
-        return Ok(data);
+            // Query items for all fetched orders
+            var orderIds = orders.Select(o => o.Id).Where(id => !string.IsNullOrEmpty(id)).ToList();
+            var itemsByOrder = new Dictionary<string, List<object>>(StringComparer.OrdinalIgnoreCase);
+            if (orderIds.Count > 0)
+            {
+                using var itemCmd = conn.CreateCommand();
+                var pNames = new List<string>();
+                for (var idx = 0; idx < orderIds.Count; idx++)
+                {
+                    pNames.Add($"@oid{idx}");
+                    AddP(itemCmd, $"oid{idx}", Guid.Parse(orderIds[idx]));
+                }
+                itemCmd.CommandText = $"""
+                    SELECT "OrderId", "Id", "Name", "Quantity", "UnitPrice", "LineTotal"
+                    FROM "OrderItems" WHERE "OrderId" IN ({string.Join(",", pNames)})
+                """;
+                using var ir = await itemCmd.ExecuteReaderAsync();
+                while (await ir.ReadAsync())
+                {
+                    var oid = ir["OrderId"]?.ToString() ?? "";
+                    if (!itemsByOrder.ContainsKey(oid)) itemsByOrder[oid] = new List<object>();
+                    decimal? up = null, lt = null;
+                    if (ir["UnitPrice"] is not DBNull) decimal.TryParse(ir["UnitPrice"]?.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var upv) ; up = ir["UnitPrice"] is DBNull ? null : decimal.TryParse(ir["UnitPrice"]?.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var upv2) ? upv2 : null;
+                    lt = ir["LineTotal"] is DBNull ? null : decimal.TryParse(ir["LineTotal"]?.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var ltv) ? ltv : null;
+                    itemsByOrder[oid].Add(new {
+                        id = ir["Id"]?.ToString(),
+                        name = ir["Name"]?.ToString(),
+                        quantity = Convert.ToInt32(ir["Quantity"]),
+                        unitPrice = up,
+                        lineTotal = lt
+                    });
+                }
+            }
+
+            var results = orders.Select(o => {
+                o.Data["items"] = itemsByOrder.TryGetValue(o.Id, out var items) ? items : new List<object>();
+                return (object)o.Data;
+            }).ToList();
+
+            return Ok(results);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GET /api/orders failed");
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
 
     // GET /api/orders/{id}
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
-        var o = await _context.Orders.AsNoTracking()
-            .Include(x => x.Items)
-            .Where(x => x.Id == id)
-            .Select(x => new
-            {
-                x.Id,
-                x.Status,
-                x.CustomerName,
-                x.CustomerIdNumber,
-                x.CustomerPhone,
-                x.Address,
-                x.PaymentMethod,
-                x.DeliveryType,
-                x.CreatedAtUtc,
-                x.LocationLat,
-                x.LocationLng,
-                x.LocationText,
-                x.CheckoutFormSent,
-                x.CheckoutCompleted,
-                x.CheckoutCompletedAtUtc,
-                x.LastNotifiedStatus,
-                x.LastNotifiedAtUtc,
-                x.SpecialInstructions,
-                x.PaymentProofMediaId,
-                x.PaymentProofSubmittedAtUtc,
-                x.PaymentVerifiedAtUtc,
-                x.PaymentVerifiedBy,
-                x.SubtotalAmount,
-                x.TotalAmount,
-                PaymentProofExists = x.PaymentProofMediaId != null,
-                PaymentVerificationStatus = x.PaymentProofMediaId == null ? "none"
-                    : x.PaymentVerifiedAtUtc != null ? "verified" : "pending",
-                x.CashCurrency, x.CashTenderedAmount, x.CashBcvRateUsed,
-                x.CashChangeRequired, x.CashChangeAmount, x.CashChangeAmountBs,
-                x.CashPayoutBank, x.CashPayoutIdNumber, x.CashPayoutPhone,
-                x.CashChangeReturned, x.CashChangeReturnedAtUtc, x.CashChangeReturnedReference,
-                Items = x.Items.Select(i => new { i.Id, i.Name, i.Quantity, i.UnitPrice, i.LineTotal })
-            })
-            .SingleOrDefaultAsync();
+        try
+        {
+            var conn = _context.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
 
-        if (o is null) return NotFound(new { error = "Order not found" });
-        return Ok(o);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """SELECT * FROM "Orders" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@oid) LIMIT 1""";
+            AddP(cmd, "oid", id.ToString());
+
+            Dictionary<string, object?>? orderData = null;
+            string orderId = "";
+            using (var r = await cmd.ExecuteReaderAsync())
+            {
+                var cols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                for (var i = 0; i < r.FieldCount; i++) cols.Add(r.GetName(i));
+                if (!await r.ReadAsync()) return NotFound(new { error = "Order not found" });
+                orderData = MapOrderRow(r, cols);
+                orderId = orderData["id"]?.ToString() ?? "";
+            }
+
+            // Fetch items separately
+            var items = new List<object>();
+            if (!string.IsNullOrEmpty(orderId))
+            {
+                using var itemCmd = conn.CreateCommand();
+                itemCmd.CommandText = """SELECT "Id","Name","Quantity","UnitPrice","LineTotal" FROM "OrderItems" WHERE LOWER(CAST("OrderId" AS TEXT)) = LOWER(@oid)""";
+                AddP(itemCmd, "oid", orderId);
+                using var ir = await itemCmd.ExecuteReaderAsync();
+                while (await ir.ReadAsync())
+                {
+                    decimal? up = ir["UnitPrice"] is DBNull ? null : decimal.TryParse(ir["UnitPrice"]?.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var u) ? u : null;
+                    decimal? lt = ir["LineTotal"] is DBNull ? null : decimal.TryParse(ir["LineTotal"]?.ToString(), System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var l) ? l : null;
+                    items.Add(new { id = ir["Id"]?.ToString(), name = ir["Name"]?.ToString(), quantity = Convert.ToInt32(ir["Quantity"]), unitPrice = up, lineTotal = lt });
+                }
+            }
+            orderData["items"] = items;
+            return Ok(orderData);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "GET /api/orders/{Id} failed", id);
+            return StatusCode(500, new { error = ex.Message });
+        }
     }
+
+    private static Dictionary<string, object?> MapOrderRow(System.Data.Common.DbDataReader r, HashSet<string> cols)
+    {
+        string? Col(string n) => cols.Contains(n) && r[n] is not DBNull ? r[n]?.ToString() : null;
+        decimal? Dec(string n) {
+            if (!cols.Contains(n) || r[n] is DBNull) return null;
+            var raw = r[n];
+            if (raw is decimal d) return d;
+            return decimal.TryParse(raw?.ToString(), System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
+        }
+        bool Bool(string n) {
+            if (!cols.Contains(n) || r[n] is DBNull) return false;
+            var raw = r[n];
+            return raw switch { bool b => b, int i => i != 0, long l => l != 0,
+                string s => s is "1" or "true" or "True" or "t", _ => false };
+        }
+        DateTime? Dt(string n) {
+            if (!cols.Contains(n) || r[n] is DBNull) return null;
+            return r[n] is DateTime dt ? dt : DateTime.TryParse(r[n]?.ToString(), out var p) ? p : null;
+        }
+
+        var proofId = Col("PaymentProofMediaId");
+        var verifiedAt = Dt("PaymentVerifiedAtUtc");
+
+        return new Dictionary<string, object?>
+        {
+            ["id"] = Col("Id"),
+            ["status"] = Col("Status"),
+            ["customerName"] = Col("CustomerName"),
+            ["customerIdNumber"] = Col("CustomerIdNumber"),
+            ["customerPhone"] = Col("CustomerPhone"),
+            ["address"] = Col("Address"),
+            ["paymentMethod"] = Col("PaymentMethod"),
+            ["deliveryType"] = Col("DeliveryType"),
+            ["createdAtUtc"] = Dt("CreatedAtUtc"),
+            ["locationLat"] = Dec("LocationLat"),
+            ["locationLng"] = Dec("LocationLng"),
+            ["locationText"] = Col("LocationText"),
+            ["checkoutFormSent"] = Bool("CheckoutFormSent"),
+            ["checkoutCompleted"] = Bool("CheckoutCompleted"),
+            ["checkoutCompletedAtUtc"] = Dt("CheckoutCompletedAtUtc"),
+            ["lastNotifiedStatus"] = Col("LastNotifiedStatus"),
+            ["lastNotifiedAtUtc"] = Dt("LastNotifiedAtUtc"),
+            ["specialInstructions"] = Col("SpecialInstructions"),
+            ["subtotalAmount"] = Dec("SubtotalAmount"),
+            ["totalAmount"] = Dec("TotalAmount"),
+            ["paymentProofMediaId"] = proofId,
+            ["paymentProofSubmittedAtUtc"] = Dt("PaymentProofSubmittedAtUtc"),
+            ["paymentVerifiedAtUtc"] = verifiedAt,
+            ["paymentVerifiedBy"] = Col("PaymentVerifiedBy"),
+            ["paymentProofExists"] = proofId != null,
+            ["paymentVerificationStatus"] = proofId == null ? "none" : verifiedAt != null ? "verified" : "pending",
+            ["cashCurrency"] = Col("CashCurrency"),
+            ["cashTenderedAmount"] = Dec("CashTenderedAmount"),
+            ["cashBcvRateUsed"] = Dec("CashBcvRateUsed"),
+            ["cashChangeRequired"] = Bool("CashChangeRequired"),
+            ["cashChangeAmount"] = Dec("CashChangeAmount"),
+            ["cashChangeAmountBs"] = Dec("CashChangeAmountBs"),
+            ["cashPayoutBank"] = Col("CashPayoutBank"),
+            ["cashPayoutIdNumber"] = Col("CashPayoutIdNumber"),
+            ["cashPayoutPhone"] = Col("CashPayoutPhone"),
+            ["cashChangeReturned"] = Bool("CashChangeReturned"),
+            ["cashChangeReturnedAtUtc"] = Dt("CashChangeReturnedAtUtc"),
+            ["cashChangeReturnedReference"] = Col("CashChangeReturnedReference"),
+        };
+    }
+
 
     public sealed class UpdateStatusRequest
     {
@@ -645,6 +743,11 @@ public sealed class OrdersController : ControllerBase
         {
             _logger.LogWarning(ex, "Failed to delete cached proof for orderId={OrderId}", orderId);
         }
+    }
+
+    private static void AddP(System.Data.Common.DbCommand cmd, string name, object value)
+    {
+        var p = cmd.CreateParameter(); p.ParameterName = name; p.Value = value; cmd.Parameters.Add(p);
     }
 
     private static string FormatCashChangeNotification(string? customerName, string orderCode, decimal amount, string? reference)
