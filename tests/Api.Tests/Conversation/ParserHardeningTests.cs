@@ -841,9 +841,9 @@ public class ParserHardeningTests
     }
 
     [Fact]
-    public void MenuPrompt_DoesNotContainDelivery()
+    public void MenuPdfPrompt_DoesNotContainDelivery()
     {
-        Msg.MenuPrompt.Should().NotContain("delivery", because: "delivery/pickup is asked in a separate step");
+        Msg.MenuPdfPrompt.Should().NotContain("delivery", because: "delivery/pickup is asked in a separate step");
     }
 
     // ── GOAL 1: Real reply buttons are sent ──

@@ -2166,15 +2166,17 @@ public sealed class WebhookProcessor : IWebhookProcessor
     {
         var s = StripAccents(t);
 
-        // Exact matches
-        if (s is "hola" or "buenas" or "buenos dias" or "buen dia"
+        // Exact matches (including common typos: hoal, ola, holaa, hloa)
+        if (s is "hola" or "hoal" or "ola" or "holaa" or "hloa"
+            or "buenas" or "buenos dias" or "buen dia"
             or "buenas tardes" or "buenas noches" or "hey" or "epa"
             or "epale" or "saludos" or "que tal" or "como estas"
             or "que hubo" or "habla" or "hablame")
             return true;
 
         // Starts-with (e.g. "hola buenas", "epa bro", "que tal como estas")
-        if (s.StartsWith("hola ") || s.StartsWith("que tal")
+        if (s.StartsWith("hola ") || s.StartsWith("hoal ") || s.StartsWith("ola ")
+            || s.StartsWith("que tal")
             || s.StartsWith("como estas") || s.StartsWith("buenas ")
             || s.StartsWith("buenos ") || s.StartsWith("saludos ")
             || s.StartsWith("epa ") || s.StartsWith("epale ")
@@ -4046,7 +4048,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Noise words to strip (greetings + filler + ordering prefixes) — preserve newlines for segment splitting
         // Multi-word phrases listed first so they match before individual words
-        var noisePattern = @"\b(quisiera\s+hacer\s+un\s+pedido|hacer\s+un\s+pedido|hacer\s+pedido|quiero\s+hacer\s+un\s+pedido|quiero\s+pedir|voy\s+a\s+querer|voy\s+a\s+pedir|me\s+das?|mand[ae]\s*me|manda\s*me|para\s+comer|buenas\s+tardes|buenas\s+noches|buenos?\s+d[ií]as?|hola|buenas?|hey|epa|epale|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|dame|ponme|regalame|reg[aá]lame|necesito|pedimos|bro|pana|mano|vale|loco|hermano)\b";
+        var noisePattern = @"\b(quisiera\s+hacer\s+un\s+pedido|hacer\s+un\s+pedido|hacer\s+pedido|quiero\s+hacer\s+un\s+pedido|quiero\s+pedir|voy\s+a\s+querer|voy\s+a\s+pedir|me\s+das?|mand[ae]\s*me|manda\s*me|para\s+comer|buenas\s+tardes|buenas\s+noches|buenos?\s+d[ií]as?|hola|hoal|ola|holaa|hloa|buenas?|hey|epa|epale|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|dame|ponme|regalame|reg[aá]lame|necesito|pedimos|bro|pana|mano|vale|loco|hermano)\b";
         var cleaned = Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase);
         // Collapse spaces on each line but preserve newlines
         cleaned = string.Join("\n", cleaned.Split('\n').Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim()));

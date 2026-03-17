@@ -3652,7 +3652,7 @@ public class WebhookProcessorTests
         state.ObservationAnswered.Should().BeFalse();
         state.OrderConfirmed.Should().BeFalse();
         sentMessages.Last().Body.Should().Contain("RESUMEN DE TU PEDIDO");
-        sentMessages.Last().Body.Should().Contain("deseas ordenar");
+        sentMessages.Last().Body.Should().Contain("tu pedido");
     }
 
     [Fact]
@@ -3832,7 +3832,7 @@ public class WebhookProcessorTests
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "no se"), _testBusiness);
 
         sentMessages.Should().HaveCount(1);
-        sentMessages[0].Body.Should().Contain("deseas ordenar");
+        sentMessages[0].Body.Should().Contain("tu pedido");
 
         _aiParserMock.Verify(
             x => x.ParseAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),

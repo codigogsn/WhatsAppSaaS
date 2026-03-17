@@ -21,14 +21,6 @@ internal static class Msg
     internal static string ReturningGreeting(string businessName, string customerName)
         => $"Hola de nuevo, *{customerName}*! \ud83d\udc4b Bienvenido a *{businessName}*";
 
-    internal static string MenuPrompt
-        => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?\n\n"
-         + "_Ejemplo:_\n"
-         + "_2 hamburguesas cl\u00e1sicas_\n"
-         + "_1 papa mediana_\n"
-         + "_2 Coca Cola_\n\n"
-         + "_Escribe un producto por l\u00ednea_";
-
     internal static string MenuPdfPrompt
         => "Perfecto. Env\u00edame tu pedido.\n\n"
          + "_Ejemplo:_\n"
@@ -111,13 +103,7 @@ internal static class Msg
 
     // ── Order flow ──
 
-    internal static string WhatToOrder
-        => "\ud83c\udf7d\ufe0f \u00bfQu\u00e9 deseas ordenar?\n\n"
-         + "_Ejemplo:_\n"
-         + "_2 hamburguesas cl\u00e1sicas_\n"
-         + "_1 papa mediana_\n"
-         + "_2 Coca Cola_\n\n"
-         + "_Escribe un producto por l\u00ednea_";
+    internal static string WhatToOrder => MenuPdfPrompt;
 
     internal static string ContinueOrder
         => "Perfecto, escr\u00edbeme tu pedido.\n\n"
@@ -597,13 +583,7 @@ internal static class Msg
     // ── Conversation recovery (ambiguous/stall responses) ──
 
     internal static string GentleRedirect
-        => "\ud83e\udd14 No estoy seguro de lo que deseas.\n\n"
-         + "\u00bfQu\u00e9 deseas ordenar?\n\n"
-         + "_Ejemplo:_\n"
-         + "_2 hamburguesas cl\u00e1sicas_\n"
-         + "_1 papa mediana_\n"
-         + "_2 Coca Cola_\n\n"
-         + "_Escribe un producto por l\u00ednea_";
+        => "\ud83e\udd14 No estoy seguro de lo que deseas.\n\n" + MenuPdfPrompt;
 
     internal static string GentleRedirectWithOrder(IReadOnlyList<ConversationItemEntry> items)
     {
