@@ -464,6 +464,7 @@
     <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
     <button onclick="window.location.href='/menu'" id="btnMenuMgr" style="display:none;">Menu Manager</button>
     <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
+    <button onclick="toggleCustomersPanel()">Customers</button>
     <span id="selectedBizStatus" class="small"></span>
     <span style="flex:1;"></span>
     <span class="muted small">API: <code id="baseUrl"></code></span>
@@ -814,6 +815,24 @@
       </div>
     </div>
   </details>
+
+  <!-- Customers CRM Panel -->
+  <div id="customersPanel" class="biz-panel" style="display:none;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <h3>Customers</h3>
+      <button onclick="toggleCustomersPanel()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>
+    </div>
+    <div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap;">
+      <input id="crmSearch" placeholder="Search name or phone..." style="flex:1;min-width:160px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;" onkeyup="if(event.key==='Enter')loadCrm()">
+      <select id="crmSort" style="padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;">
+        <option value="recent">Most recent</option>
+        <option value="orders">Most orders</option>
+        <option value="spent">Most spent</option>
+      </select>
+      <button class="primary" onclick="loadCrm()">Load</button>
+    </div>
+    <div id="crmBody" style="font-size:12px;color:var(--muted);">Click Load to view customers.</div>
+  </div>
 
   <!-- Filters -->
   <div class="filters">
@@ -2219,6 +2238,65 @@ async function toggleUsersPanel(){
     await loadUsers();
   } else {
     panel.style.display = 'none';
+  }
+}
+
+// ── Customers CRM ──
+function toggleCustomersPanel(){
+  const panel = document.getElementById('customersPanel');
+  if (panel.style.display === 'none') {
+    panel.style.display = '';
+    loadCrm();
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+async function loadCrm(){
+  const body = document.getElementById('crmBody');
+  body.innerHTML = '<span style="color:var(--muted);">Loading...</span>';
+  const bid = getBusinessId();
+  const sort = document.getElementById('crmSort').value;
+  const search = document.getElementById('crmSearch').value.trim();
+  const qs = new URLSearchParams({sort, take: '200'});
+  if (bid) qs.set('businessId', bid);
+  if (search) qs.set('search', search);
+  try {
+    const res = await fetch('/api/admin/customers/crm?' + qs.toString(), { headers: adminHeaders() });
+    if (!res.ok) { body.textContent = 'Error loading customers'; return; }
+    const data = await res.json();
+    if (!data.customers || data.customers.length === 0) {
+      body.textContent = 'No customers found.';
+      return;
+    }
+    body.innerHTML = '<table style="width:100%;border-collapse:collapse;font-size:12px;">'
+      + '<thead><tr style="border-bottom:2px solid var(--border);text-align:left;">'
+      + '<th style="padding:6px;">Name</th>'
+      + '<th style="padding:6px;">Phone</th>'
+      + '<th style="padding:6px;">Orders</th>'
+      + '<th style="padding:6px;">Spent</th>'
+      + '<th style="padding:6px;">Favorite Item</th>'
+      + '<th style="padding:6px;">Delivery</th>'
+      + '<th style="padding:6px;">Payment</th>'
+      + '<th style="padding:6px;">Last Purchase</th>'
+      + '</tr></thead><tbody>'
+      + data.customers.map(function(c){
+        var lastDate = c.lastPurchase ? new Date(c.lastPurchase).toLocaleDateString() : 'N/A';
+        return '<tr style="border-bottom:1px solid var(--border);">'
+          + '<td style="padding:6px;font-weight:600;">' + esc(c.name) + '</td>'
+          + '<td style="padding:6px;font-family:monospace;font-size:11px;">' + esc(c.phone) + '</td>'
+          + '<td style="padding:6px;text-align:center;">' + c.ordersCount + '</td>'
+          + '<td style="padding:6px;">$' + fmtMoney(c.totalSpent) + '</td>'
+          + '<td style="padding:6px;">' + esc(c.favoriteItem) + '</td>'
+          + '<td style="padding:6px;"><span class="pill" style="font-size:10px;">' + esc(c.preferredDelivery) + '</span></td>'
+          + '<td style="padding:6px;"><span class="pill" style="font-size:10px;">' + esc(c.preferredPayment) + '</span></td>'
+          + '<td style="padding:6px;">' + lastDate + '</td>'
+          + '</tr>';
+      }).join('')
+      + '</tbody></table>'
+      + '<div style="margin-top:8px;color:var(--muted);font-size:11px;">' + data.total + ' customer(s)</div>';
+  } catch(e) {
+    body.textContent = 'Error: ' + e.message;
   }
 }
 
