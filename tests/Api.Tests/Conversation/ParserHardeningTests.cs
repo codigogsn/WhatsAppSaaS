@@ -548,7 +548,7 @@ public class ParserHardeningTests
         var thirdMsg = (OutgoingMessage)_whatsAppClientMock.Invocations
             .Where(i => i.Method.Name == "SendTextMessageAsync")
             .ElementAt(2).Arguments[0];
-        thirdMsg.Body.Should().Contain("Envíame tu pedido",
+        thirdMsg.Body.Should().Contain("deseas ordenar",
             "fresh conversation prompt should use the PDF menu prompt");
     }
 

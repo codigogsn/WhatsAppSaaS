@@ -650,6 +650,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             goto quickParseEntry;
                         }
 
+                        // Repeated greeting in active session: skip full greeting, send short prompt
+                        if (IsGreeting(t) && state.MenuSent
+                            && state.LastActivityUtc.HasValue
+                            && (DateTime.UtcNow - state.LastActivityUtc.Value).TotalMinutes <= 10)
+                        {
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.ContinueOrder,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
                         state.LastActivityUtc = DateTime.UtcNow;

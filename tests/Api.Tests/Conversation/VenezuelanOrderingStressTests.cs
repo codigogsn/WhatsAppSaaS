@@ -557,7 +557,7 @@ public class VenezuelanOrderingStressTests
         await _sut.ProcessAsync(Msg("que tienen"), _testBusiness);
 
         sentMessages.Should().ContainSingle();
-        sentMessages[0].Body.Should().Contain("tu pedido");
+        sentMessages[0].Body.Should().Contain("deseas ordenar");
 
         _aiParserMock.Verify(
             x => x.ParseAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
@@ -839,12 +839,12 @@ public class VenezuelanOrderingStressTests
 
         // User is indecisive
         await _sut.ProcessAsync(Msg("mmm"), _testBusiness);
-        sentMessages.Last().Body.Should().Contain("tu pedido");
+        sentMessages.Last().Body.Should().Contain("deseas ordenar");
 
         // User stalls again
         sentMessages.Clear();
         await _sut.ProcessAsync(Msg("dejame pensar"), _testBusiness);
-        sentMessages.Last().Body.Should().Contain("tu pedido");
+        sentMessages.Last().Body.Should().Contain("deseas ordenar");
 
         // User finally places order
         sentMessages.Clear();
@@ -950,7 +950,7 @@ public class VenezuelanOrderingStressTests
     public void Edge_GentleRedirect_ContainsExample()
     {
         var redirect = Msg_Static.GentleRedirect;
-        redirect.Should().Contain("tu pedido");
+        redirect.Should().Contain("deseas ordenar");
         redirect.Should().Contain("Ejemplo");
     }
 

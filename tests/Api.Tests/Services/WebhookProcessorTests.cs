@@ -253,7 +253,7 @@ public class WebhookProcessorTests
         sentMessages[1].Body.Should().Contain("Menú");
 
         // Message 3: Prompt
-        sentMessages[2].Body.Should().Contain("Envíame tu pedido");
+        sentMessages[2].Body.Should().Contain("deseas ordenar");
     }
 
     [Fact]
@@ -274,7 +274,7 @@ public class WebhookProcessorTests
         sentMessages[1].DocumentUrl.Should().NotBeNullOrWhiteSpace("message 2 must be the PDF document");
         sentMessages[1].DocumentUrl.Should().Contain("menu", "PDF URL should reference the menu");
         sentMessages[2].DocumentUrl.Should().BeNull("message 3 is a plain text prompt");
-        sentMessages[2].Body.Should().Contain("Envíame tu pedido", "message 3 is the ordering prompt");
+        sentMessages[2].Body.Should().Contain("deseas ordenar", "message 3 is the ordering prompt");
     }
 
     [Fact]
@@ -768,7 +768,7 @@ public class WebhookProcessorTests
         sentMessages.Should().HaveCount(3, "should send welcome + menu PDF + prompt");
         sentMessages[0].Body.Should().Contain("bienvenido");
         sentMessages[1].DocumentUrl.Should().NotBeNullOrWhiteSpace("menu should be sent as PDF");
-        sentMessages[2].Body.Should().Contain("Envíame tu pedido");
+        sentMessages[2].Body.Should().Contain("deseas ordenar");
 
         // State must be reset
         staleState.Items.Should().BeEmpty("stale items should be cleared");
@@ -854,7 +854,7 @@ public class WebhookProcessorTests
         sentMessages.Should().HaveCount(3, $"'{input}' should reset and send 3 fresh messages");
         sentMessages[0].Body.Should().Contain("bienvenido", $"'{input}' should trigger welcome");
         sentMessages[1].DocumentUrl.Should().NotBeNullOrWhiteSpace($"'{input}' should trigger PDF menu");
-        sentMessages[2].Body.Should().Contain("Envíame tu pedido", $"'{input}' should trigger prompt");
+        sentMessages[2].Body.Should().Contain("deseas ordenar", $"'{input}' should trigger prompt");
 
         // Must NOT contain stale checkout messages
         sentMessages.Should().NotContain(m => m.Body.Contains("planilla"), $"'{input}' should not trigger stale checkout");
@@ -3652,7 +3652,7 @@ public class WebhookProcessorTests
         state.ObservationAnswered.Should().BeFalse();
         state.OrderConfirmed.Should().BeFalse();
         sentMessages.Last().Body.Should().Contain("RESUMEN DE TU PEDIDO");
-        sentMessages.Last().Body.Should().Contain("tu pedido");
+        sentMessages.Last().Body.Should().Contain("deseas ordenar");
     }
 
     [Fact]
@@ -3832,7 +3832,7 @@ public class WebhookProcessorTests
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "no se"), _testBusiness);
 
         sentMessages.Should().HaveCount(1);
-        sentMessages[0].Body.Should().Contain("tu pedido");
+        sentMessages[0].Body.Should().Contain("deseas ordenar");
 
         _aiParserMock.Verify(
             x => x.ParseAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),

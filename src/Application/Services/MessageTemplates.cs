@@ -22,7 +22,7 @@ internal static class Msg
         => $"Hola de nuevo, *{customerName}*! \ud83d\udc4b Bienvenido a *{businessName}*";
 
     internal static string MenuPdfPrompt
-        => "Perfecto. Env\u00edame tu pedido.\n\n"
+        => "\u00bfQu\u00e9 deseas ordenar?\n\n"
          + "_Ejemplo:_\n"
          + "_2 hamburguesas cl\u00e1sicas_\n"
          + "_1 papa mediana_\n"
