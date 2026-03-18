@@ -297,8 +297,7 @@ internal static class Msg
     internal static string ZelleDetails(string recipient, string? instructions = null)
         => "\ud83d\udcb3 *DATOS PARA PAGO ZELLE*\n\n"
          + $"\u2022 *Enviar a:* {recipient}"
-         + (!string.IsNullOrWhiteSpace(instructions) ? $"\n\u2022 *Instrucciones:* {instructions}" : "")
-         + "\n\nRealiza el pago y env\u00eda el *comprobante* (screenshot) \ud83d\udcf8";
+         + (!string.IsNullOrWhiteSpace(instructions) ? $"\n\u2022 *Instrucciones:* {instructions}" : "");
 
     internal static string ZelleProofRequest
         => "Env\u00eda el *comprobante de Zelle* (screenshot) \ud83d\udcf8";
