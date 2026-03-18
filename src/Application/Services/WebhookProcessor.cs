@@ -1429,21 +1429,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private async Task SendZelleDetailsAsync(
         string to, string phoneNumberId, BusinessContext biz, string conversationId, CancellationToken ct)
     {
-        var recipient = biz.ZelleRecipient;
-        if (string.IsNullOrWhiteSpace(recipient))
-        {
-            // Fallback: send generic proof request if no Zelle config
-            await SendAsync(new OutgoingMessage
-            {
-                To = to, Body = Msg.ZelleProofRequest,
-                PhoneNumberId = phoneNumberId, AccessToken = biz.AccessToken
-            }, biz.BusinessId, conversationId, ct);
-            return;
-        }
+        // Per-business config → env var → "(no configurado)"
+        var recipient = FirstNonEmpty(biz.ZelleRecipient,
+            Environment.GetEnvironmentVariable("ZELLE_RECIPIENT")) ?? "(no configurado)";
+        var instructions = FirstNonEmpty(biz.ZelleInstructions,
+            Environment.GetEnvironmentVariable("ZELLE_INSTRUCTIONS"));
 
+        // Message 1: Zelle destination details
         await SendAsync(new OutgoingMessage
         {
-            To = to, Body = Msg.ZelleDetails(recipient, biz.ZelleInstructions),
+            To = to, Body = Msg.ZelleDetails(recipient, instructions),
+            PhoneNumberId = phoneNumberId, AccessToken = biz.AccessToken
+        }, biz.BusinessId, conversationId, ct);
+
+        // Message 2: Proof request (separate, matching pago móvil pattern)
+        await SendAsync(new OutgoingMessage
+        {
+            To = to, Body = Msg.ZelleProofRequest,
             PhoneNumberId = phoneNumberId, AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
     }
