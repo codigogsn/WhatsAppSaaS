@@ -319,49 +319,120 @@ static void SeedDefaultBusiness(IServiceProvider services)
 
     try
     {
-        var existing = db.Businesses.FirstOrDefault(b => b.PhoneNumberId == phoneNumberId);
-        if (existing is not null)
+        // Raw SQL: avoids EF Guid cast crash on legacy text Id rows like "biz_demo_001"
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) conn.Open();
+
+        // Count legacy rows with non-uuid Ids for diagnostics (PostgreSQL only)
+        var isPostgres = conn.GetType().Name.Contains("Npgsql", StringComparison.OrdinalIgnoreCase);
+        if (isPostgres)
         {
-            var changed = false;
-            if (!string.IsNullOrWhiteSpace(accessToken) && existing.AccessToken != accessToken)
+            try
             {
-                existing.AccessToken = accessToken;
-                changed = true;
+                using var diagCmd = conn.CreateCommand();
+                diagCmd.CommandText = """
+                    SELECT COUNT(*) FROM "Businesses"
+                    WHERE CAST("Id" AS TEXT) !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+                """;
+                var legacyCount = Convert.ToInt64(diagCmd.ExecuteScalar());
+                if (legacyCount > 0)
+                    Log.Warning("SEED: found {LegacyCount} business row(s) with non-UUID Id — skipped by EF, safe in raw SQL", legacyCount);
             }
-            if (!string.IsNullOrWhiteSpace(adminKey) && existing.AdminKey != adminKey)
+            catch (Exception ex)
             {
-                existing.AdminKey = adminKey;
-                changed = true;
+                Log.Debug(ex, "SEED: legacy Id diagnostic query failed (non-critical)");
             }
-            if (!existing.IsActive)
+        }
+
+        // Check if business already exists for this phoneNumberId
+        string? existingId = null;
+        string? existingToken = null;
+        string? existingAdminKey = null;
+        bool existingActive = false;
+
+        using (var readCmd = conn.CreateCommand())
+        {
+            readCmd.CommandText = """
+                SELECT CAST("Id" AS TEXT), "AccessToken", "AdminKey", "IsActive"
+                FROM "Businesses"
+                WHERE "PhoneNumberId" = @pid
+                LIMIT 1
+            """;
+            var p = readCmd.CreateParameter(); p.ParameterName = "pid"; p.Value = phoneNumberId; readCmd.Parameters.Add(p);
+
+            using var r = readCmd.ExecuteReader();
+            if (r.Read())
             {
-                existing.IsActive = true;
-                changed = true;
+                existingId = r.IsDBNull(0) ? null : r.GetString(0);
+                existingToken = r.IsDBNull(1) ? null : r.GetString(1);
+                existingAdminKey = r.IsDBNull(2) ? null : r.GetString(2);
+                var rawActive = r["IsActive"];
+                existingActive = rawActive switch
+                {
+                    bool bv => bv, int iv => iv != 0, long lv => lv != 0,
+                    string sv => sv is "1" or "true" or "True" or "t", _ => true
+                };
+            }
+        }
+
+        if (existingId is not null)
+        {
+            // Update existing business with raw SQL
+            var sets = new List<string>();
+            var updateParams = new List<(string name, object value)>();
+
+            if (!string.IsNullOrWhiteSpace(accessToken) && accessToken != existingToken)
+            {
+                sets.Add("\"AccessToken\" = @token");
+                updateParams.Add(("token", accessToken));
+            }
+            if (!string.IsNullOrWhiteSpace(adminKey) && adminKey != existingAdminKey)
+            {
+                sets.Add("\"AdminKey\" = @akey");
+                updateParams.Add(("akey", adminKey));
+            }
+            if (!existingActive)
+            {
+                sets.Add("\"IsActive\" = true");
             }
 
-            if (changed)
+            if (sets.Count > 0)
             {
-                db.SaveChanges();
-                Log.Information("SEED: updated existing business PhoneNumberId={PhoneNumberId}", phoneNumberId);
+                using var updCmd = conn.CreateCommand();
+                updCmd.CommandText = $"""UPDATE "Businesses" SET {string.Join(", ", sets)} WHERE "PhoneNumberId" = @pid""";
+                var pp = updCmd.CreateParameter(); pp.ParameterName = "pid"; pp.Value = phoneNumberId; updCmd.Parameters.Add(pp);
+                foreach (var (name, value) in updateParams)
+                {
+                    var up = updCmd.CreateParameter(); up.ParameterName = name; up.Value = value; updCmd.Parameters.Add(up);
+                }
+                updCmd.ExecuteNonQuery();
+                Log.Information("SEED: updated existing business PhoneNumberId={PhoneNumberId} Id={Id}", phoneNumberId, existingId);
             }
             else
             {
-                Log.Information("SEED: business already exists PhoneNumberId={PhoneNumberId} IsActive={IsActive}",
-                    phoneNumberId, existing.IsActive);
+                Log.Information("SEED: business already exists PhoneNumberId={PhoneNumberId} Id={Id} IsActive={IsActive}",
+                    phoneNumberId, existingId, existingActive);
             }
             return;
         }
 
-        db.Businesses.Add(new WhatsAppSaaS.Domain.Entities.Business
+        // Insert new business with raw SQL
+        var newId = Guid.NewGuid();
+        using (var insCmd = conn.CreateCommand())
         {
-            Name = businessName,
-            PhoneNumberId = phoneNumberId,
-            AccessToken = accessToken,
-            AdminKey = adminKey,
-            IsActive = true
-        });
-        db.SaveChanges();
-        Log.Information("SEED: created business PhoneNumberId={PhoneNumberId} Name={Name}", phoneNumberId, businessName);
+            insCmd.CommandText = """
+                INSERT INTO "Businesses" ("Id", "Name", "PhoneNumberId", "AccessToken", "AdminKey", "IsActive", "CreatedAtUtc")
+                VALUES (@id, @name, @pid, @token, @akey, true, @created)
+            """;
+            var ip1 = insCmd.CreateParameter(); ip1.ParameterName = "id"; ip1.Value = newId; insCmd.Parameters.Add(ip1);
+            var ip2 = insCmd.CreateParameter(); ip2.ParameterName = "name"; ip2.Value = businessName; insCmd.Parameters.Add(ip2);
+            var ip3 = insCmd.CreateParameter(); ip3.ParameterName = "pid"; ip3.Value = phoneNumberId; insCmd.Parameters.Add(ip3);
+            var ip4 = insCmd.CreateParameter(); ip4.ParameterName = "token"; ip4.Value = accessToken; insCmd.Parameters.Add(ip4);
+            var ip5 = insCmd.CreateParameter(); ip5.ParameterName = "akey"; ip5.Value = adminKey; insCmd.Parameters.Add(ip5);
+            var ip6 = insCmd.CreateParameter(); ip6.ParameterName = "created"; ip6.Value = DateTime.UtcNow; insCmd.Parameters.Add(ip6);
+            insCmd.ExecuteNonQuery();
+        }
+        Log.Information("SEED: created business PhoneNumberId={PhoneNumberId} Id={Id} Name={Name}", phoneNumberId, newId, businessName);
     }
     catch (Exception ex)
     {
@@ -387,7 +458,7 @@ static void SeedZelleConfig(IServiceProvider services)
         cmd.CommandText = """
             UPDATE "Businesses"
             SET "ZelleRecipient" = @recip, "ZelleInstructions" = @instr
-            WHERE "IsActive" = true AND "ZelleRecipient" IS NULL
+            WHERE CAST("IsActive" AS TEXT) IN ('true','1','t') AND "ZelleRecipient" IS NULL
         """;
         var p1 = cmd.CreateParameter(); p1.ParameterName = "recip"; p1.Value = "insertatuzelle@gmail.com"; cmd.Parameters.Add(p1);
         var p2 = cmd.CreateParameter(); p2.ParameterName = "instr"; p2.Value = "Enviar comprobante por WhatsApp"; cmd.Parameters.Add(p2);
@@ -398,7 +469,7 @@ static void SeedZelleConfig(IServiceProvider services)
         using var verify = conn.CreateCommand();
         verify.CommandText = """
             SELECT "Id", "Name", "ZelleRecipient", "ZelleInstructions"
-            FROM "Businesses" WHERE "IsActive" = true LIMIT 5
+            FROM "Businesses" WHERE CAST("IsActive" AS TEXT) IN ('true','1','t') LIMIT 5
         """;
         using var r = verify.ExecuteReader();
         while (r.Read())
