@@ -1435,6 +1435,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var instructions = FirstNonEmpty(biz.ZelleInstructions,
             Environment.GetEnvironmentVariable("ZELLE_INSTRUCTIONS"));
 
+        _logger.LogInformation(
+            "ZELLE DETAILS: bizId={BizId} bizName={BizName} phoneNumberId={PhoneNumberId} " +
+            "biz.ZelleRecipient={ZelleRecipient} biz.ZelleInstructions={ZelleInstructions} " +
+            "envZELLE_RECIPIENT={EnvRecipient} resolvedRecipient={Resolved}",
+            biz.BusinessId, biz.BusinessName, biz.PhoneNumberId,
+            biz.ZelleRecipient ?? "(null)", biz.ZelleInstructions ?? "(null)",
+            Environment.GetEnvironmentVariable("ZELLE_RECIPIENT") ?? "(null)", recipient);
+
         // Message 1: Zelle destination details
         await SendAsync(new OutgoingMessage
         {

@@ -108,6 +108,8 @@ public class AdminBusinessesController : ControllerBase
                 NotificationPhone = Col("NotificationPhone"),
                 RestaurantType = Col("RestaurantType"),
                 MenuPdfUrl = Col("MenuPdfUrl"),
+                ZelleRecipient = Col("ZelleRecipient"),
+                ZelleInstructions = Col("ZelleInstructions"),
                 IsActive = true // we filtered for active
             };
             if (DateTime.TryParse(Col("CreatedAtUtc"), out var created))
@@ -210,6 +212,8 @@ public class AdminBusinessesController : ControllerBase
                     notificationPhone = Col("NotificationPhone"),
                     restaurantType = Col("RestaurantType"),
                     menuPdfUrl = Col("MenuPdfUrl"),
+                    zelleRecipient = Col("ZelleRecipient"),
+                    zelleInstructions = Col("ZelleInstructions"),
                     createdAtUtc = Col("CreatedAtUtc")
                 });
             }
@@ -269,6 +273,8 @@ public class AdminBusinessesController : ControllerBase
             biz.NotificationPhone,
             biz.RestaurantType,
             biz.MenuPdfUrl,
+            biz.ZelleRecipient,
+            biz.ZelleInstructions,
             biz.CreatedAtUtc
         });
     }
@@ -287,6 +293,8 @@ public class AdminBusinessesController : ControllerBase
         public string? PaymentMobilePhone { get; set; }
         public string? NotificationPhone { get; set; }
         public string? RestaurantType { get; set; }
+        public string? ZelleRecipient { get; set; }
+        public string? ZelleInstructions { get; set; }
     }
 
     // GET /api/admin/businesses/templates
@@ -341,6 +349,8 @@ public class AdminBusinessesController : ControllerBase
             PaymentMobilePhone = req.PaymentMobilePhone?.Trim(),
             NotificationPhone = req.NotificationPhone?.Trim(),
             RestaurantType = req.RestaurantType?.Trim().ToLowerInvariant(),
+            ZelleRecipient = req.ZelleRecipient?.Trim(),
+            ZelleInstructions = req.ZelleInstructions?.Trim(),
             IsActive = true
         };
 
@@ -520,6 +530,8 @@ public class AdminBusinessesController : ControllerBase
         public string? PaymentMobileId { get; set; }
         public string? PaymentMobilePhone { get; set; }
         public string? NotificationPhone { get; set; }
+        public string? ZelleRecipient { get; set; }
+        public string? ZelleInstructions { get; set; }
     }
 
     // PUT /api/admin/businesses/{id}
@@ -544,7 +556,8 @@ public class AdminBusinessesController : ControllerBase
                 SET "Name" = @name, "Greeting" = @greeting, "Schedule" = @schedule,
                     "Address" = @address, "LogoUrl" = @logo,
                     "PaymentMobileBank" = @pmBank, "PaymentMobileId" = @pmId,
-                    "PaymentMobilePhone" = @pmPhone, "NotificationPhone" = @notif
+                    "PaymentMobilePhone" = @pmPhone, "NotificationPhone" = @notif,
+                    "ZelleRecipient" = @zRecip, "ZelleInstructions" = @zInstr
                 WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@id)
             """;
             AddParam(cmd, "name", name);
@@ -556,6 +569,8 @@ public class AdminBusinessesController : ControllerBase
             AddParam(cmd, "pmId", (object?)req.PaymentMobileId?.Trim() ?? DBNull.Value);
             AddParam(cmd, "pmPhone", (object?)req.PaymentMobilePhone?.Trim() ?? DBNull.Value);
             AddParam(cmd, "notif", (object?)req.NotificationPhone?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "zRecip", (object?)req.ZelleRecipient?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "zInstr", (object?)req.ZelleInstructions?.Trim() ?? DBNull.Value);
             AddParam(cmd, "id", id.ToString());
             await cmd.ExecuteNonQueryAsync(ct);
 
@@ -570,7 +585,9 @@ public class AdminBusinessesController : ControllerBase
                 paymentMobileBank = req.PaymentMobileBank?.Trim(),
                 paymentMobileId = req.PaymentMobileId?.Trim(),
                 paymentMobilePhone = req.PaymentMobilePhone?.Trim(),
-                notificationPhone = req.NotificationPhone?.Trim()
+                notificationPhone = req.NotificationPhone?.Trim(),
+                zelleRecipient = req.ZelleRecipient?.Trim(),
+                zelleInstructions = req.ZelleInstructions?.Trim()
             });
         }
         catch (Exception ex)
