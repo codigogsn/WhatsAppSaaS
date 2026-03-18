@@ -1036,6 +1036,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 if (!state.PaymentEvidenceRequested)
                                 {
                                     state.PaymentEvidenceRequested = true;
+                                    state.CheckoutPendingSinceUtc ??= DateTime.UtcNow;
 
                                     if (payMethod == "pago_movil")
                                     {
@@ -1094,6 +1095,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             if (!state.PaymentEvidenceRequested)
                             {
                                 state.PaymentEvidenceRequested = true;
+                                state.CheckoutPendingSinceUtc ??= DateTime.UtcNow;
 
                                 if (state.PaymentMethod == "pago_movil")
                                     await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, state.Items, cancellationToken);
@@ -1609,7 +1611,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (!state.CheckoutFormSent)
         {
             state.CheckoutFormSent = true;
-            return state.DeliveryType == "pickup" ? Msg.CheckoutFormPickup : Msg.CheckoutForm;
+            state.CheckoutPendingSinceUtc ??= DateTime.UtcNow;
+            var form = state.DeliveryType == "pickup" ? Msg.CheckoutFormPickup : Msg.CheckoutForm;
+            return form + "\n\n" + Msg.CheckoutReservation;
         }
 
         return new BotReply(Msg.CheckoutDataReceived, Msg.CheckoutDataButtons);

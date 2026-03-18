@@ -113,6 +113,7 @@ try
         WhatsAppSaaS.Infrastructure.Services.BackgroundJobService>();
     builder.Services.AddHostedService<WhatsAppSaaS.Api.Workers.BackgroundJobWorker>();
     builder.Services.AddHostedService<WhatsAppSaaS.Api.Workers.CleanupJobScheduler>();
+    builder.Services.AddHostedService<WhatsAppSaaS.Api.Workers.CheckoutReminderWorker>();
 
     // ────────────────────────────────────────
     // JWT Authentication

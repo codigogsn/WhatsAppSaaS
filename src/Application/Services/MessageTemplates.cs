@@ -304,6 +304,17 @@ internal static class Msg
 
     // ── Order confirmation / receipt ──
 
+    // ── Checkout reservation & inactivity reminders ──
+
+    internal static string CheckoutReservation
+        => "Tu pedido queda reservado por unos minutos mientras completas el pago \u23f3";
+
+    internal static string CheckoutReminder1
+        => "\u00bfQuieres que termine tu pedido? \ud83d\ude0a";
+
+    internal static string CheckoutReminder2
+        => "Tu pedido sigue disponible \ud83d\udc40";
+
     internal static string EmptyOrder
         => "No hay productos en tu pedido. Env\u00eda lo que deseas pedir.";
 

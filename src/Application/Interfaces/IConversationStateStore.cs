@@ -70,6 +70,11 @@ public sealed class ConversationFields
 
     public DateTime? LastActivityUtc { get; set; }
 
+    // Checkout inactivity reminder state
+    public DateTime? CheckoutPendingSinceUtc { get; set; }
+    public DateTime? Reminder1SentAtUtc { get; set; }
+    public DateTime? Reminder2SentAtUtc { get; set; }
+
     /// <summary>
     /// Pending items that had ambiguous matches. Each entry contains
     /// the original text, quantity, and candidate canonical names.
@@ -116,6 +121,9 @@ public sealed class ConversationFields
         ComboAcceptedCount = 0;
         ComboDeclinedCount = 0;
         PendingAmbiguousItems = null;
+        CheckoutPendingSinceUtc = null;
+        Reminder1SentAtUtc = null;
+        Reminder2SentAtUtc = null;
         CashCurrency = null;
         CashTenderedAmount = null;
         CashChangeRequired = false;
