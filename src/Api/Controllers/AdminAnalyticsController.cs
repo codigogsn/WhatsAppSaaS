@@ -479,10 +479,16 @@ public class AdminAnalyticsController : ControllerBase
             {
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = """
-                    SELECT "Name", "PhoneE164", "OrdersCount", "TotalSpent"
-                    FROM "Customers"
-                    WHERE "BusinessId" = @bid AND "OrdersCount" > 0
-                    ORDER BY "TotalSpent" DESC
+                    SELECT
+                        (SELECT o2."CustomerName" FROM "Orders" o2
+                         WHERE o2."From" = c."PhoneE164"
+                           AND CAST(o2."CheckoutCompleted" AS TEXT) IN ('true','1','t')
+                           AND o2."CustomerName" IS NOT NULL AND o2."CustomerName" != ''
+                         ORDER BY o2."CreatedAtUtc" DESC LIMIT 1) AS "Name",
+                        c."PhoneE164", c."OrdersCount", c."TotalSpent"
+                    FROM "Customers" c
+                    WHERE CAST(c."BusinessId" AS TEXT) = CAST(@bid AS TEXT) AND c."OrdersCount" > 0
+                    ORDER BY c."TotalSpent" DESC
                     LIMIT 5
                 """;
                 AddParam(cmd, "bid", businessId.Value);

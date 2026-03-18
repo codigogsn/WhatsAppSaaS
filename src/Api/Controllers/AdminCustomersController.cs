@@ -59,18 +59,26 @@ public class AdminCustomersController : ControllerBase
                 _ => "ORDER BY last_purchase DESC NULLS LAST"
             };
 
-            // Two-step query: base aggregation on Orders only (no OrderItems inflation),
-            // then correlated subquery for favorite item from OrderItems.
-            // Use CAST for CheckoutCompleted to handle legacy integer columns.
+            var completedFilter = """CAST(o."CheckoutCompleted" AS TEXT) IN ('true','1','t')""";
+            var completedFilter2 = """CAST(o2."CheckoutCompleted" AS TEXT) IN ('true','1','t')""";
+
             var sql = $"""
                 SELECT
-                    base.phone, base.name, base.orders_count, base.total_spent,
+                    base.phone, base.orders_count, base.total_spent,
                     base.last_purchase, base.pref_delivery, base.pref_payment,
+                    (SELECT o2."CustomerName"
+                     FROM "Orders" o2
+                     WHERE o2."From" = base.phone
+                       AND {completedFilter2}
+                       AND o2."CustomerName" IS NOT NULL AND o2."CustomerName" != ''
+                       {(businessId.HasValue ? "AND CAST(o2.\"BusinessId\" AS TEXT) = @bid" : "")}
+                     ORDER BY o2."CreatedAtUtc" DESC
+                     LIMIT 1) AS name,
                     (SELECT oi."Name"
                      FROM "OrderItems" oi
                      INNER JOIN "Orders" o2 ON CAST(o2."Id" AS TEXT) = CAST(oi."OrderId" AS TEXT)
                      WHERE o2."From" = base.phone
-                       AND CAST(o2."CheckoutCompleted" AS TEXT) IN ('true','1','t')
+                       AND {completedFilter2}
                        {(businessId.HasValue ? "AND CAST(o2.\"BusinessId\" AS TEXT) = @bid" : "")}
                      GROUP BY oi."Name"
                      ORDER BY SUM(oi."Quantity") DESC
@@ -78,7 +86,6 @@ public class AdminCustomersController : ControllerBase
                 FROM (
                     SELECT
                         o."From" AS phone,
-                        MIN(o."CustomerName") AS name,
                         COUNT(*) AS orders_count,
                         COALESCE(SUM(o."TotalAmount"), 0) AS total_spent,
                         MAX(o."CreatedAtUtc") AS last_purchase,
@@ -86,7 +93,7 @@ public class AdminCustomersController : ControllerBase
                         MODE() WITHIN GROUP (ORDER BY o."PaymentMethod") AS pref_payment
                     FROM "Orders" o
                     WHERE o."From" IS NOT NULL AND o."From" != ''
-                      AND CAST(o."CheckoutCompleted" AS TEXT) IN ('true','1','t')
+                      AND {completedFilter}
                       {bizFilter}{searchFilter}
                     GROUP BY o."From"
                 ) base
