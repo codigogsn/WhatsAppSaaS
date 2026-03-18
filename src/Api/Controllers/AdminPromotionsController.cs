@@ -98,10 +98,21 @@ public class AdminPromotionsController : ControllerBase
                 req.Filter, recipients.Count, message.Length);
 
             int sent = 0, skipped = 0, failed = 0;
+            var failedSamples = new List<object>();
 
             foreach (var r in recipients)
             {
                 if (ct.IsCancellationRequested) break;
+
+                // Pre-send validation
+                var precheck = ValidateRecipient(r);
+                if (precheck is not null)
+                {
+                    failed++;
+                    AddFailedSample(failedSamples, r.Phone, precheck, precheck);
+                    _logger.LogWarning("PROMOTION: skipped {Phone} — {Reason}", r.Phone, precheck);
+                    continue;
+                }
 
                 try
                 {
@@ -118,13 +129,19 @@ public class AdminPromotionsController : ControllerBase
                     else
                     {
                         failed++;
-                        _logger.LogWarning("PROMOTION: send failed for {Phone}", r.Phone);
+                        AddFailedSample(failedSamples, r.Phone, "provider_rejected",
+                            "WhatsApp API returned failure — check server logs for details");
+                        _logger.LogWarning("PROMOTION: provider rejected send to {Phone}", r.Phone);
                     }
                 }
                 catch (Exception ex)
                 {
                     failed++;
-                    _logger.LogWarning(ex, "PROMOTION: exception sending to {Phone}", r.Phone);
+                    var reason = NormalizeErrorReason(ex.Message);
+                    AddFailedSample(failedSamples, r.Phone, reason,
+                        ex.Message.Length > 200 ? ex.Message[..200] : ex.Message);
+                    _logger.LogWarning(ex, "PROMOTION: exception sending to {Phone} reason={Reason}",
+                        r.Phone, reason);
                 }
 
                 // Small delay to avoid rate limiting
@@ -140,7 +157,8 @@ public class AdminPromotionsController : ControllerBase
                 matched = recipients.Count,
                 sent,
                 skipped,
-                failed
+                failed,
+                failedSamples
             });
         }
         catch (Exception ex)
@@ -217,6 +235,39 @@ public class AdminPromotionsController : ControllerBase
         }
 
         return results;
+    }
+
+    private static string? ValidateRecipient(Recipient r)
+    {
+        if (string.IsNullOrWhiteSpace(r.Phone) || r.Phone.Length < 8)
+            return "invalid_phone";
+        if (string.IsNullOrWhiteSpace(r.PhoneNumberId))
+            return "missing_phone_number_id";
+        if (string.IsNullOrWhiteSpace(r.AccessToken))
+            return "missing_access_token";
+        return null;
+    }
+
+    private static void AddFailedSample(List<object> samples, string phone, string reason, string details)
+    {
+        if (samples.Count >= 10) return;
+        samples.Add(new { phoneE164 = phone, reason, details });
+    }
+
+    private static string NormalizeErrorReason(string message)
+    {
+        var m = message.ToLowerInvariant();
+        if (m.Contains("not a valid whatsapp") || m.Contains("not on whatsapp"))
+            return "not_whatsapp_user";
+        if (m.Contains("outside allowed") || m.Contains("24-hour") || m.Contains("messaging window"))
+            return "outside_allowed_messaging_rule";
+        if (m.Contains("recipient") && m.Contains("not allowed"))
+            return "recipient_not_allowed";
+        if (m.Contains("invalid") && m.Contains("phone"))
+            return "invalid_phone";
+        if (m.Contains("rate limit") || m.Contains("throttl"))
+            return "rate_limited";
+        return "unknown_error";
     }
 
     private bool IsAdmin()

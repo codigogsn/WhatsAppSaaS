@@ -2426,9 +2426,22 @@ async function sendPromotion(){
     resultEl.style.display = 'block';
     resultEl.style.background = 'var(--success-bg)';
     resultEl.style.color = '#047857';
-    resultEl.innerHTML = '<strong>Promotion sent!</strong><br/>'
+    var html = '<strong>Promotion sent!</strong><br/>'
       + 'Matched: ' + data.matched + ' | Sent: ' + data.sent
       + ' | Failed: ' + data.failed;
+    if (data.failedSamples && data.failedSamples.length > 0) {
+      html += '<div style="margin-top:10px;text-align:left;"><strong>First failed recipients:</strong>'
+        + '<table style="width:100%;font-size:11px;margin-top:4px;border-collapse:collapse;">'
+        + '<tr style="border-bottom:1px solid var(--border);"><th style="text-align:left;padding:3px;">Phone</th><th style="text-align:left;padding:3px;">Reason</th><th style="text-align:left;padding:3px;">Details</th></tr>';
+      data.failedSamples.forEach(function(f){
+        html += '<tr style="border-bottom:1px solid var(--border);">'
+          + '<td style="padding:3px;font-family:monospace;">' + esc(f.phoneE164||'') + '</td>'
+          + '<td style="padding:3px;"><span class="pill" style="font-size:10px;">' + esc(f.reason||'') + '</span></td>'
+          + '<td style="padding:3px;color:var(--muted);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(f.details||'') + '</td></tr>';
+      });
+      html += '</table></div>';
+    }
+    resultEl.innerHTML = html;
   } catch(e) {
     resultEl.style.display = 'block';
     resultEl.style.background = 'var(--danger-bg)';
