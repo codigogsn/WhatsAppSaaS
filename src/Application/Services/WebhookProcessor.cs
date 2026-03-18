@@ -655,6 +655,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             && state.LastActivityUtc.HasValue
                             && (DateTime.UtcNow - state.LastActivityUtc.Value).TotalMinutes <= 10)
                         {
+                            // Dedupe: if another greeting arrived within 30s, ignore silently
+                            if ((DateTime.UtcNow - state.LastActivityUtc.Value).TotalSeconds <= 30)
+                            {
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+
                             state.LastActivityUtc = DateTime.UtcNow;
                             await SendAsync(new OutgoingMessage
                             {
