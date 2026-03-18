@@ -59,28 +59,37 @@ public class AdminCustomersController : ControllerBase
                 _ => "ORDER BY last_purchase DESC NULLS LAST"
             };
 
+            // Two-step query: base aggregation on Orders only (no OrderItems inflation),
+            // then correlated subquery for favorite item from OrderItems.
+            // Use CAST for CheckoutCompleted to handle legacy integer columns.
             var sql = $"""
                 SELECT
-                    o."From" AS phone,
-                    MIN(o."CustomerName") AS name,
-                    COUNT(*) AS orders_count,
-                    COALESCE(SUM(o."TotalAmount"), 0) AS total_spent,
-                    MAX(o."CreatedAtUtc") AS last_purchase,
-                    MODE() WITHIN GROUP (ORDER BY o."DeliveryType") AS pref_delivery,
-                    MODE() WITHIN GROUP (ORDER BY o."PaymentMethod") AS pref_payment,
-                    (SELECT oi2."Name"
-                     FROM "OrderItems" oi2
-                     INNER JOIN "Orders" o2 ON o2."Id" = oi2."OrderId"
-                     WHERE o2."From" = o."From"
+                    base.phone, base.name, base.orders_count, base.total_spent,
+                    base.last_purchase, base.pref_delivery, base.pref_payment,
+                    (SELECT oi."Name"
+                     FROM "OrderItems" oi
+                     INNER JOIN "Orders" o2 ON CAST(o2."Id" AS TEXT) = CAST(oi."OrderId" AS TEXT)
+                     WHERE o2."From" = base.phone
+                       AND CAST(o2."CheckoutCompleted" AS TEXT) IN ('true','1','t')
                        {(businessId.HasValue ? "AND CAST(o2.\"BusinessId\" AS TEXT) = @bid" : "")}
-                     GROUP BY oi2."Name"
-                     ORDER BY SUM(oi2."Quantity") DESC
+                     GROUP BY oi."Name"
+                     ORDER BY SUM(oi."Quantity") DESC
                      LIMIT 1) AS fav_item
-                FROM "Orders" o
-                WHERE o."From" IS NOT NULL AND o."From" != ''
-                  AND o."CheckoutCompleted" = true
-                  {bizFilter}{searchFilter}
-                GROUP BY o."From"
+                FROM (
+                    SELECT
+                        o."From" AS phone,
+                        MIN(o."CustomerName") AS name,
+                        COUNT(*) AS orders_count,
+                        COALESCE(SUM(o."TotalAmount"), 0) AS total_spent,
+                        MAX(o."CreatedAtUtc") AS last_purchase,
+                        MODE() WITHIN GROUP (ORDER BY o."DeliveryType") AS pref_delivery,
+                        MODE() WITHIN GROUP (ORDER BY o."PaymentMethod") AS pref_payment
+                    FROM "Orders" o
+                    WHERE o."From" IS NOT NULL AND o."From" != ''
+                      AND CAST(o."CheckoutCompleted" AS TEXT) IN ('true','1','t')
+                      {bizFilter}{searchFilter}
+                    GROUP BY o."From"
+                ) base
                 {orderBy}
                 LIMIT @take
             """;
