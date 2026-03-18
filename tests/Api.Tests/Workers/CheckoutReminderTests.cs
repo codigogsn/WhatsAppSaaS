@@ -20,7 +20,6 @@ public class CheckoutReminderTests
             CashFlowCompleted = true
         };
 
-        // CheckoutFormSent is false, so BuildOrderReplyFromState should set it
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
         state.CheckoutFormSent.Should().BeTrue();
@@ -56,11 +55,11 @@ public class CheckoutReminderTests
     }
 
     [Fact]
-    public void ReminderState_StopWhenUserReplied()
+    public void ReminderState_StopWhenUserReplied_AfterThreshold()
     {
-        // Simulate: checkout started at T, user replied at T+2min
+        // User replied 2 minutes after checkout started — beyond 30s threshold
         var checkoutStart = DateTime.UtcNow.AddMinutes(-6);
-        var userReply = DateTime.UtcNow.AddMinutes(-4);
+        var userReply = checkoutStart.AddMinutes(2);
 
         var state = new ConversationFields
         {
@@ -70,8 +69,25 @@ public class CheckoutReminderTests
             CheckoutFormSent = true
         };
 
-        // User replied AFTER checkout started — reminders should stop
-        state.LastActivityUtc.Should().BeAfter(state.CheckoutPendingSinceUtc.Value);
+        // User replied > 30s after checkout started → should stop
+        state.LastActivityUtc.Value.Should().BeAfter(state.CheckoutPendingSinceUtc.Value.AddSeconds(30));
+    }
+
+    [Fact]
+    public void ReminderState_NoStopWhenSameCycleActivity()
+    {
+        // Activity within 5 seconds of checkout start = same processing cycle
+        var checkoutStart = DateTime.UtcNow.AddMinutes(-6);
+        var sameCycleActivity = checkoutStart.AddSeconds(2);
+
+        var state = new ConversationFields
+        {
+            CheckoutPendingSinceUtc = checkoutStart,
+            LastActivityUtc = sameCycleActivity
+        };
+
+        // Activity within 30s of checkout start → should NOT count as user reply
+        state.LastActivityUtc.Value.Should().BeBefore(state.CheckoutPendingSinceUtc.Value.AddSeconds(30));
     }
 
     [Fact]
@@ -79,22 +95,55 @@ public class CheckoutReminderTests
     {
         var state = new ConversationFields
         {
-            CheckoutPendingSinceUtc = DateTime.UtcNow.AddMinutes(-20),
+            CheckoutPendingSinceUtc = null, // Worker clears this after reminder 2
             Reminder1SentAtUtc = DateTime.UtcNow.AddMinutes(-15),
             Reminder2SentAtUtc = DateTime.UtcNow.AddMinutes(-5)
         };
 
-        // After both reminders sent, CheckoutPendingSinceUtc should be null
-        // (the worker clears it after reminder 2)
-        // Here we verify both timestamps are set, proving max 2 reminders
+        // After both reminders, CheckoutPendingSinceUtc is null (worker cleared it)
+        state.CheckoutPendingSinceUtc.Should().BeNull();
         state.Reminder1SentAtUtc.Should().NotBeNull();
         state.Reminder2SentAtUtc.Should().NotBeNull();
     }
 
     [Fact]
+    public void Reminder1Eligible_WhenElapsed5Min()
+    {
+        var state = new ConversationFields
+        {
+            CheckoutPendingSinceUtc = DateTime.UtcNow.AddMinutes(-6),
+            LastActivityUtc = DateTime.UtcNow.AddMinutes(-10), // Before checkout
+            Items = { new ConversationItemEntry { Name = "Burger", Quantity = 1, UnitPrice = 5m } },
+            CheckoutFormSent = true
+        };
+
+        state.CheckoutPendingSinceUtc.Should().NotBeNull();
+        state.Reminder1SentAtUtc.Should().BeNull(); // Not yet sent
+        var elapsed = DateTime.UtcNow - state.CheckoutPendingSinceUtc!.Value;
+        elapsed.TotalMinutes.Should().BeGreaterThan(5); // Eligible for reminder 1
+    }
+
+    [Fact]
+    public void Reminder2Eligible_WhenElapsed15Min()
+    {
+        var state = new ConversationFields
+        {
+            CheckoutPendingSinceUtc = DateTime.UtcNow.AddMinutes(-16),
+            Reminder1SentAtUtc = DateTime.UtcNow.AddMinutes(-11), // Sent at ~5 min
+            LastActivityUtc = DateTime.UtcNow.AddMinutes(-20),
+            Items = { new ConversationItemEntry { Name = "Burger", Quantity = 1, UnitPrice = 5m } },
+            CheckoutFormSent = true
+        };
+
+        state.Reminder1SentAtUtc.Should().NotBeNull();
+        state.Reminder2SentAtUtc.Should().BeNull();
+        var elapsed = DateTime.UtcNow - state.CheckoutPendingSinceUtc!.Value;
+        elapsed.TotalMinutes.Should().BeGreaterThan(15); // Eligible for reminder 2
+    }
+
+    [Fact]
     public void ReservationMessage_OnlyInPendingCheckout()
     {
-        // State WITHOUT checkout form — should NOT get reservation message
         var stateNoCheckout = new ConversationFields
         {
             Items = { new ConversationItemEntry { Name = "Hamburguesa", Quantity = 1, UnitPrice = 5m } },
@@ -104,16 +153,13 @@ public class CheckoutReminderTests
         };
 
         var reply1 = WebhookProcessor.BuildOrderReplyFromState(stateNoCheckout);
-        // This should be the confirmation prompt (not checkout form yet)
         reply1.Body.Should().NotContain("reservado");
 
-        // Now simulate that order is confirmed and payment selected
         stateNoCheckout.OrderConfirmed = true;
         stateNoCheckout.PaymentMethod = "efectivo";
         stateNoCheckout.CashFlowCompleted = true;
 
         var reply2 = WebhookProcessor.BuildOrderReplyFromState(stateNoCheckout);
-        // NOW checkout form is sent, reservation message should appear
         reply2.Body.Should().Contain("reservado");
     }
 
@@ -146,11 +192,25 @@ public class CheckoutReminderTests
             Reminder1SentAtUtc = DateTime.UtcNow.AddMinutes(-5)
         };
 
-        // Order completed — reset clears everything
         state.ResetAfterConfirm();
 
         state.CheckoutPendingSinceUtc.Should().BeNull();
         state.Reminder1SentAtUtc.Should().BeNull();
         state.Reminder2SentAtUtc.Should().BeNull();
+    }
+
+    [Fact]
+    public void NoReminder_WhenItemsCleared()
+    {
+        var state = new ConversationFields
+        {
+            CheckoutPendingSinceUtc = DateTime.UtcNow.AddMinutes(-6),
+            CheckoutFormSent = true
+            // Items is empty — order was cleared/cancelled
+        };
+
+        state.Items.Count.Should().Be(0);
+        state.CheckoutPendingSinceUtc.Should().NotBeNull();
+        // Worker will clear this because Items.Count == 0
     }
 }

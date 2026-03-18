@@ -30,7 +30,8 @@ public sealed class CheckoutReminderWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("CheckoutReminderWorker started");
+        _logger.LogInformation("CheckoutReminderWorker started — poll={Poll}s r1={R1}min r2={R2}min",
+            PollInterval.TotalSeconds, Reminder1Delay.TotalMinutes, Reminder2Delay.TotalMinutes);
 
         // Wait 30s on startup to let other services initialize
         await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken);
@@ -68,46 +69,74 @@ public sealed class CheckoutReminderWorker : BackgroundService
             .Where(c => c.UpdatedAtUtc > cutoff && c.BusinessId != null)
             .ToListAsync(ct);
 
+        int scanned = 0, noPending = 0, staleCleared = 0, userReplied = 0,
+            notReady = 0, reminder1Sent = 0, reminder2Sent = 0, errors = 0;
+
         foreach (var conv in conversations)
         {
             try
             {
-                await ProcessConversationAsync(conv, db, stateStore, ct);
+                var result = await ProcessConversationAsync(conv, db, stateStore, ct);
+                scanned++;
+                switch (result)
+                {
+                    case ProcessResult.NoPending: noPending++; break;
+                    case ProcessResult.StaleCleared: staleCleared++; break;
+                    case ProcessResult.UserReplied: userReplied++; break;
+                    case ProcessResult.NotReady: notReady++; break;
+                    case ProcessResult.Reminder1Sent: reminder1Sent++; break;
+                    case ProcessResult.Reminder2Sent: reminder2Sent++; break;
+                }
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "CheckoutReminderWorker: error processing {ConversationId}", conv.ConversationId);
+                errors++;
+                _logger.LogWarning(ex, "REMINDER: error processing {ConversationId}", conv.ConversationId);
             }
+        }
+
+        if (scanned > 0 || conversations.Count > 0)
+        {
+            _logger.LogInformation(
+                "REMINDER SCAN: total={Total} scanned={Scanned} noPending={NoPending} " +
+                "staleCleared={StaleCleared} userReplied={UserReplied} notReady={NotReady} " +
+                "r1Sent={R1Sent} r2Sent={R2Sent} errors={Errors}",
+                conversations.Count, scanned, noPending, staleCleared, userReplied,
+                notReady, reminder1Sent, reminder2Sent, errors);
         }
     }
 
-    private async Task ProcessConversationAsync(
+    private enum ProcessResult { NoPending, StaleCleared, UserReplied, NotReady, Reminder1Sent, Reminder2Sent }
+
+    private async Task<ProcessResult> ProcessConversationAsync(
         ConversationState conv, AppDbContext db, IConversationStateStore stateStore, CancellationToken ct)
     {
         var state = Deserialize(conv.StateJson);
-        if (state is null) return;
+        if (state is null) return ProcessResult.NoPending;
 
         // No pending checkout
-        if (!state.CheckoutPendingSinceUtc.HasValue) return;
+        if (!state.CheckoutPendingSinceUtc.HasValue)
+            return ProcessResult.NoPending;
 
         // Already completed / reset — clear stale pending
-        if (state.Items.Count == 0 || !state.CheckoutFormSent)
+        if (state.Items.Count == 0)
         {
-            state.CheckoutPendingSinceUtc = null;
-            state.Reminder1SentAtUtc = null;
-            state.Reminder2SentAtUtc = null;
+            _logger.LogDebug("REMINDER: clearing stale pending for {Conv} — no items", conv.ConversationId);
+            ClearReminderState(state);
             await stateStore.SaveAsync(conv.ConversationId, state, ct);
-            return;
+            return ProcessResult.StaleCleared;
         }
 
         // User replied after checkout started — stop reminders
-        if (state.LastActivityUtc.HasValue && state.LastActivityUtc > state.CheckoutPendingSinceUtc)
+        // Use 30-second tolerance to avoid same-cycle false positives
+        if (state.LastActivityUtc.HasValue
+            && state.LastActivityUtc.Value > state.CheckoutPendingSinceUtc.Value.AddSeconds(30))
         {
-            state.CheckoutPendingSinceUtc = null;
-            state.Reminder1SentAtUtc = null;
-            state.Reminder2SentAtUtc = null;
+            _logger.LogDebug("REMINDER: user replied for {Conv} — lastActivity={Activity} checkoutPending={Pending}",
+                conv.ConversationId, state.LastActivityUtc, state.CheckoutPendingSinceUtc);
+            ClearReminderState(state);
             await stateStore.SaveAsync(conv.ConversationId, state, ct);
-            return;
+            return ProcessResult.UserReplied;
         }
 
         var now = DateTime.UtcNow;
@@ -115,9 +144,19 @@ public sealed class CheckoutReminderWorker : BackgroundService
 
         // Parse conversation ID: "{from}:{phoneNumberId}"
         var parts = conv.ConversationId.Split(':', 2);
-        if (parts.Length != 2) return;
+        if (parts.Length != 2)
+        {
+            _logger.LogWarning("REMINDER: invalid conversationId format: {Conv}", conv.ConversationId);
+            return ProcessResult.NoPending;
+        }
         var to = parts[0];
         var phoneNumberId = parts[1];
+
+        if (string.IsNullOrWhiteSpace(to) || to.Length < 8)
+        {
+            _logger.LogDebug("REMINDER: invalid phone for {Conv}", conv.ConversationId);
+            return ProcessResult.NoPending;
+        }
 
         // Resolve access token from business
         string? accessToken = null;
@@ -129,25 +168,40 @@ public sealed class CheckoutReminderWorker : BackgroundService
         // Reminder 1: after 5 minutes
         if (!state.Reminder1SentAtUtc.HasValue && elapsed >= Reminder1Delay)
         {
+            _logger.LogInformation(
+                "REMINDER 1: sending for {Conv} elapsed={Elapsed}min to={To} phoneNumberId={PNI} hasToken={HasToken}",
+                conv.ConversationId, elapsed.TotalMinutes.ToString("F1"), to, phoneNumberId,
+                !string.IsNullOrWhiteSpace(accessToken));
             await EnqueueReminderAsync(db, to, phoneNumberId, accessToken,
                 Reminder1Text, conv.BusinessId, ct);
             state.Reminder1SentAtUtc = now;
             await stateStore.SaveAsync(conv.ConversationId, state, ct);
-            _logger.LogInformation("Checkout reminder 1 sent for {ConversationId}", conv.ConversationId);
-            return;
+            return ProcessResult.Reminder1Sent;
         }
 
-        // Reminder 2: after 15 minutes
+        // Reminder 2: after 15 minutes total
         if (state.Reminder1SentAtUtc.HasValue && !state.Reminder2SentAtUtc.HasValue && elapsed >= Reminder2Delay)
         {
+            _logger.LogInformation(
+                "REMINDER 2: sending for {Conv} elapsed={Elapsed}min to={To}",
+                conv.ConversationId, elapsed.TotalMinutes.ToString("F1"), to);
             await EnqueueReminderAsync(db, to, phoneNumberId, accessToken,
                 Reminder2Text, conv.BusinessId, ct);
             state.Reminder2SentAtUtc = now;
             // Clear pending — no more reminders
             state.CheckoutPendingSinceUtc = null;
             await stateStore.SaveAsync(conv.ConversationId, state, ct);
-            _logger.LogInformation("Checkout reminder 2 sent for {ConversationId}", conv.ConversationId);
+            return ProcessResult.Reminder2Sent;
         }
+
+        return ProcessResult.NotReady;
+    }
+
+    private static void ClearReminderState(ConversationFields state)
+    {
+        state.CheckoutPendingSinceUtc = null;
+        state.Reminder1SentAtUtc = null;
+        state.Reminder2SentAtUtc = null;
     }
 
     private static async Task EnqueueReminderAsync(
@@ -173,21 +227,29 @@ public sealed class CheckoutReminderWorker : BackgroundService
         await db.SaveChangesAsync(ct);
     }
 
-    private static async Task<string?> GetAccessTokenAsync(AppDbContext db, Guid businessId, CancellationToken ct)
+    private async Task<string?> GetAccessTokenAsync(AppDbContext db, Guid businessId, CancellationToken ct)
     {
-        var conn = db.Database.GetDbConnection();
-        if (conn.State != System.Data.ConnectionState.Open)
-            await conn.OpenAsync(ct);
+        try
+        {
+            var conn = db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
 
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = """SELECT "AccessToken" FROM "Businesses" WHERE "Id" = @id LIMIT 1""";
-        var p = cmd.CreateParameter();
-        p.ParameterName = "id";
-        p.Value = businessId;
-        cmd.Parameters.Add(p);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """SELECT "AccessToken" FROM "Businesses" WHERE CAST("Id" AS TEXT) = @id LIMIT 1""";
+            var p = cmd.CreateParameter();
+            p.ParameterName = "id";
+            p.Value = businessId.ToString();
+            cmd.Parameters.Add(p);
 
-        var result = await cmd.ExecuteScalarAsync(ct);
-        return result as string;
+            var result = await cmd.ExecuteScalarAsync(ct);
+            return result as string;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "REMINDER: failed to resolve access token for business {BusinessId}", businessId);
+            return null;
+        }
     }
 
     private static ConversationFields? Deserialize(string json)
