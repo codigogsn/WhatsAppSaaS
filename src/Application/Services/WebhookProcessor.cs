@@ -1462,7 +1462,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     internal static decimal ComputeOrderTotalUsd(ConversationFields state)
     {
-        return state.Items.Sum(i => i.UnitPrice * i.Quantity);
+        var subtotal = state.Items.Sum(i => i.UnitPrice * i.Quantity);
+        var fee = state.DeliveryType == "delivery" ? Msg.DeliveryFeeUsd : 0m;
+        return subtotal + fee;
     }
 
     internal static decimal ConvertUsdToCurrency(decimal usdAmount, string currency, ResolvedRate? bcvRate)
