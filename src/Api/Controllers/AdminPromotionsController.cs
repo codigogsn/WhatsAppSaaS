@@ -190,7 +190,7 @@ public class AdminPromotionsController : ControllerBase
         var sql = $"""
             SELECT DISTINCT c."PhoneE164", b."PhoneNumberId", b."AccessToken"
             FROM "Customers" c
-            INNER JOIN "Businesses" b ON b."Id" = c."BusinessId"
+            INNER JOIN "Businesses" b ON CAST(b."Id" AS TEXT) = CAST(c."BusinessId" AS TEXT)
             WHERE {string.Join(" AND ", where)}
               AND b."IsActive" = true
             ORDER BY c."PhoneE164"
