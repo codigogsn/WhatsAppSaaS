@@ -635,6 +635,21 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                         }
 
+                        // Greeting + order combo: "hola buenas quiero 2 hamburguesas"
+                        // Only try if message has a greeting AND contains digits (quantity)
+                        // or an ordering-intent phrase — avoids false positives on pure greetings
+                        // or menu requests like "me mandas el menu?"
+                        if (IsGreeting(t)
+                            && (System.Text.RegularExpressions.Regex.IsMatch(rawText, @"\d") || IsOrderingIntent(t))
+                            && TryParseQuickOrder(rawText, out var greetingItems, out var greetingDelivery, out var greetingObs)
+                            && greetingItems.Count > 0)
+                        {
+                            state.ResetAfterConfirm();
+                            state.MenuSent = true;
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            goto quickParseEntry;
+                        }
+
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
                         state.LastActivityUtc = DateTime.UtcNow;
