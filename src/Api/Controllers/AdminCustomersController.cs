@@ -49,7 +49,7 @@ public class AdminCustomersController : ControllerBase
                 : "";
 
             var searchFilter = !string.IsNullOrWhiteSpace(search)
-                ? " AND (o.\"CustomerName\" ILIKE @search OR o.\"CustomerPhone\" ILIKE @search OR o.\"From\" ILIKE @search)"
+                ? " AND (o.\"CustomerName\" ILIKE @search OR o.\"CustomerPhone\" ILIKE @search)"
                 : "";
 
             var orderBy = sort switch
@@ -68,7 +68,7 @@ public class AdminCustomersController : ControllerBase
                     base.last_purchase, base.pref_delivery, base.pref_payment,
                     (SELECT o2."CustomerName"
                      FROM "Orders" o2
-                     WHERE o2."From" = base.phone
+                     WHERE o2."CustomerPhone" = base.phone
                        AND {completedFilter2}
                        AND o2."CustomerName" IS NOT NULL AND o2."CustomerName" != ''
                        {(businessId.HasValue ? "AND CAST(o2.\"BusinessId\" AS TEXT) = @bid" : "")}
@@ -77,7 +77,7 @@ public class AdminCustomersController : ControllerBase
                     (SELECT oi."Name"
                      FROM "OrderItems" oi
                      INNER JOIN "Orders" o2 ON CAST(o2."Id" AS TEXT) = CAST(oi."OrderId" AS TEXT)
-                     WHERE o2."From" = base.phone
+                     WHERE o2."CustomerPhone" = base.phone
                        AND {completedFilter2}
                        {(businessId.HasValue ? "AND CAST(o2.\"BusinessId\" AS TEXT) = @bid" : "")}
                      GROUP BY oi."Name"
@@ -85,17 +85,17 @@ public class AdminCustomersController : ControllerBase
                      LIMIT 1) AS fav_item
                 FROM (
                     SELECT
-                        o."From" AS phone,
+                        o."CustomerPhone" AS phone,
                         COUNT(*) AS orders_count,
                         COALESCE(SUM(o."TotalAmount"), 0) AS total_spent,
                         MAX(o."CreatedAtUtc") AS last_purchase,
                         MODE() WITHIN GROUP (ORDER BY o."DeliveryType") AS pref_delivery,
                         MODE() WITHIN GROUP (ORDER BY o."PaymentMethod") AS pref_payment
                     FROM "Orders" o
-                    WHERE o."From" IS NOT NULL AND o."From" != ''
+                    WHERE o."CustomerPhone" IS NOT NULL AND o."CustomerPhone" != ''
                       AND {completedFilter}
                       {bizFilter}{searchFilter}
-                    GROUP BY o."From"
+                    GROUP BY o."CustomerPhone"
                 ) base
                 {orderBy}
                 LIMIT @take

@@ -480,28 +480,38 @@ public class AdminAnalyticsController : ControllerBase
                 using var cmd = conn.CreateCommand();
                 cmd.CommandText = """
                     SELECT
+                        base.phone,
+                        base.orders_count,
+                        base.total_spent,
                         (SELECT o2."CustomerName" FROM "Orders" o2
-                         WHERE o2."From" = c."PhoneE164"
+                         WHERE o2."CustomerPhone" = base.phone
                            AND CAST(o2."CheckoutCompleted" AS TEXT) IN ('true','1','t')
                            AND o2."CustomerName" IS NOT NULL AND o2."CustomerName" != ''
-                         ORDER BY o2."CreatedAtUtc" DESC LIMIT 1) AS "Name",
-                        c."PhoneE164", c."OrdersCount", c."TotalSpent"
-                    FROM "Customers" c
-                    WHERE CAST(c."BusinessId" AS TEXT) = CAST(@bid AS TEXT) AND c."OrdersCount" > 0
-                    ORDER BY c."TotalSpent" DESC
+                         ORDER BY o2."CreatedAtUtc" DESC LIMIT 1) AS name
+                    FROM (
+                        SELECT
+                            o."CustomerPhone" AS phone,
+                            COUNT(*) AS orders_count,
+                            COALESCE(SUM(o."TotalAmount"), 0) AS total_spent
+                        FROM "Orders" o
+                        WHERE o."CustomerPhone" IS NOT NULL AND o."CustomerPhone" != ''
+                          AND CAST(o."CheckoutCompleted" AS TEXT) IN ('true','1','t')
+                          AND CAST(o."BusinessId" AS TEXT) = @bid
+                        GROUP BY o."CustomerPhone"
+                    ) base
+                    ORDER BY base.total_spent DESC
                     LIMIT 5
                 """;
-                AddParam(cmd, "bid", businessId.Value);
+                AddParam(cmd, "bid", businessId.Value.ToString());
                 using var r = await cmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct))
                 {
-                    var nameOrd = r.GetOrdinal("Name");
                     topCustomers.Add(new
                     {
-                        name = r.IsDBNull(nameOrd) ? null : r.GetString(nameOrd),
-                        phone = r.GetString(r.GetOrdinal("PhoneE164")),
-                        orders = Convert.ToInt32(r["OrdersCount"]),
-                        revenue = Convert.ToDecimal(r["TotalSpent"])
+                        name = r["name"] is DBNull ? (string?)null : r["name"]?.ToString(),
+                        phone = r["phone"]?.ToString() ?? "",
+                        orders = Convert.ToInt32(r["orders_count"]),
+                        revenue = Convert.ToDecimal(r["total_spent"])
                     });
                 }
             }
