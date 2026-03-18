@@ -70,6 +70,9 @@ public sealed class ConversationFields
 
     public DateTime? LastActivityUtc { get; set; }
 
+    // Greeting dedupe: timestamp of last short greeting redirect sent
+    public DateTime? LastGreetingRedirectAtUtc { get; set; }
+
     // Checkout inactivity reminder state
     public DateTime? CheckoutPendingSinceUtc { get; set; }
     public DateTime? Reminder1SentAtUtc { get; set; }
@@ -121,6 +124,7 @@ public sealed class ConversationFields
         ComboAcceptedCount = 0;
         ComboDeclinedCount = 0;
         PendingAmbiguousItems = null;
+        LastGreetingRedirectAtUtc = null;
         CheckoutPendingSinceUtc = null;
         Reminder1SentAtUtc = null;
         Reminder2SentAtUtc = null;

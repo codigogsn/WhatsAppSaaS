@@ -655,14 +655,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             && state.LastActivityUtc.HasValue
                             && (DateTime.UtcNow - state.LastActivityUtc.Value).TotalMinutes <= 10)
                         {
-                            // Dedupe: if another greeting arrived within 30s, ignore silently
-                            if ((DateTime.UtcNow - state.LastActivityUtc.Value).TotalSeconds <= 30)
+                            // Dedupe: if short redirect was already sent within 30s, ignore silently
+                            if (state.LastGreetingRedirectAtUtc.HasValue
+                                && (DateTime.UtcNow - state.LastGreetingRedirectAtUtc.Value).TotalSeconds <= 30)
                             {
                                 await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                                 continue;
                             }
 
                             state.LastActivityUtc = DateTime.UtcNow;
+                            state.LastGreetingRedirectAtUtc = DateTime.UtcNow;
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -677,6 +679,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
                         state.LastActivityUtc = DateTime.UtcNow;
+                        state.LastGreetingRedirectAtUtc = DateTime.UtcNow;
 
                         // Customer memory: load stored profile to pre-fill name + personalize greeting
                         var customer = await _orderRepository.GetCustomerByPhoneAsync(
