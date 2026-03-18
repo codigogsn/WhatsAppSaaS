@@ -847,6 +847,7 @@
 
       <button onclick="downloadOrdersCsv()">CSV Orders</button>
       <button onclick="downloadCustomersCsv()">CSV Customers</button>
+      <button onclick="openPromoModal()" style="background:var(--accent);color:#fff;">Send Promotion</button>
 
       <span class="muted small" id="msg"></span>
     </div>
@@ -2346,6 +2347,99 @@ loadBusinesses().then(() => load());
     <div id="proofActions" style="display:none;margin-top:12px;display:flex;gap:8px;justify-content:flex-end;"></div>
   </div>
 </div>
+<!-- Send Promotion Modal -->
+<div class="modal-overlay" id="promoOverlay" onclick="closePromoModal()">
+  <div class="modal" onclick="event.stopPropagation()" style="max-width:480px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+      <h3 style="margin:0;">Send Promotion</h3>
+      <button onclick="closePromoModal()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:12px;color:var(--muted);font-weight:500;display:block;margin-bottom:4px;">Recipient filter</label>
+      <select id="promoFilter" onchange="updatePromoCount()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--surface-2);font-size:13px;">
+        <option value="all">All customers</option>
+        <option value="has_orders" selected>Customers with orders</option>
+        <option value="recent_30d">Active last 30 days</option>
+        <option value="repeat">Repeat customers (2+ orders)</option>
+      </select>
+    </div>
+    <div style="margin-bottom:12px;">
+      <span id="promoCount" style="font-size:12px;color:var(--muted);">Loading...</span>
+    </div>
+    <div style="margin-bottom:12px;">
+      <label style="font-size:12px;color:var(--muted);font-weight:500;display:block;margin-bottom:4px;">Message</label>
+      <textarea id="promoMessage" rows="5" maxlength="4096" placeholder="Write your promotional message..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:inherit;resize:vertical;"></textarea>
+    </div>
+    <div style="background:var(--warning-bg);color:#b45309;padding:10px;border-radius:var(--radius-sm);font-size:11px;margin-bottom:14px;">
+      Send only to customers who already interacted with your business.
+    </div>
+    <div id="promoResult" style="display:none;margin-bottom:14px;padding:10px;border-radius:var(--radius-sm);font-size:12px;"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;">
+      <button onclick="closePromoModal()">Cancel</button>
+      <button id="promoSendBtn" onclick="sendPromotion()" style="background:var(--accent);color:#fff;">Send</button>
+    </div>
+  </div>
+</div>
+<script>
+function openPromoModal(){
+  document.getElementById('promoOverlay').classList.add('open');
+  document.getElementById('promoMessage').value = '';
+  document.getElementById('promoResult').style.display = 'none';
+  document.getElementById('promoSendBtn').disabled = false;
+  updatePromoCount();
+}
+function closePromoModal(){ document.getElementById('promoOverlay').classList.remove('open'); }
+async function updatePromoCount(){
+  const el = document.getElementById('promoCount');
+  el.textContent = 'Loading...';
+  const filter = document.getElementById('promoFilter').value;
+  try {
+    const res = await fetch('/api/admin/promotions/recipients?filter=' + filter, { headers: adminHeaders() });
+    if (!res.ok) { el.textContent = 'Error loading count'; return; }
+    const data = await res.json();
+    el.textContent = data.count + ' recipient' + (data.count !== 1 ? 's' : '') + ' matched';
+  } catch(e) { el.textContent = 'Error: ' + e.message; }
+}
+async function sendPromotion(){
+  const message = document.getElementById('promoMessage').value.trim();
+  if (!message) { alert('Please write a message.'); return; }
+  const filter = document.getElementById('promoFilter').value;
+  const btn = document.getElementById('promoSendBtn');
+  const resultEl = document.getElementById('promoResult');
+  btn.disabled = true;
+  btn.textContent = 'Sending...';
+  resultEl.style.display = 'none';
+  try {
+    const res = await fetch('/api/admin/promotions/send', {
+      method: 'POST',
+      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, filter })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      resultEl.style.display = 'block';
+      resultEl.style.background = 'var(--danger-bg)';
+      resultEl.style.color = '#b91c1c';
+      resultEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+      return;
+    }
+    resultEl.style.display = 'block';
+    resultEl.style.background = 'var(--success-bg)';
+    resultEl.style.color = '#047857';
+    resultEl.innerHTML = '<strong>Promotion sent!</strong><br/>'
+      + 'Matched: ' + data.matched + ' | Sent: ' + data.sent
+      + ' | Failed: ' + data.failed;
+  } catch(e) {
+    resultEl.style.display = 'block';
+    resultEl.style.background = 'var(--danger-bg)';
+    resultEl.style.color = '#b91c1c';
+    resultEl.textContent = 'Network error: ' + e.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Send';
+  }
+}
+</script>
 <div id="toastStack" class="toast-stack"></div>
 </body>
 </html>
