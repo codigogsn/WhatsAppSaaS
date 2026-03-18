@@ -256,6 +256,7 @@ public sealed class OrdersController : ControllerBase
         {
             ["Pending"] = "Pending",
             ["Preparing"] = "Preparing",
+            ["ReadyForPickup"] = "ReadyForPickup",
             ["OutForDelivery"] = "OutForDelivery",
             ["Completed"] = "Completed",
             ["Cancelled"] = "Cancelled"
@@ -804,6 +805,7 @@ public sealed class OrdersController : ControllerBase
         return status switch
         {
             "Preparing" => (true, "🍔 Tu pedido está en preparación."),
+            "ReadyForPickup" => (true, "✅ Tu pedido está listo para retirar en tienda."),
             "OutForDelivery" => (true, "🚗 Tu pedido va en camino."),
             "Completed" => (true, "✅ Tu pedido fue entregado. ¡Gracias!"),
             _ => (false, "")

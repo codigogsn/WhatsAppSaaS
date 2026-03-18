@@ -167,6 +167,7 @@
     .pill { display:inline-block; padding: 4px 12px; border-radius: 999px; font-size: 11px; font-weight: 700; letter-spacing: .3px; }
     .pill-Pending { background: var(--warning-bg); color: #b45309; border: 1px solid rgba(245,158,11,.25); }
     .pill-Preparing { background: #fff7ed; color: #c2410c; border: 1px solid rgba(234,88,12,.2); }
+    .pill-ReadyForPickup { background: #f0fdf4; color: #15803d; border: 1px solid rgba(34,197,94,.25); }
     .pill-OutForDelivery { background: var(--info-bg); color: var(--info); border: 1px solid rgba(59,130,246,.2); }
     .pill-Completed { background: var(--success-bg); color: #047857; border: 1px solid rgba(16,185,129,.2); }
     .pill-Cancelled { background: var(--danger-bg); color: #b91c1c; border: 1px solid rgba(239,68,68,.2); }
@@ -1467,6 +1468,7 @@ async function submitCreateBiz(){
 const STATUS_LABELS = {
   Pending: 'Pendiente',
   Preparing: 'En preparaci\u00f3n',
+  ReadyForPickup: 'Listo para retirar',
   OutForDelivery: 'En camino',
   Completed: 'Completado',
   Cancelled: 'Cancelado'
@@ -1751,7 +1753,7 @@ async function load() {
           <select data-id="${esc(o.id)}" onclick="event.stopPropagation()">
             <option value="Pending" ${o.status==='Pending'?'selected':''}>Pendiente</option>
             <option value="Preparing" ${o.status==='Preparing'?'selected':''}>En preparaci\u00f3n</option>
-            <option value="OutForDelivery" ${o.status==='OutForDelivery'?'selected':''}>En camino</option>
+            ${o.deliveryType==='pickup' ? `<option value="ReadyForPickup" ${o.status==='ReadyForPickup'?'selected':''}>Listo para retirar</option>` : `<option value="OutForDelivery" ${o.status==='OutForDelivery'?'selected':''}>En camino</option>`}
             <option value="Completed" ${o.status==='Completed'?'selected':''}>Completado</option>
             <option value="Cancelled" ${o.status==='Cancelled'?'selected':''}>Cancelado</option>
           </select>
