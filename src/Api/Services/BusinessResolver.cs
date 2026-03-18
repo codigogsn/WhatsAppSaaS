@@ -106,7 +106,10 @@ public class BusinessResolver : IBusinessResolver
         return new BusinessContext(biz.Id, biz.PhoneNumberId, biz.AccessToken, biz.Name,
             biz.Greeting, biz.Schedule, biz.Address, biz.LogoUrl,
             biz.PaymentMobileBank, biz.PaymentMobileId, biz.PaymentMobilePhone, biz.NotificationPhone,
-            MenuPdfUrl: _menuPdfUrl);
+            biz.RestaurantType,
+            MenuPdfUrl: _menuPdfUrl,
+            ZelleRecipient: biz.ZelleRecipient,
+            ZelleInstructions: biz.ZelleInstructions);
     }
 
     private async Task<BusinessContext?> FindByPhoneNumberIdAsync(string id, CancellationToken ct)
