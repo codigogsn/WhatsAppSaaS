@@ -240,6 +240,7 @@ try
     // Seed default business from env vars (idempotent)
     // ────────────────────────────────────────
     SeedDefaultBusiness(app.Services);
+    SeedZelleConfig(app.Services);
 
     app.UseGlobalExceptionHandling();
     app.UseRequestLogging();
@@ -364,6 +365,52 @@ static void SeedDefaultBusiness(IServiceProvider services)
     catch (Exception ex)
     {
         Log.Error(ex, "SEED: failed to seed business for PhoneNumberId={PhoneNumberId}", phoneNumberId);
+    }
+}
+
+// ──────────────────────────────────────────
+// Seed Zelle config for active business (one-time, raw SQL)
+// ──────────────────────────────────────────
+static void SeedZelleConfig(IServiceProvider services)
+{
+    using var scope = services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+    try
+    {
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) conn.Open();
+
+        // Only update businesses that have NULL ZelleRecipient (idempotent)
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE "Businesses"
+            SET "ZelleRecipient" = @recip, "ZelleInstructions" = @instr
+            WHERE "IsActive" = true AND "ZelleRecipient" IS NULL
+        """;
+        var p1 = cmd.CreateParameter(); p1.ParameterName = "recip"; p1.Value = "insertatuzelle@gmail.com"; cmd.Parameters.Add(p1);
+        var p2 = cmd.CreateParameter(); p2.ParameterName = "instr"; p2.Value = "Enviar comprobante por WhatsApp"; cmd.Parameters.Add(p2);
+        var rows = cmd.ExecuteNonQuery();
+        Log.Information("SEED ZELLE: updated {Rows} business(es) with ZelleRecipient/ZelleInstructions", rows);
+
+        // Verify
+        using var verify = conn.CreateCommand();
+        verify.CommandText = """
+            SELECT "Id", "Name", "ZelleRecipient", "ZelleInstructions"
+            FROM "Businesses" WHERE "IsActive" = true LIMIT 5
+        """;
+        using var r = verify.ExecuteReader();
+        while (r.Read())
+        {
+            Log.Information("SEED ZELLE VERIFY: bizId={Id} name={Name} ZelleRecipient={Recip} ZelleInstructions={Instr}",
+                r["Id"], r["Name"],
+                r["ZelleRecipient"] is DBNull ? "(null)" : r["ZelleRecipient"],
+                r["ZelleInstructions"] is DBNull ? "(null)" : r["ZelleInstructions"]);
+        }
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "SEED ZELLE: failed to seed Zelle config");
     }
 }
 
