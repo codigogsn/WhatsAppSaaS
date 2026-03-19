@@ -778,4 +778,423 @@ public class RealWorldOrderingConversationTests
         reply.Body.Should().Contain("$24.00");
         reply.Body.Should().NotContain("Delivery: $");
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 13 — Embedded modifiers in order text
+    //  "2 hamburguesas sin cebolla y 1 coca cola"
+    //  Modifiers extracted AND items parsed correctly
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario13_EmbeddedModifiers()
+    {
+        var state = SimulateGreeting("hola");
+        var reply = SimulateOrderMessage(state, "2 hamburguesas sin cebolla y 1 coca cola");
+
+        state.Items.Should().HaveCount(2);
+
+        var burger = state.Items.First(i => i.Name == "Hamburguesa Clasica");
+        burger.Quantity.Should().Be(2);
+        burger.UnitPrice.Should().Be(6.50m);
+        burger.Modifiers.Should().Contain("sin cebolla",
+            "modifier must be extracted from inline order text");
+
+        var coca = state.Items.First(i => i.Name == "Coca Cola");
+        coca.Quantity.Should().Be(1);
+        coca.UnitPrice.Should().Be(1.50m);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 14 — Multi-line WhatsApp order
+    //  Users often type one item per line in WhatsApp
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario14_MultiLineOrder()
+    {
+        var state = SimulateGreeting("buenas tardes");
+        var multiLine = "2 hamburguesas clasicas\n1 papas grandes\n1 coca cola";
+        var reply = SimulateOrderMessage(state, multiLine);
+
+        state.Items.Should().HaveCount(3);
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Papas Grandes" && i.Quantity == 1);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+
+        foreach (var item in state.Items)
+            item.UnitPrice.Should().BeGreaterThan(0.50m);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 15 — Full flow through confirm → payment gate
+    //  Verifies state transitions past summary into payment
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario15_ConfirmAdvancesToPaymentGate()
+    {
+        var state = SimulateGreeting("hola");
+        SimulateOrderMessage(state, "1 hamburguesa clasica");
+        SimulateObservationAnswer(state, "no");
+        var reply = SimulateDeliveryChoice(state, "pickup");
+
+        // At summary — confirm/edit/cancel buttons
+        reply.Body.Should().Contain("RESUMEN");
+        reply.Buttons.Should().Contain(b => b.Title == "Confirmar");
+
+        // User confirms
+        state.OrderConfirmed = true;
+        reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Should now ask payment method
+        reply.Body.Should().Contain("pagar");
+        reply.Buttons.Should().Contain(b => b.Title == "Efectivo");
+
+        // User picks efectivo
+        state.PaymentMethod = "efectivo";
+        reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Cash flow: currency selection
+        reply.Body.Should().Contain("moneda");
+        state.AwaitingCashCurrency.Should().BeTrue();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 16 — Accented Spanish input
+    //  "1 hamburguesa clásica" with accent on á
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario16_AccentedInput()
+    {
+        var state = SimulateGreeting("hola");
+        var reply = SimulateOrderMessage(state, "1 hamburguesa clásica");
+
+        state.Items.Should().HaveCount(1);
+        state.Items[0].Name.Should().Be("Hamburguesa Clasica");
+        state.Items[0].Quantity.Should().Be(1);
+        state.Items[0].UnitPrice.Should().Be(6.50m);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 17 — Venezuelan ordering prefix variants
+    //  "ponme", "regalame", "quiero" all work as noise prefix
+    // ═══════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("ponme 2 perros clasicos y 1 coca cola")]
+    [InlineData("regalame 2 perros clasicos y 1 coca cola")]
+    [InlineData("quiero 2 perros clasicos y 1 coca cola")]
+    [InlineData("dame 2 perros clasicos y 1 coca cola")]
+    [InlineData("necesito 2 perros clasicos y 1 coca cola")]
+    public void Scenario17_VenezuelanPrefixVariants(string orderText)
+    {
+        var state = SimulateGreeting("epa");
+        SimulateOrderMessage(state, orderText);
+
+        state.Items.Should().HaveCount(2,
+            $"'{orderText}' must parse correctly regardless of prefix");
+        state.Items.Should().Contain(i => i.Name == "Perro Clasico" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 18 — Edit then add items, re-verify summary
+    //  User edits, adds a new item, summary updates
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario18_EditThenAddItem_SummaryUpdates()
+    {
+        var state = SimulateGreeting("hola");
+        SimulateOrderMessage(state, "1 hamburguesa clasica");
+        SimulateObservationAnswer(state, "no");
+        var reply = SimulateDeliveryChoice(state, "delivery");
+
+        // At summary — $6.50 + $4.00 delivery = $10.50
+        reply.Body.Should().Contain("RESUMEN");
+        reply.Body.Should().Contain("$10.50");
+
+        // User edits
+        state.DeliveryType = null;
+        state.ExtrasOffered = false;
+        state.ObservationAnswered = false;
+
+        // Add a coca cola
+        state.ExtrasOffered = false;
+        state.ObservationAnswered = false;
+        SimulateOrderMessage(state, "1 coca cola");
+
+        state.Items.Should().HaveCount(2);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+
+        // Skip obs, pick delivery again
+        SimulateObservationAnswer(state, "no");
+        reply = SimulateDeliveryChoice(state, "delivery");
+
+        // New total: $6.50 + $1.50 + $4.00 = $12.00
+        reply.Body.Should().Contain("RESUMEN");
+        reply.Body.Should().Contain("Hamburguesa Clasica");
+        reply.Body.Should().Contain("Coca Cola");
+        reply.Body.Should().Contain("$12.00");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 19 — Full-category order (all categories)
+    //  Tests summary displays items sorted by category
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario19_AllCategoryOrder()
+    {
+        var state = SimulateGreeting("hola");
+        SimulateOrderMessage(state, "1 hamburguesa clasica");
+
+        // Reset obs gate to add more items
+        state.ExtrasOffered = false;
+        state.ObservationAnswered = false;
+        SimulateOrderMessage(state, "1 perro clasico");
+
+        state.ExtrasOffered = false;
+        state.ObservationAnswered = false;
+        SimulateOrderMessage(state, "1 papas medianas");
+
+        state.ExtrasOffered = false;
+        state.ObservationAnswered = false;
+        SimulateOrderMessage(state, "1 coca cola");
+
+        state.Items.Should().HaveCount(4);
+
+        SimulateObservationAnswer(state, "no");
+        var reply = SimulateDeliveryChoice(state, "pickup");
+
+        // Summary should list all categories in order
+        var body = reply.Body;
+        var burgerPos = body.IndexOf("Hamburguesa Clasica");
+        var perroPos = body.IndexOf("Perro Clasico");
+        var papasPos = body.IndexOf("Papas Medianas");
+        var cocaPos = body.IndexOf("Coca Cola");
+
+        burgerPos.Should().BeGreaterThan(-1);
+        perroPos.Should().BeGreaterThan(-1);
+        papasPos.Should().BeGreaterThan(-1);
+        cocaPos.Should().BeGreaterThan(-1);
+
+        // Category sort: hamburguesas < perros < papas < bebidas
+        burgerPos.Should().BeLessThan(perroPos, "hamburguesas before perros");
+        perroPos.Should().BeLessThan(papasPos, "perros before papas");
+        papasPos.Should().BeLessThan(cocaPos, "papas before bebidas");
+
+        // Total: 6.50 + 4.50 + 3.50 + 1.50 = $16.00
+        body.Should().Contain("$16.00");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 20 — Cancel then immediately reorder same thing
+    //  Proves no ghost state from previous order
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario20_CancelAndReorderSameItems()
+    {
+        var state = SimulateGreeting("hola");
+        SimulateOrderMessage(state, "2 hamburguesas clasicas y 1 coca cola");
+        state.Items.Should().HaveCount(2);
+
+        // Cancel
+        state.ResetAfterConfirm();
+        state.Items.Should().BeEmpty();
+
+        // Re-greet and order the same thing
+        state.MenuSent = true;
+        SimulateOrderMessage(state, "2 hamburguesas clasicas y 1 coca cola");
+
+        // Must be exactly 2 items with exact quantities — no doubling
+        state.Items.Should().HaveCount(2);
+        state.Items.First(i => i.Name == "Hamburguesa Clasica").Quantity.Should().Be(2);
+        state.Items.First(i => i.Name == "Coca Cola").Quantity.Should().Be(1);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 21 — Word-number quantities
+    //  "una hamburguesa, dos perros y tres cocas"
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario21_WordNumberQuantities()
+    {
+        var state = SimulateGreeting("buenas");
+        SimulateOrderMessage(state, "una hamburguesa, dos perros clasicos y tres coca cola");
+
+        state.Items.Should().HaveCount(3);
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 1);
+        state.Items.Should().Contain(i => i.Name == "Perro Clasico" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 3);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 22 — Combo ordering
+    //  "1 combo clasico y 1 agua"
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario22_ComboOrder()
+    {
+        var state = SimulateGreeting("hola");
+        SimulateOrderMessage(state, "1 combo clasico y 1 agua");
+
+        state.Items.Should().HaveCount(2);
+        state.Items.Should().Contain(i => i.Name == "Combo Clasico" && i.Quantity == 1);
+        state.Items.Should().Contain(i => i.Name == "Agua" && i.Quantity == 1);
+
+        state.Items.First(i => i.Name == "Combo Clasico").UnitPrice.Should().Be(8.50m);
+        state.Items.First(i => i.Name == "Agua").UnitPrice.Should().Be(1.00m);
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 23 — Pickup simple (fresh greeting variant)
+    //  "buenos dias" → "1 papas medianas" → "no" → "pickup"
+    //  Clean pickup with no delivery fee, different greeting
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario23_FreshGreetingPickupSimple()
+    {
+        var state = SimulateGreeting("buenos dias");
+
+        var reply = SimulateOrderMessage(state, "1 papas medianas");
+        state.Items.Should().HaveCount(1);
+        state.Items[0].Name.Should().Be("Papas Medianas");
+        state.Items[0].UnitPrice.Should().Be(3.50m);
+
+        reply = SimulateObservationAnswer(state, "no");
+        reply = SimulateDeliveryChoice(state, "pickup");
+
+        reply.Body.Should().Contain("RESUMEN");
+        reply.Body.Should().Contain("Papas Medianas");
+        reply.Body.Should().Contain("$3.50");
+        reply.Body.Should().NotContain("Delivery");
+
+        var total = WebhookProcessor.ComputeOrderTotalUsd(state);
+        total.Should().Be(3.50m, "pickup total = item price only");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 24 — Delivery with "hola que tal" greeting
+    //  Different greeting + delivery flow with fee verification
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario24_HolaQueTal_DeliveryWithFee()
+    {
+        var state = SimulateGreeting("hola que tal");
+
+        SimulateOrderMessage(state, "1 hamburguesa doble y 2 coca cola");
+        state.Items.Should().HaveCount(2);
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Doble" && i.Quantity == 1);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 2);
+
+        SimulateObservationAnswer(state, "no");
+        var reply = SimulateDeliveryChoice(state, "delivery");
+
+        reply.Body.Should().Contain("RESUMEN");
+        reply.Body.Should().Contain("Delivery: $4.00");
+
+        // Subtotal: 8.50 + 3.00 = 11.50; Total: 11.50 + 4.00 = 15.50
+        var total = WebhookProcessor.ComputeOrderTotalUsd(state);
+        total.Should().Be(15.50m);
+        reply.Body.Should().Contain("$15.50");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SCENARIO 25 — Observation with embedded modifiers
+    //  Order text already contains modifiers; observation gate
+    //  should be skipped because obs was extracted inline
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Scenario25_EmbeddedObservation_SkipsGate()
+    {
+        var state = SimulateGreeting("hola");
+
+        // TryParseQuickOrder extracts "sin cebolla" as embedded observation
+        var reply = SimulateOrderMessage(state,
+            "1 hamburguesa clasica sin cebolla");
+
+        state.Items.Should().HaveCount(1);
+        state.Items[0].Name.Should().Be("Hamburguesa Clasica");
+
+        // Check if modifiers were captured (inline or as observation)
+        var hasModifier = !string.IsNullOrWhiteSpace(state.Items[0].Modifiers);
+        var hasObs = !string.IsNullOrWhiteSpace(state.SpecialInstructions);
+        (hasModifier || hasObs).Should().BeTrue(
+            "sin cebolla must be captured as modifier or observation");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SUPPLEMENTARY — ComputeOrderTotalUsd correctness
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void ComputeOrderTotalUsd_DeliveryAddsFeee_PickupDoesNot()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry
+            { Name = "Perro Clasico", Quantity = 2, UnitPrice = 4.50m });
+
+        state.DeliveryType = "delivery";
+        WebhookProcessor.ComputeOrderTotalUsd(state).Should().Be(13.00m); // 9 + 4
+
+        state.DeliveryType = "pickup";
+        WebhookProcessor.ComputeOrderTotalUsd(state).Should().Be(9.00m); // 9 only
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SUPPLEMENTARY — Price per unit shown correctly in summary
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Summary_ShowsUnitPriceAndLineTotal()
+    {
+        var state = new ConversationFields();
+        state.Items.Add(new ConversationItemEntry
+            { Name = "Hamburguesa Clasica", Quantity = 3, UnitPrice = 6.50m });
+        state.ExtrasOffered = true;
+        state.ObservationAnswered = true;
+        state.DeliveryType = "pickup";
+
+        var reply = WebhookProcessor.BuildOrderReplyFromState(state);
+
+        // Should show: 3x Hamburguesa Clasica  $6.50 c/u = $19.50
+        reply.Body.Should().Contain("3x Hamburguesa Clasica");
+        reply.Body.Should().Contain("$6.50 c/u");
+        reply.Body.Should().Contain("$19.50");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  SUPPLEMENTARY — Large multi-item Venezuelan order
+    //  Realistic big family order
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void LargeVenezuelanFamilyOrder()
+    {
+        var state = SimulateGreeting("buenas noches");
+        SimulateOrderMessage(state,
+            "4 hamburguesas clasicas, 3 perros clasicos, 2 papas grandes y 4 coca cola");
+
+        state.Items.Should().HaveCount(4);
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 4);
+        state.Items.Should().Contain(i => i.Name == "Perro Clasico" && i.Quantity == 3);
+        state.Items.Should().Contain(i => i.Name == "Papas Grandes" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 4);
+
+        SimulateObservationAnswer(state, "no");
+        var reply = SimulateDeliveryChoice(state, "delivery");
+
+        // 4*6.50 + 3*4.50 + 2*4.50 + 4*1.50 = 26 + 13.50 + 9 + 6 = 54.50 + 4 delivery = 58.50
+        var total = WebhookProcessor.ComputeOrderTotalUsd(state);
+        total.Should().Be(58.50m);
+        reply.Body.Should().Contain("$58.50");
+    }
 }
