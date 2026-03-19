@@ -702,9 +702,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
                         state.LastActivityUtc = DateTime.UtcNow;
-                        // Do NOT set LastGreetingRedirectAtUtc here — full greeting is not
-                        // a redirect. This allows a follow-up greeting to get the short prompt
-                        // instead of being silently deduped.
+                        // Set LastGreetingRedirectAtUtc so that rapid follow-up greetings
+                        // ("hola" then "quetal" within seconds) are silently deduped instead
+                        // of sending an extra "Perfecto, dime tu orden." message.
+                        state.LastGreetingRedirectAtUtc = DateTime.UtcNow;
 
                         // Customer memory: load stored profile to pre-fill name + personalize greeting
                         var customer = await _orderRepository.GetCustomerByPhoneAsync(

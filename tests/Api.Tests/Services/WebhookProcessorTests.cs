@@ -3834,11 +3834,10 @@ public class WebhookProcessorTests
         sentMessages[2].Body.Should().Contain("deseas ordenar");
         state.MenuSent.Should().BeTrue();
 
-        // Step 3: repeated greeting shortly after → short redirect only
+        // Step 3: repeated greeting shortly after → silently suppressed (no duplicate prompt)
         sentMessages.Clear();
         await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "hola que tal"), _testBusiness);
-        sentMessages.Should().ContainSingle("repeated greeting = short redirect only");
-        sentMessages[0].Body.Should().Contain("dime tu orden");
+        sentMessages.Should().BeEmpty("rapid follow-up greeting after full greeting must be silently deduped");
     }
 
     [Theory]

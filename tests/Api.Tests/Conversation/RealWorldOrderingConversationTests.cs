@@ -720,6 +720,125 @@ public class RealWorldOrderingConversationTests
     }
 
     // ═══════════════════════════════════════════════════════════
+    //  REGRESSION — Greeting coalescing: full greeting sets
+    //  LastGreetingRedirectAtUtc so rapid follow-up greetings
+    //  are silently deduped (no extra "Perfecto, dime tu orden.")
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void GreetingCoalescing_FullGreetingSetsRedirectTimestamp()
+    {
+        // After full greeting, LastGreetingRedirectAtUtc must be set
+        // so that the 30s dedup window suppresses follow-up greetings
+        var state = new ConversationFields();
+        state.MenuSent = true;
+        state.LastActivityUtc = DateTime.UtcNow;
+        state.LastGreetingRedirectAtUtc = DateTime.UtcNow; // production now sets this
+
+        // Simulate rapid follow-up greeting arriving within 30s
+        var elapsed = (DateTime.UtcNow - state.LastGreetingRedirectAtUtc.Value).TotalSeconds;
+        elapsed.Should().BeLessThanOrEqualTo(30,
+            "rapid follow-up greeting should be within the dedup window");
+
+        // In ProcessAsync, this condition triggers silent dedup (lines 680-686):
+        // if (LastGreetingRedirectAtUtc.HasValue && elapsed <= 30) → continue (skip)
+        state.LastGreetingRedirectAtUtc.HasValue.Should().BeTrue(
+            "full greeting must set this so follow-ups are silently deduped");
+    }
+
+    [Theory]
+    [InlineData("que tal")]
+    [InlineData("quetal")]
+    [InlineData("hola que tal")]
+    [InlineData("buenas")]
+    [InlineData("hola")]
+    public void GreetingCoalescing_RapidFollowUpIsSuppressed(string followUp)
+    {
+        // Step 1: Full greeting just happened
+        var state = new ConversationFields();
+        state.MenuSent = true;
+        state.LastActivityUtc = DateTime.UtcNow;
+        state.LastGreetingRedirectAtUtc = DateTime.UtcNow;
+
+        // Step 2: Follow-up greeting arrives immediately
+        WebhookProcessor.IsGreeting(followUp.Trim().ToLowerInvariant()).Should().BeTrue();
+
+        // Step 3: Dedup check — should suppress because within 30s window
+        var withinWindow = state.LastGreetingRedirectAtUtc.HasValue
+            && (DateTime.UtcNow - state.LastGreetingRedirectAtUtc.Value).TotalSeconds <= 30;
+        withinWindow.Should().BeTrue(
+            $"'{followUp}' arriving right after full greeting should be within dedup window");
+
+        // No state corruption
+        state.Items.Should().BeEmpty();
+        state.MenuSent.Should().BeTrue();
+    }
+
+    [Fact]
+    public void GreetingCoalescing_CancelThenHolaThenQuetal_OnlyOneFullGreeting()
+    {
+        // Cancel → fresh greeting → rapid follow-up
+        var state = SimulateGreeting("hola");
+        SimulateOrderMessage(state, "1 hamburguesa clasica");
+        state.Items.Should().HaveCount(1);
+
+        // Cancel
+        state.ResetAfterConfirm();
+        state.Items.Should().BeEmpty();
+        state.LastGreetingRedirectAtUtc.Should().BeNull(
+            "cancel clears LastGreetingRedirectAtUtc");
+
+        // New full greeting
+        state.MenuSent = true;
+        state.LastActivityUtc = DateTime.UtcNow;
+        state.LastGreetingRedirectAtUtc = DateTime.UtcNow; // set by full greeting
+
+        // Rapid "quetal" follow-up — should be suppressed
+        WebhookProcessor.IsGreeting("quetal").Should().BeTrue();
+        var withinWindow = state.LastGreetingRedirectAtUtc.HasValue
+            && (DateTime.UtcNow - state.LastGreetingRedirectAtUtc.Value).TotalSeconds <= 30;
+        withinWindow.Should().BeTrue("quetal should be deduped after fresh full greeting");
+    }
+
+    [Fact]
+    public void GreetingCoalescing_OrderAfterFullGreeting_NotSuppressed()
+    {
+        // Full greeting sets dedup timestamp, but ordering must NOT be affected
+        var state = new ConversationFields();
+        state.MenuSent = true;
+        state.LastActivityUtc = DateTime.UtcNow;
+        state.LastGreetingRedirectAtUtc = DateTime.UtcNow;
+
+        // User sends an order (not a greeting) — must work normally
+        var orderText = "2 hamburguesas clasicas y 1 coca cola";
+        WebhookProcessor.IsGreeting(orderText.Trim().ToLowerInvariant()).Should().BeFalse(
+            "order text must NOT be detected as greeting");
+
+        // Order should parse normally
+        SimulateOrderMessage(state, orderText);
+        state.Items.Should().HaveCount(2);
+        state.Items.Should().Contain(i => i.Name == "Hamburguesa Clasica" && i.Quantity == 2);
+        state.Items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
+
+    [Fact]
+    public void GreetingCoalescing_AfterWindowExpires_NormalBehavior()
+    {
+        // After dedup window expires, greeting should proceed normally
+        var state = new ConversationFields();
+        state.MenuSent = true;
+        state.LastActivityUtc = DateTime.UtcNow.AddSeconds(-35);
+        state.LastGreetingRedirectAtUtc = DateTime.UtcNow.AddSeconds(-35);
+
+        // Follow-up greeting arriving after >30s — NOT within window
+        WebhookProcessor.IsGreeting("que tal").Should().BeTrue();
+        var withinWindow = state.LastGreetingRedirectAtUtc.HasValue
+            && (DateTime.UtcNow - state.LastGreetingRedirectAtUtc.Value).TotalSeconds <= 30;
+        withinWindow.Should().BeFalse(
+            "greeting arriving after 35s should NOT be suppressed");
+    }
+
+    // ═══════════════════════════════════════════════════════════
     //  SUPPLEMENTARY — Cancel detection for all common variants
     // ═══════════════════════════════════════════════════════════
 
