@@ -665,10 +665,58 @@ public class RealWorldOrderingConversationTests
     [InlineData("epa")]
     [InlineData("epale")]
     [InlineData("saludos")]
+    [InlineData("que tal")]
+    [InlineData("quetal")]
     public void GreetingDetection_CommonVariants(string greeting)
     {
         WebhookProcessor.IsGreeting(greeting).Should().BeTrue(
             $"'{greeting}' must be recognized as a greeting");
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    //  REGRESSION — "quetal" after "hola" must not duplicate prompt
+    //  Production bug: "quetal" fell through to AI parse
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Regression_QueTal_NoSpace_IsGreeting()
+    {
+        // "quetal" (no space) must be recognized as a greeting
+        WebhookProcessor.IsGreeting("quetal").Should().BeTrue(
+            "'quetal' without space is a common Venezuelan typing pattern");
+    }
+
+    [Fact]
+    public void Regression_HolaThenQuetal_NoDoubledPrompt()
+    {
+        // Step 1: "hola" triggers full greeting, sets MenuSent=true
+        var state = SimulateGreeting("hola");
+        state.MenuSent.Should().BeTrue();
+
+        // Step 2: "quetal" arrives immediately after — must be recognized as greeting
+        WebhookProcessor.IsGreeting("quetal").Should().BeTrue();
+        // Since MenuSent is already true, ProcessAsync would send short redirect
+        // (not a second full greeting). State should NOT be corrupted.
+        state.Items.Should().BeEmpty("greeting must not add items");
+        state.MenuSent.Should().BeTrue("menu already sent, should stay true");
+    }
+
+    [Fact]
+    public void Regression_HolaThenQueTalWithSpace_NoDoubledPrompt()
+    {
+        var state = SimulateGreeting("hola");
+        WebhookProcessor.IsGreeting("que tal").Should().BeTrue();
+        state.Items.Should().BeEmpty();
+        state.MenuSent.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Regression_HolaThenHolaQueTal_NoDoubledPrompt()
+    {
+        var state = SimulateGreeting("hola");
+        WebhookProcessor.IsGreeting("hola que tal").Should().BeTrue();
+        state.Items.Should().BeEmpty();
+        state.MenuSent.Should().BeTrue();
     }
 
     // ═══════════════════════════════════════════════════════════

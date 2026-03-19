@@ -2261,7 +2261,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (s is "hola" or "hoal" or "ola" or "holaa" or "hloa" or "hoka" or "gola"
             or "buenas" or "buenos dias" or "buenas dias" or "buen dia"
             or "buenas tardes" or "buenas noches" or "hey" or "epa"
-            or "epale" or "saludos" or "que tal" or "como estas"
+            or "epale" or "saludos" or "que tal" or "quetal" or "como estas"
             or "que hubo" or "habla" or "hablame")
             return true;
 
