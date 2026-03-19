@@ -793,8 +793,8 @@ public class VenezuelanOrderingStressTests
 
         state.Items.Should().BeEmpty();
         state.DeliveryType.Should().BeNull();
-        state.HumanHandoffRequested.Should().BeTrue("cancel should trigger handoff");
-        sentMessages.Should().ContainSingle(m => m.Body.Contains("agente humano"));
+        state.HumanHandoffRequested.Should().BeFalse("cancel should NOT trigger handoff");
+        sentMessages.Should().ContainSingle(m => m.Body.Contains("cancelado"));
     }
 
     [Fact]

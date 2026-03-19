@@ -3678,47 +3678,14 @@ public class WebhookProcessorTests
 
         state.Items.Should().BeEmpty();
         state.DeliveryType.Should().BeNull();
-        state.HumanHandoffRequested.Should().BeTrue();
-        sentMessages.Should().ContainSingle(m => m.Body.Contains("agente humano"));
-    }
-
-    [Theory]
-    [InlineData("hola")]
-    [InlineData("buenas")]
-    [InlineData("que tal")]
-    [InlineData("hoka")]
-    [InlineData("gola")]
-    public async Task Cancelar_ThenGreeting_StaysInHandoff(string greeting)
-    {
-        var sentMessages = new List<OutgoingMessage>();
-        _whatsAppClientMock
-            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
-            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
-            .ReturnsAsync(true);
-
-        var state = new ConversationFields
-        {
-            HumanHandoffRequested = true,
-            HumanHandoffAtUtc = DateTime.UtcNow.AddMinutes(-1),
-            HumanHandoffNotifiedCount = 1
-        };
-        _stateStoreMock
-            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(state);
-
-        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", greeting), _testBusiness);
-
-        state.HumanHandoffRequested.Should().BeTrue($"'{greeting}' must not clear handoff");
+        state.HumanHandoffRequested.Should().BeFalse("cancel should NOT trigger handoff");
+        state.MenuSent.Should().BeTrue("cancel should set MenuSent for next greeting");
         sentMessages.Should().ContainSingle();
-        sentMessages[0].Body.Should().Contain("QUIERO PEDIR", $"'{greeting}' should get handoff-still-active message");
+        sentMessages[0].Body.Should().Contain("cancelado");
     }
 
-    [Theory]
-    [InlineData("quiero pedir")]
-    [InlineData("nuevo pedido")]
-    [InlineData("quiero ordenar")]
-    [InlineData("hacer un pedido")]
-    public async Task Cancelar_ThenStrongIntent_RestartsOrder(string intent)
+    [Fact]
+    public async Task Cancelar_WithNoItems_StillHandledLocally()
     {
         var sentMessages = new List<OutgoingMessage>();
         _whatsAppClientMock
@@ -3726,19 +3693,39 @@ public class WebhookProcessorTests
             .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
             .ReturnsAsync(true);
 
-        var state = new ConversationFields
-        {
-            HumanHandoffRequested = true,
-            HumanHandoffAtUtc = DateTime.UtcNow.AddMinutes(-1),
-            HumanHandoffNotifiedCount = 1
-        };
+        var state = new ConversationFields { MenuSent = true };
         _stateStoreMock
             .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(state);
 
-        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", intent), _testBusiness);
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "cancelar"), _testBusiness);
 
-        state.HumanHandoffRequested.Should().BeFalse($"'{intent}' should clear handoff");
+        sentMessages.Should().ContainSingle();
+        sentMessages[0].Body.Should().Contain("cancelado");
+    }
+
+    [Theory]
+    [InlineData("cancelar pedido")]
+    [InlineData("olvida eso")]
+    [InlineData("ya no")]
+    public async Task CancelVariants_HandledLocally(string input)
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Test", Quantity = 1 });
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", input), _testBusiness);
+
+        sentMessages.Should().ContainSingle();
+        sentMessages[0].Body.Should().Contain("cancelado", $"'{input}' should be handled locally");
     }
 
     [Theory]

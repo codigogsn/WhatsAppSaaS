@@ -540,6 +540,9 @@ internal static class Msg
     internal static string HandoffStillActive
         => "Tu conversaci\u00f3n sigue en atenci\u00f3n por nuestro equipo. Si quieres volver a pedir, escribe: *QUIERO PEDIR*.";
 
+    internal static string OrderCancelled
+        => "Tu pedido fue cancelado. Cuando quieras, escr\u00edbeme tu pedido nuevamente.";
+
     // ── Checkout flow: fill-in-the-form ──
 
     internal static string StillFillingForm

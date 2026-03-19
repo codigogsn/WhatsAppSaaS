@@ -24,10 +24,25 @@ public sealed class MenuRepository : IMenuRepository
         try { return r.GetDecimal(ordinal); }
         catch (InvalidCastException)
         {
-            // Column is text-typed (pre-migration) — parse manually
             var raw = r.GetValue(ordinal)?.ToString();
             return decimal.TryParse(raw, System.Globalization.NumberStyles.Any,
                 System.Globalization.CultureInfo.InvariantCulture, out var val) ? val : 0m;
+        }
+    }
+
+    /// <summary>
+    /// Safely reads a DateTime value from a DB reader, handling text-typed columns
+    /// (from SQLite-generated migrations) by parsing the string value.
+    /// </summary>
+    private static DateTime SafeGetDateTime(System.Data.Common.DbDataReader r, int ordinal)
+    {
+        if (r.IsDBNull(ordinal)) return DateTime.UtcNow;
+        try { return r.GetDateTime(ordinal); }
+        catch (InvalidCastException)
+        {
+            var raw = r.GetValue(ordinal)?.ToString();
+            return DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal, out var val) ? val : DateTime.UtcNow;
         }
     }
 
@@ -74,7 +89,7 @@ public sealed class MenuRepository : IMenuRepository
                 Name = cr.GetString(cr.GetOrdinal("Name")),
                 SortOrder = cr.GetInt32(cr.GetOrdinal("SortOrder")),
                 IsActive = ParseBool(cr["IsActive"]),
-                CreatedAtUtc = cr.GetDateTime(cr.GetOrdinal("CreatedAtUtc")),
+                CreatedAtUtc = SafeGetDateTime(cr, cr.GetOrdinal("CreatedAtUtc")),
                 Items = new List<MenuItem>()
             };
             categories.Add(cat);
@@ -120,7 +135,7 @@ public sealed class MenuRepository : IMenuRepository
                 Description = ir.IsDBNull(descOrd) ? null : ir.GetString(descOrd),
                 IsAvailable = ParseBool(ir["IsAvailable"]),
                 SortOrder = ir.GetInt32(ir.GetOrdinal("SortOrder")),
-                CreatedAtUtc = ir.GetDateTime(ir.GetOrdinal("CreatedAtUtc")),
+                CreatedAtUtc = SafeGetDateTime(ir, ir.GetOrdinal("CreatedAtUtc")),
                 Aliases = new List<MenuItemAlias>()
             };
             itemsById[item.Id] = item;
@@ -211,7 +226,7 @@ public sealed class MenuRepository : IMenuRepository
                 Description = reader.IsDBNull(descOrd) ? null : reader.GetString(descOrd),
                 IsAvailable = ParseBool(reader["IsAvailable"]),
                 SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder")),
-                CreatedAtUtc = reader.GetDateTime(reader.GetOrdinal("CreatedAtUtc")),
+                CreatedAtUtc = SafeGetDateTime(reader, reader.GetOrdinal("CreatedAtUtc")),
                 Aliases = new List<MenuItemAlias>()
             };
             items.Add(item);

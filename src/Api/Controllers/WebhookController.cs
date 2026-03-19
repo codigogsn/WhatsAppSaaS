@@ -148,6 +148,14 @@ public class WebhookController : ControllerBase
         if (string.IsNullOrWhiteSpace(phoneNumberId))
             return Ok();
 
+        // Skip non-message webhooks (status callbacks, delivery/read receipts, etc.)
+        // These have phoneNumberId but no actual messages to process.
+        if (string.IsNullOrWhiteSpace(firstMessageId))
+        {
+            Log.Debug("WEBHOOK SKIPPED: no inbound messages (status callback / receipt), phoneNumberId={PhoneNumberId}", phoneNumberId);
+            return Ok();
+        }
+
         BusinessContext? businessContext;
         try
         {

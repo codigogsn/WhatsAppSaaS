@@ -468,26 +468,22 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // A-cancel) CANCELAR — reset everything
-                    if (IsCancelCommand(t) && state.Items.Count > 0)
+                    // A-cancel) CANCELAR — reset everything, no handoff, no staff notification
+                    if (IsCancelCommand(t))
                     {
                         state.ResetAfterConfirm();
-                        state.HumanHandoffRequested = true;
-                        state.HumanHandoffAtUtc = DateTime.UtcNow;
-                        state.HumanHandoffNotifiedCount = 1;
+                        state.MenuSent = true;
+                        state.LastActivityUtc = DateTime.UtcNow;
+                        state.LastGreetingRedirectAtUtc = DateTime.UtcNow;
 
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = Msg.HandoffInitiated,
+                            Body = Msg.OrderCancelled,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
 
-                        if (_notificationService is not null)
-                            await _notificationService.NotifyHumanHandoffAsync(businessContext, message.From, cancellationToken);
-
-                        state.LastActivityUtc = DateTime.UtcNow;
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
@@ -2312,7 +2308,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Exact matches
         if (t is "cancelar" or "cancelar pedido" or "cancelar orden"
             or "borrar todo" or "empezar de cero" or "cancela"
-            or "cancelo" or "cancela pedido" or "cancelo pedido")
+            or "cancelo" or "cancela pedido" or "cancelo pedido"
+            or "olvida eso" or "ya no")
             return true;
 
         // Typo-tolerant: Levenshtein distance ≤ 2 from common cancel words
