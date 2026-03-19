@@ -469,12 +469,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     }
 
                     // A-cancel) CANCELAR — reset everything, no handoff, no staff notification
+                    // MenuSent stays false so next greeting triggers full welcome sequence
                     if (IsCancelCommand(t))
                     {
                         state.ResetAfterConfirm();
-                        state.MenuSent = true;
-                        state.LastActivityUtc = DateTime.UtcNow;
-                        state.LastGreetingRedirectAtUtc = DateTime.UtcNow;
 
                         await SendAsync(new OutgoingMessage
                         {

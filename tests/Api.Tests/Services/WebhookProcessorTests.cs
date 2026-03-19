@@ -3679,7 +3679,7 @@ public class WebhookProcessorTests
         state.Items.Should().BeEmpty();
         state.DeliveryType.Should().BeNull();
         state.HumanHandoffRequested.Should().BeFalse("cancel should NOT trigger handoff");
-        state.MenuSent.Should().BeTrue("cancel should set MenuSent for next greeting");
+        state.MenuSent.Should().BeFalse("cancel should reset MenuSent so next greeting sends full welcome");
         sentMessages.Should().ContainSingle();
         sentMessages[0].Body.Should().Contain("cancelado");
     }
@@ -3726,6 +3726,82 @@ public class WebhookProcessorTests
 
         sentMessages.Should().ContainSingle();
         sentMessages[0].Body.Should().Contain("cancelado", $"'{input}' should be handled locally");
+    }
+
+    [Fact]
+    public async Task FirstGreeting_SendsFullWelcomeSequence()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // Fresh state — no MenuSent, no prior greeting
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "hola"), _testBusiness);
+
+        sentMessages.Should().HaveCount(3, "first greeting sends welcome + menu + prompt");
+        sentMessages[0].Body.Should().Contain("bienvenido");
+        sentMessages[2].Body.Should().Contain("deseas ordenar");
+        state.MenuSent.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RepeatedGreeting_SendsShortRedirectOnly()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        // State after full greeting was already sent
+        var state = new ConversationFields
+        {
+            MenuSent = true,
+            LastActivityUtc = DateTime.UtcNow.AddMinutes(-2),
+            LastGreetingRedirectAtUtc = DateTime.UtcNow.AddMinutes(-2)
+        };
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "hola que tal"), _testBusiness);
+
+        sentMessages.Should().ContainSingle("repeated greeting should send only short redirect");
+        sentMessages[0].Body.Should().Contain("dime tu orden");
+    }
+
+    [Fact]
+    public async Task CancelThenGreeting_SendsFullWelcome()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Test", Quantity = 1 });
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Step 1: cancel
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "cancelar"), _testBusiness);
+        sentMessages.Should().ContainSingle(m => m.Body.Contains("cancelado"));
+        state.MenuSent.Should().BeFalse("cancel resets MenuSent");
+
+        // Step 2: greeting after cancel should trigger full sequence
+        sentMessages.Clear();
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "hola"), _testBusiness);
+        sentMessages.Should().HaveCount(3, "greeting after cancel should send full welcome");
+        sentMessages[0].Body.Should().Contain("bienvenido");
     }
 
     [Theory]
