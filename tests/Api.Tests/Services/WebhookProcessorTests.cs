@@ -3804,6 +3804,43 @@ public class WebhookProcessorTests
         sentMessages[0].Body.Should().Contain("bienvenido");
     }
 
+    [Fact]
+    public async Task FullSequence_CancelThenHolaThenHolaQueTal()
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields { MenuSent = true };
+        state.Items.Add(new ConversationItemEntry { Name = "Hamburguesa Clasica", Quantity = 2 });
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        // Step 1: cancel
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "cancelar pedido"), _testBusiness);
+        sentMessages.Should().ContainSingle(m => m.Body.Contains("cancelado"));
+        state.MenuSent.Should().BeFalse();
+        state.LastActivityUtc.Should().BeNull();
+        state.LastGreetingRedirectAtUtc.Should().BeNull();
+
+        // Step 2: first greeting after cancel → full welcome
+        sentMessages.Clear();
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "hola"), _testBusiness);
+        sentMessages.Should().HaveCount(3, "first greeting after cancel = full welcome");
+        sentMessages[0].Body.Should().Contain("bienvenido");
+        sentMessages[2].Body.Should().Contain("deseas ordenar");
+        state.MenuSent.Should().BeTrue();
+
+        // Step 3: repeated greeting shortly after → short redirect only
+        sentMessages.Clear();
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", "hola que tal"), _testBusiness);
+        sentMessages.Should().ContainSingle("repeated greeting = short redirect only");
+        sentMessages[0].Body.Should().Contain("dime tu orden");
+    }
+
     [Theory]
     [InlineData("editar", true)]
     [InlineData("modificar", true)]

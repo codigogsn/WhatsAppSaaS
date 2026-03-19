@@ -670,6 +670,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         }
 
                         // Repeated greeting in active session: skip full greeting, send short prompt
+                        _logger.LogDebug("GREETING DECISION: text={Text} MenuSent={MenuSent} LastActivity={LA} LastRedirect={LR}",
+                            t, state.MenuSent, state.LastActivityUtc, state.LastGreetingRedirectAtUtc);
                         if (IsGreeting(t) && state.MenuSent
                             && state.LastActivityUtc.HasValue
                             && (DateTime.UtcNow - state.LastActivityUtc.Value).TotalMinutes <= 10)
@@ -695,10 +697,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                         }
 
+                        _logger.LogInformation("GREETING FULL: sending welcome+menu for {Conv}", conversationId);
                         state.ResetAfterConfirm();
                         state.MenuSent = true;
                         state.LastActivityUtc = DateTime.UtcNow;
-                        state.LastGreetingRedirectAtUtc = DateTime.UtcNow;
+                        // Do NOT set LastGreetingRedirectAtUtc here — full greeting is not
+                        // a redirect. This allows a follow-up greeting to get the short prompt
+                        // instead of being silently deduped.
 
                         // Customer memory: load stored profile to pre-fill name + personalize greeting
                         var customer = await _orderRepository.GetCustomerByPhoneAsync(
