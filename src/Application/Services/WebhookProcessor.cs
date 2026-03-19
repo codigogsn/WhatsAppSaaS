@@ -1785,6 +1785,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase));
                     unitPrice = entry?.Price ?? 0m;
                 }
+                // If price is suspiciously low, check demo catalog as fallback
+                if (unitPrice < 0.10m && _activeMenu != null)
+                {
+                    var demoEntry = MenuCatalog.FirstOrDefault(m =>
+                        m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase));
+                    if (demoEntry != null && demoEntry.Price > unitPrice)
+                        unitPrice = demoEntry.Price;
+                }
 
                 return new WhatsAppSaaS.Domain.Entities.OrderItem
                 {
@@ -2530,11 +2538,21 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     private static void AddOrIncreaseItem(ConversationFields state, string name, int qty, string? modifiers = null)
     {
-        // Look up unit price from catalog
+        // Look up unit price from active catalog, fall back to demo catalog if price is missing/invalid
         var catalog = ActiveCatalog ?? MenuCatalog;
         var entry = catalog.FirstOrDefault(m =>
             m.Canonical.Equals(name, StringComparison.OrdinalIgnoreCase));
         var unitPrice = entry?.Price ?? 0m;
+
+        // If active catalog returned no price or a suspiciously low price,
+        // check the demo catalog as fallback (handles corrupted DB menu data)
+        if (unitPrice < 0.10m && ActiveCatalog != null)
+        {
+            var demoEntry = MenuCatalog.FirstOrDefault(m =>
+                m.Canonical.Equals(name, StringComparison.OrdinalIgnoreCase));
+            if (demoEntry != null && demoEntry.Price > unitPrice)
+                unitPrice = demoEntry.Price;
+        }
 
         var existing = state.Items.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
