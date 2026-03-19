@@ -212,8 +212,9 @@ try
     // ────────────────────────────────────────
     // AUTO-MIGRATE (both SQLite and Postgres)
     // ────────────────────────────────────────
-    using (var scope = app.Services.CreateScope())
     {
+        var migrateSw = System.Diagnostics.Stopwatch.StartNew();
+        using var scope = app.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var isNpgsql = db.Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true;
 
@@ -235,13 +236,18 @@ try
                 throw;
             }
         }
+        Log.Information("STARTUP MIGRATIONS completed in {Elapsed}ms", migrateSw.ElapsedMilliseconds);
     }
 
     // ────────────────────────────────────────
-    // Seed default business from env vars (idempotent)
+    // Seed default business from env vars (idempotent, with timeout)
     // ────────────────────────────────────────
-    SeedDefaultBusiness(app.Services);
-    SeedZelleConfig(app.Services);
+    {
+        var seedSw = System.Diagnostics.Stopwatch.StartNew();
+        SeedDefaultBusiness(app.Services);
+        SeedZelleConfig(app.Services);
+        Log.Information("STARTUP SEEDS completed in {Elapsed}ms", seedSw.ElapsedMilliseconds);
+    }
 
     app.UseGlobalExceptionHandling();
     app.UseRequestLogging();
@@ -269,23 +275,7 @@ try
 
     if (!EF.IsDesignTime)
     {
-        // Best-effort: fetch today's BCV rate on startup so it's available immediately
-        try
-        {
-            using var startupScope = app.Services.CreateScope();
-            var bcvService = startupScope.ServiceProvider.GetRequiredService<IBcvRateService>();
-            var rate = await bcvService.FetchAndPersistTodayAsync();
-            if (rate is not null)
-                Log.Information("STARTUP BCV rate loaded — USD={Usd} EUR={Eur} date={Date}",
-                    rate.UsdRate, rate.EurRate, rate.RateDate.ToString("yyyy-MM-dd"));
-            else
-                Log.Warning("STARTUP BCV rate fetch returned null — will retry via background job");
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "STARTUP BCV rate fetch failed — will retry via background job");
-        }
-
+        // Start listening FIRST so Render health check passes immediately
         app.Run();
     }
 }
@@ -500,8 +490,8 @@ static void ApplyMigrationsWithAdvisoryLock(AppDbContext db)
         Log.Information("MIGRATION LOCK WAITING...");
         using (var lockCmd = conn.CreateCommand())
         {
-            lockCmd.CommandText = $"SET lock_timeout = '60s'; SELECT pg_advisory_lock({lockId})";
-            lockCmd.CommandTimeout = 70;
+            lockCmd.CommandText = $"SET lock_timeout = '30s'; SELECT pg_advisory_lock({lockId})";
+            lockCmd.CommandTimeout = 40;
             lockCmd.ExecuteNonQuery();
         }
         Log.Information("MIGRATION LOCK ACQUIRED");
