@@ -4132,7 +4132,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Noise words to strip (greetings + filler + ordering prefixes) — preserve newlines for segment splitting
         // Multi-word phrases listed first so they match before individual words
-        var noisePattern = @"\b(quisiera\s+hacer\s+un\s+pedido|hacer\s+un\s+pedido|hacer\s+pedido|quiero\s+hacer\s+un\s+pedido|quiero\s+pedir|voy\s+a\s+querer|voy\s+a\s+pedir|me\s+das?|mand[ae]\s*me|manda\s*me|para\s+comer|buenas\s+tardes|buenas\s+noches|buenos?\s+d[ií]as?|hola|hoal|ola|holaa|hloa|hoka|gola|buenas?|hey|epa|epale|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|dame|ponme|regalame|reg[aá]lame|necesito|pedimos|bro|pana|mano|vale|loco|hermano)\b";
+        var noisePattern = @"\b(quisiera\s+hacer\s+un\s+pedido|hacer\s+un\s+pedido|hacer\s+pedido|quiero\s+hacer\s+un\s+pedido|quiero\s+pedir|voy\s+a\s+querer|voy\s+a\s+pedir|me\s+vas\s+a\s+dar|me\s+va\s+a\s+dar|me\s+das?|mand[ae]\s*me|manda\s*me|para\s+comer|buenas\s+tardes|buenas\s+noches|buenos?\s+d[ií]as?|hola|hoal|ola|holaa|hloa|hoka|gola|buenas?|hey|epa|epale|saludos|por\s*favor|porfavor|porfa|plis|please|gracias|quiero|quisiera|dame|ponme|regalame|reg[aá]lame|necesito|pedimos|bro|pana|mano|vale|loco|hermano)\b";
         var cleaned = Regex.Replace(text, noisePattern, " ", RegexOptions.IgnoreCase);
         // Collapse spaces on each line but preserve newlines
         cleaned = string.Join("\n", cleaned.Split('\n').Select(line => Regex.Replace(line, @"[ \t]+", " ").Trim()));

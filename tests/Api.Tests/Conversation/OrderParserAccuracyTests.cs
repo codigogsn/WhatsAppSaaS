@@ -710,4 +710,92 @@ public class OrderParserAccuracyTests
         parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name))
             .Should().BeEmpty($"'{input}' should not match any menu items");
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  REGRESSION — "me vas a dar" natural inline multi-item
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Regression_MeVasADar_MultiItem_AllParsed()
+    {
+        var input = "me vas a dar 3 perros clasicos 2 papas grandes y una coacola";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+        var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+        items.Should().HaveCount(3, "all three items must be parsed");
+        items.Should().Contain(p => p.Name == "Perro Clasico" && p.Quantity == 3);
+        items.Should().Contain(p => p.Name == "Papas Grandes" && p.Quantity == 2);
+        items.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    [Fact]
+    public void Regression_Dame_MultiItem()
+    {
+        var input = "dame 2 hamburguesas clasicas y 1 coca cola";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+        var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+        items.Should().HaveCount(2);
+        items.Should().Contain(p => p.Name == "Hamburguesa Clasica" && p.Quantity == 2);
+        items.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    [Fact]
+    public void Regression_Ponme_WithCommas()
+    {
+        var input = "ponme 2 perros clasicos, 2 papas grandes y 1 coca cola";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+        var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+        items.Should().HaveCount(3);
+        items.Should().Contain(p => p.Name == "Perro Clasico" && p.Quantity == 2);
+        items.Should().Contain(p => p.Name == "Papas Grandes" && p.Quantity == 2);
+        items.Should().Contain(p => p.Name == "Coca Cola" && p.Quantity == 1);
+    }
+
+    [Fact]
+    public void Regression_TypoTolerance_Coacola()
+    {
+        var input = "1 coacola";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+        var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+        items.Should().ContainSingle();
+        items[0].Name.Should().Be("Coca Cola");
+    }
+
+    [Fact]
+    public void Regression_TypoTolerance_Clasicos()
+    {
+        var input = "3 perros clasicos";
+        var parsed = WebhookProcessor.ParseOrderText(input);
+        var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+        items.Should().ContainSingle();
+        items[0].Name.Should().Be("Perro Clasico");
+        items[0].Quantity.Should().Be(3);
+    }
+
+    [Fact]
+    public void Regression_MenuPrices_NotNonsense()
+    {
+        var catalog = WebhookProcessor.MenuCatalog;
+        var cocaCola = catalog.FirstOrDefault(e => e.Canonical == "Coca Cola");
+        cocaCola.Should().NotBeNull();
+        cocaCola!.Price.Should().BeGreaterThan(0.50m, "Coca Cola price should not be nonsense like $0.02");
+    }
+
+    [Fact]
+    public void TryParseQuickOrder_MultiItem_AllItems()
+    {
+        var ok = WebhookProcessor.TryParseQuickOrder(
+            "me vas a dar 3 perros clasicos 2 papas grandes y una coacola",
+            out var items, out _, out _);
+
+        ok.Should().BeTrue();
+        items.Should().HaveCount(3);
+        items.Should().Contain(i => i.Name == "Perro Clasico" && i.Quantity == 3);
+        items.Should().Contain(i => i.Name == "Papas Grandes" && i.Quantity == 2);
+        items.Should().Contain(i => i.Name == "Coca Cola" && i.Quantity == 1);
+    }
 }
