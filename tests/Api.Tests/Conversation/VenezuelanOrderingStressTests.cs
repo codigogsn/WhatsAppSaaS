@@ -793,7 +793,8 @@ public class VenezuelanOrderingStressTests
 
         state.Items.Should().BeEmpty();
         state.DeliveryType.Should().BeNull();
-        state.MenuSent.Should().BeTrue("should show menu again");
+        state.HumanHandoffRequested.Should().BeTrue("cancel should trigger handoff");
+        sentMessages.Should().ContainSingle(m => m.Body.Contains("agente humano"));
     }
 
     [Fact]

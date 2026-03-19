@@ -3678,7 +3678,67 @@ public class WebhookProcessorTests
 
         state.Items.Should().BeEmpty();
         state.DeliveryType.Should().BeNull();
-        state.MenuSent.Should().BeTrue();
+        state.HumanHandoffRequested.Should().BeTrue();
+        sentMessages.Should().ContainSingle(m => m.Body.Contains("agente humano"));
+    }
+
+    [Theory]
+    [InlineData("hola")]
+    [InlineData("buenas")]
+    [InlineData("que tal")]
+    [InlineData("hoka")]
+    [InlineData("gola")]
+    public async Task Cancelar_ThenGreeting_StaysInHandoff(string greeting)
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields
+        {
+            HumanHandoffRequested = true,
+            HumanHandoffAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            HumanHandoffNotifiedCount = 1
+        };
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", greeting), _testBusiness);
+
+        state.HumanHandoffRequested.Should().BeTrue($"'{greeting}' must not clear handoff");
+        sentMessages.Should().ContainSingle();
+        sentMessages[0].Body.Should().Contain("QUIERO PEDIR", $"'{greeting}' should get handoff-still-active message");
+    }
+
+    [Theory]
+    [InlineData("quiero pedir")]
+    [InlineData("nuevo pedido")]
+    [InlineData("quiero ordenar")]
+    [InlineData("hacer un pedido")]
+    public async Task Cancelar_ThenStrongIntent_RestartsOrder(string intent)
+    {
+        var sentMessages = new List<OutgoingMessage>();
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields
+        {
+            HumanHandoffRequested = true,
+            HumanHandoffAtUtc = DateTime.UtcNow.AddMinutes(-1),
+            HumanHandoffNotifiedCount = 1
+        };
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(CreateTextMessagePayload("5511999999999", intent), _testBusiness);
+
+        state.HumanHandoffRequested.Should().BeFalse($"'{intent}' should clear handoff");
     }
 
     [Theory]

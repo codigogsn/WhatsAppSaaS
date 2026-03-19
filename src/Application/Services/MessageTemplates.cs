@@ -537,6 +537,9 @@ internal static class Msg
     internal static string HandoffWaiting
         => "Tu consulta est\u00e1 siendo atendida por nuestro equipo. Te responderemos pronto.";
 
+    internal static string HandoffStillActive
+        => "Tu conversaci\u00f3n sigue en atenci\u00f3n por nuestro equipo. Si quieres volver a pedir, escribe: *QUIERO PEDIR*.";
+
     // ── Checkout flow: fill-in-the-form ──
 
     internal static string StillFillingForm

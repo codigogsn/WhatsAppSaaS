@@ -327,27 +327,41 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     }
 
                     // 0b) If already in human handoff, pause all bot logic
+                    //     EXCEPT strong ordering intents that explicitly restart
                     if (state.HumanHandoffRequested)
                     {
-                        // Send reminder max 2 more times, then stay silent
-                        if (state.HumanHandoffNotifiedCount < 3)
+                        // Strong ordering intent breaks out of handoff
+                        if (IsOrderingIntent(t) || IsMenuRequest(t))
                         {
-                            state.HumanHandoffNotifiedCount++;
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = Msg.HandoffWaiting,
-                                PhoneNumberId = phoneNumberId,
-                                AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                            // Notify staff on first follow-up only (count == 2)
-                            if (_notificationService is not null && state.HumanHandoffNotifiedCount == 2)
-                                await _notificationService.NotifyCustomerWaitingAsync(businessContext, message.From, cancellationToken);
+                            state.HumanHandoffRequested = false;
+                            state.HumanHandoffAtUtc = null;
+                            state.HumanHandoffNotifiedCount = 0;
+                            // Fall through to normal processing
                         }
+                        else
+                        {
+                            // Greetings and other casual messages stay locked
+                            if (state.HumanHandoffNotifiedCount < 3)
+                            {
+                                state.HumanHandoffNotifiedCount++;
+                                var handoffBody = IsGreeting(t)
+                                    ? Msg.HandoffStillActive
+                                    : Msg.HandoffWaiting;
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = handoffBody,
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
 
-                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                        continue;
+                                if (_notificationService is not null && state.HumanHandoffNotifiedCount == 2)
+                                    await _notificationService.NotifyCustomerWaitingAsync(businessContext, message.From, cancellationToken);
+                            }
+
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
                     }
 
                     // ── Fashion vertical: handles its own flow ──
@@ -458,9 +472,20 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (IsCancelCommand(t) && state.Items.Count > 0)
                     {
                         state.ResetAfterConfirm();
-                        state.MenuSent = true;
+                        state.HumanHandoffRequested = true;
+                        state.HumanHandoffAtUtc = DateTime.UtcNow;
+                        state.HumanHandoffNotifiedCount = 1;
 
-                        await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, null, cancellationToken);
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = Msg.HandoffInitiated,
+                            PhoneNumberId = phoneNumberId,
+                            AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        if (_notificationService is not null)
+                            await _notificationService.NotifyHumanHandoffAsync(businessContext, message.From, cancellationToken);
 
                         state.LastActivityUtc = DateTime.UtcNow;
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
