@@ -80,6 +80,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Load business menu from DB; fallback to demo catalog
         _activeMenu = await LoadBusinessMenuAsync(businessContext.BusinessId, cancellationToken);
         ActiveCatalog = _activeMenu;
+        _staticLogger = _logger;
 
         // Resolve BCV rate once per request (never blocks processing)
         try
@@ -1788,8 +1789,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 // If price is suspiciously low, check demo catalog as fallback
                 if (unitPrice < 0.10m && _activeMenu != null)
                 {
-                    var demoEntry = MenuCatalog.FirstOrDefault(m =>
-                        m.Canonical.Equals(i.Name, StringComparison.OrdinalIgnoreCase));
+                    _logger.LogInformation("PRICE FALLBACK start item={Item} dbPrice={DbPrice}", i.Name, unitPrice);
+                    var demoEntry = FindDemoPriceFallback(i.Name, _logger);
                     if (demoEntry != null && demoEntry.Price > unitPrice)
                         unitPrice = demoEntry.Price;
                 }
@@ -2548,8 +2549,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // check the demo catalog as fallback (handles corrupted DB menu data)
         if (unitPrice < 0.10m && ActiveCatalog != null)
         {
-            var demoEntry = MenuCatalog.FirstOrDefault(m =>
-                m.Canonical.Equals(name, StringComparison.OrdinalIgnoreCase));
+            _staticLogger?.LogInformation("PRICE FALLBACK start item={Item} dbPrice={DbPrice}", name, unitPrice);
+            var demoEntry = FindDemoPriceFallback(name);
             if (demoEntry != null && demoEntry.Price > unitPrice)
                 unitPrice = demoEntry.Price;
         }
@@ -3410,6 +3411,109 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Active catalog for current request (set by ProcessAsync, used by static helpers)
     [ThreadStatic]
     internal static MenuEntry[]? ActiveCatalog;
+
+    // Logger for static helpers (set by ProcessAsync alongside ActiveCatalog)
+    [ThreadStatic]
+    private static ILogger? _staticLogger;
+
+    /// <summary>
+    /// Finds the best matching demo catalog entry for an item with a corrupted DB price.
+    /// Uses a ranked matching strategy:
+    ///   1. Exact canonical match
+    ///   2. NormalizeMenuItemName resolution (aliases, singularization, fuzzy)
+    ///   3. Contains/substring match on normalized names
+    /// Only returns entries with price > 0.50 to ensure sane fallback.
+    /// </summary>
+    internal static MenuEntry? FindDemoPriceFallback(string itemName, ILogger? logger = null)
+    {
+        var log = logger ?? _staticLogger;
+        var stripped = StripAccents(itemName.Trim().ToLowerInvariant());
+        var singularized = SingularizeWords(stripped);
+
+        // 1. Exact canonical match (case-insensitive)
+        var exact = MenuCatalog.FirstOrDefault(m =>
+            m.Canonical.Equals(itemName, StringComparison.OrdinalIgnoreCase));
+        if (exact != null && exact.Price > 0.50m)
+        {
+            log?.LogInformation("PRICE FALLBACK exact canonical hit item={Item} -> {Canon} ${Price}",
+                itemName, exact.Canonical, exact.Price);
+            return exact;
+        }
+
+        // 2. Exact canonical match on stripped/singularized form
+        foreach (var m in MenuCatalog)
+        {
+            var canonNorm = StripAccents(m.Canonical.ToLowerInvariant());
+            var canonSing = SingularizeWords(canonNorm);
+            if (stripped == canonNorm || singularized == canonNorm
+                || stripped == canonSing || singularized == canonSing)
+            {
+                if (m.Price > 0.50m)
+                {
+                    log?.LogInformation("PRICE FALLBACK normalized canonical hit item={Item} -> {Canon} ${Price}",
+                        itemName, m.Canonical, m.Price);
+                    return m;
+                }
+            }
+        }
+
+        // 3. NormalizeMenuItemName resolution (uses alias matching, singularization, fuzzy)
+        var resolved = NormalizeMenuItemName(itemName, MenuCatalog);
+        if (resolved != null)
+        {
+            var entry = MenuCatalog.FirstOrDefault(m =>
+                m.Canonical.Equals(resolved, StringComparison.OrdinalIgnoreCase));
+            if (entry != null && entry.Price > 0.50m)
+            {
+                log?.LogInformation("PRICE FALLBACK NormalizeMenuItemName hit item={Item} -> {Canon} ${Price}",
+                    itemName, entry.Canonical, entry.Price);
+                return entry;
+            }
+        }
+
+        // 4. Alias scan: check if itemName matches any alias in demo catalog
+        foreach (var m in MenuCatalog)
+        {
+            foreach (var alias in m.Aliases)
+            {
+                var aliasNorm = StripAccents(alias);
+                var aliasSing = SingularizeWords(aliasNorm);
+                if (stripped == aliasNorm || singularized == aliasNorm
+                    || stripped == aliasSing || singularized == aliasSing)
+                {
+                    if (m.Price > 0.50m)
+                    {
+                        log?.LogInformation("PRICE FALLBACK alias hit item={Item} alias={Alias} -> {Canon} ${Price}",
+                            itemName, alias, m.Canonical, m.Price);
+                        return m;
+                    }
+                }
+            }
+        }
+
+        // 5. Contains/substring match on normalized names (last resort)
+        MenuEntry? bestContains = null;
+        foreach (var m in MenuCatalog)
+        {
+            if (m.Price <= 0.50m) continue;
+            var canonNorm = StripAccents(m.Canonical.ToLowerInvariant());
+            if (canonNorm.Contains(stripped) || stripped.Contains(canonNorm)
+                || canonNorm.Contains(singularized) || singularized.Contains(canonNorm))
+            {
+                if (bestContains == null || m.Price > bestContains.Price)
+                    bestContains = m;
+            }
+        }
+        if (bestContains != null)
+        {
+            log?.LogInformation("PRICE FALLBACK fuzzy/contains hit item={Item} -> {Canon} ${Price}",
+                itemName, bestContains.Canonical, bestContains.Price);
+            return bestContains;
+        }
+
+        log?.LogInformation("PRICE FALLBACK no match for item={Item}, keeping db price", itemName);
+        return null;
+    }
 
     // Catalog: future menu system will load from DB. For now, realistic burger-restaurant demo.
     internal static readonly MenuEntry[] MenuCatalog =

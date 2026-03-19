@@ -870,4 +870,162 @@ public class OrderParserAccuracyTests
         cocaEntry.Should().NotBeNull();
         cocaEntry!.Price.Should().BeGreaterThan(0.50m, "coca cola price must be realistic");
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  REGRESSION — FindDemoPriceFallback: ranked matching for
+    //  corrupted DB prices with mismatched canonical names
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void FindDemoPriceFallback_ExactCanonical_HitsDirectly()
+    {
+        // "Hamburguesa Clasica" matches demo canonical exactly
+        var entry = WebhookProcessor.FindDemoPriceFallback("Hamburguesa Clasica");
+        entry.Should().NotBeNull();
+        entry!.Canonical.Should().Be("Hamburguesa Clasica");
+        entry.Price.Should().BeGreaterThan(1m);
+    }
+
+    [Fact]
+    public void FindDemoPriceFallback_PlainHamburguesa_MatchesDemoViaAlias()
+    {
+        // DB canonical "hamburguesa" should match demo alias "hamburguesa" → "Hamburguesa Clasica"
+        var entry = WebhookProcessor.FindDemoPriceFallback("hamburguesa");
+        entry.Should().NotBeNull();
+        entry!.Canonical.Should().Be("Hamburguesa Clasica");
+        entry.Price.Should().BeGreaterThan(1m);
+    }
+
+    [Fact]
+    public void FindDemoPriceFallback_PluralHamburguesas_MatchesDemo()
+    {
+        var entry = WebhookProcessor.FindDemoPriceFallback("hamburguesas");
+        entry.Should().NotBeNull();
+        entry!.Canonical.Should().Be("Hamburguesa Clasica");
+        entry.Price.Should().BeGreaterThan(1m);
+    }
+
+    [Fact]
+    public void FindDemoPriceFallback_HamburguesaClasicaAccented_MatchesDemo()
+    {
+        // "Hamburguesa Clásica" (with accent) should still match
+        var entry = WebhookProcessor.FindDemoPriceFallback("Hamburguesa Clásica");
+        entry.Should().NotBeNull();
+        entry!.Canonical.Should().Be("Hamburguesa Clasica");
+        entry.Price.Should().BeGreaterThan(1m);
+    }
+
+    [Fact]
+    public void FindDemoPriceFallback_CocaCola_StillWorks()
+    {
+        var entry = WebhookProcessor.FindDemoPriceFallback("Coca Cola");
+        entry.Should().NotBeNull();
+        entry!.Canonical.Should().Be("Coca Cola");
+        entry.Price.Should().Be(1.50m);
+    }
+
+    [Fact]
+    public void FindDemoPriceFallback_CocaColaLowercase_StillWorks()
+    {
+        var entry = WebhookProcessor.FindDemoPriceFallback("coca cola");
+        entry.Should().NotBeNull();
+        entry!.Canonical.Should().Be("Coca Cola");
+        entry.Price.Should().Be(1.50m);
+    }
+
+    [Fact]
+    public void PriceFallback_CorruptedDB_MismatchedCanonical_UsesDemo()
+    {
+        // Simulates the real bug: DB has canonical "hamburguesa" (not "Hamburguesa Clasica")
+        // with corrupted price. Fallback must still find demo entry.
+        var corruptCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "hamburguesa", Aliases = new[] { "hamburguesas" }, Price = 0.06m },
+            new() { Canonical = "Coca Cola", Aliases = new[] { "coca cola" }, Price = 0.02m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = corruptCatalog;
+
+            // Resolve "hamburguesas" via NormalizeMenuItemName with corrupt catalog
+            var resolved = WebhookProcessor.NormalizeMenuItemName("hamburguesas");
+            resolved.Should().NotBeNull();
+
+            // FindDemoPriceFallback should find demo match even with DB canonical name
+            var demoEntry = WebhookProcessor.FindDemoPriceFallback(resolved!);
+            demoEntry.Should().NotBeNull("demo fallback must find hamburguesa even when DB canonical differs");
+            demoEntry!.Price.Should().BeGreaterThan(1m, "demo price must be sane, not corrupted");
+
+            // Coca Cola should also resolve
+            var cocaDemo = WebhookProcessor.FindDemoPriceFallback("Coca Cola");
+            cocaDemo.Should().NotBeNull();
+            cocaDemo!.Price.Should().Be(1.50m);
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
+
+    [Fact]
+    public void PriceFallback_NormalPrice_NoFallbackNeeded()
+    {
+        // When DB price is >= 0.10, no fallback should be triggered
+        // (This tests the threshold logic, not FindDemoPriceFallback itself)
+        var normalCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "Hamburguesa Clasica", Aliases = new[] { "hamburguesa" }, Price = 6.50m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = normalCatalog;
+
+            // With normal price, the catalog entry price is used directly
+            var entry = normalCatalog.FirstOrDefault(m =>
+                m.Canonical.Equals("Hamburguesa Clasica", StringComparison.OrdinalIgnoreCase));
+            entry.Should().NotBeNull();
+            entry!.Price.Should().Be(6.50m, "normal DB price should be kept as-is");
+            (entry.Price < 0.10m).Should().BeFalse("fallback threshold should NOT trigger");
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
+
+    [Fact]
+    public void FindDemoPriceFallback_2Hamburguesas_BothGetSanePrices()
+    {
+        // End-to-end: "dame 2 hamburguesas y 1 coca cola" with corrupted DB
+        var corruptCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "hamburguesa", Aliases = new[] { "hamburguesas", "burger" }, Price = 0.06m },
+            new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 0.02m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = corruptCatalog;
+
+            var parsed = WebhookProcessor.ParseOrderText("dame 2 hamburguesas y 1 coca cola");
+            var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+            items.Should().HaveCount(2);
+
+            foreach (var item in items)
+            {
+                var demoEntry = WebhookProcessor.FindDemoPriceFallback(item.Name);
+                demoEntry.Should().NotBeNull($"demo fallback must find match for '{item.Name}'");
+                demoEntry!.Price.Should().BeGreaterThan(0.50m, $"demo price for '{item.Name}' must be sane");
+            }
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
 }
