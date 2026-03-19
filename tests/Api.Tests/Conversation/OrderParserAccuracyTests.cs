@@ -1028,4 +1028,198 @@ public class OrderParserAccuracyTests
             WebhookProcessor.ActiveCatalog = savedCatalog;
         }
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  REGRESSION — Incomplete DB catalog: items missing from DB
+    //  must still parse via demo catalog fallback in
+    //  NormalizeMenuItemName
+    // ═══════════════════════════════════════════════════════════
+
+    [Fact]
+    public void IncompleteDBCatalog_MeVasADar_AllThreeItemsParsed()
+    {
+        // Simulate production DB that only has coca cola, NOT perros or papas
+        var incompleteCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "coca cola", Aliases = new[] { "cocacola", "coca" }, Price = 0.02m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+
+            var input = "me vas a dar 3 perros clasicos 2 papas grandes y una cocacola";
+            var parsed = WebhookProcessor.ParseOrderText(input);
+            var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+            items.Should().HaveCount(3, "all three items must parse even with incomplete DB catalog");
+            items.Should().Contain(p => p.Name == "Perro Clasico" && p.Quantity == 3);
+            items.Should().Contain(p => p.Name == "Papas Grandes" && p.Quantity == 2);
+            items.Should().Contain(p => p.Quantity == 1 && (p.Name == "Coca Cola" || p.Name == "coca cola"));
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
+
+    [Fact]
+    public void IncompleteDBCatalog_3PerrosClasicos_Parsed()
+    {
+        var incompleteCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 1.50m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+
+            var parsed = WebhookProcessor.ParseOrderText("3 perros clasicos");
+            var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+            items.Should().HaveCount(1);
+            items[0].Name.Should().Be("Perro Clasico");
+            items[0].Quantity.Should().Be(3);
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
+
+    [Fact]
+    public void IncompleteDBCatalog_2PapasGrandes_Parsed()
+    {
+        var incompleteCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 1.50m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+
+            var parsed = WebhookProcessor.ParseOrderText("2 papas grandes");
+            var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+            items.Should().HaveCount(1);
+            items[0].Name.Should().Be("Papas Grandes");
+            items[0].Quantity.Should().Be(2);
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
+
+    [Fact]
+    public void IncompleteDBCatalog_UnaCocacola_Parsed()
+    {
+        var incompleteCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 1.50m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+
+            var parsed = WebhookProcessor.ParseOrderText("una cocacola");
+            var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+            items.Should().HaveCount(1);
+            items[0].Quantity.Should().Be(1);
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
+
+    [Fact]
+    public void IncompleteDBCatalog_Quiero_MultiItem_AllParsed()
+    {
+        var incompleteCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 0.02m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+
+            var parsed = WebhookProcessor.ParseOrderText("quiero 3 perros clasicos 2 papas grandes y una cocacola");
+            var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+            items.Should().HaveCount(3, "quiero prefix must not block multi-item parsing");
+            items.Should().Contain(p => p.Name == "Perro Clasico" && p.Quantity == 3);
+            items.Should().Contain(p => p.Name == "Papas Grandes" && p.Quantity == 2);
+            items.Should().Contain(p => p.Quantity == 1);
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
+
+    [Fact]
+    public void IncompleteDBCatalog_Dame_WithCommas_AllParsed()
+    {
+        var incompleteCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "coca cola", Aliases = new[] { "cocacola", "coca cola" }, Price = 0.02m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+
+            var parsed = WebhookProcessor.ParseOrderText("dame 3 perros clasicos, 2 papas grandes y una cocacola");
+            var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+            items.Should().HaveCount(3, "comma-separated items must all parse");
+            items.Should().Contain(p => p.Name == "Perro Clasico" && p.Quantity == 3);
+            items.Should().Contain(p => p.Name == "Papas Grandes" && p.Quantity == 2);
+            items.Should().Contain(p => p.Quantity == 1);
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
+
+    [Fact]
+    public void IncompleteDBCatalog_1HamburguesaClasica_Parsed()
+    {
+        // Verify hamburguesa also works with incomplete DB
+        var incompleteCatalog = new WebhookProcessor.MenuEntry[]
+        {
+            new() { Canonical = "hamburguesa", Aliases = Array.Empty<string>(), Price = 0.06m },
+        };
+
+        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        try
+        {
+            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+
+            var parsed = WebhookProcessor.ParseOrderText("1 hamburguesa clasica");
+            var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+
+            items.Should().HaveCount(1);
+            // Should resolve to either DB canonical or demo canonical
+            items[0].Name.Should().Contain("amburguesa");
+            items[0].Quantity.Should().Be(1);
+        }
+        finally
+        {
+            WebhookProcessor.ActiveCatalog = savedCatalog;
+        }
+    }
 }

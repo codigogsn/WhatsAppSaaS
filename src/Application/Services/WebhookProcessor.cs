@@ -3625,7 +3625,21 @@ public sealed class WebhookProcessor : IWebhookProcessor
     }
 
     internal static string? NormalizeMenuItemName(string rawItem)
-        => NormalizeMenuItemName(rawItem, ActiveCatalog ?? MenuCatalog);
+    {
+        var result = NormalizeMenuItemName(rawItem, ActiveCatalog ?? MenuCatalog);
+        // If active (DB) catalog couldn't resolve the item, try demo catalog as fallback.
+        // This handles production DBs with incomplete menus — common items like perros,
+        // papas, etc. can still be parsed even if the DB doesn't have matching entries.
+        if (result == null && ActiveCatalog != null)
+        {
+            result = NormalizeMenuItemName(rawItem, MenuCatalog);
+            if (result != null)
+                _staticLogger?.LogInformation(
+                    "NormalizeMenuItemName DB catalog miss, demo fallback hit: raw={Raw} -> {Canon}",
+                    rawItem, result);
+        }
+        return result;
+    }
 
     internal static string? NormalizeMenuItemName(string rawItem, MenuEntry[] catalog)
     {
