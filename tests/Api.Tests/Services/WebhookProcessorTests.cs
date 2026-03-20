@@ -1633,7 +1633,7 @@ public class WebhookProcessorTests
 
         WebhookProcessor.TryParseCheckoutForm(text, out var form).Should().BeTrue();
 
-        form.CustomerName.Should().Be("adal");
+        form.CustomerName.Should().Be("Adal");
         form.CustomerIdNumber.Should().Be("27302670");
         form.CustomerPhone.Should().Be("04242309349");
         form.Address.Should().Be("alto hatillo");
@@ -1723,7 +1723,7 @@ public class WebhookProcessorTests
             CreateTextMessagePayload("5511999999999", "adal\n27302670\n04242309349\nalto hatillo\npago movil"),
             _testBusiness);
 
-        state.CustomerName.Should().Be("adal");
+        state.CustomerName.Should().Be("Adal");
         state.CustomerIdNumber.Should().Be("27302670");
         state.CustomerPhone.Should().Be("04242309349");
         state.Address.Should().Be("alto hatillo");

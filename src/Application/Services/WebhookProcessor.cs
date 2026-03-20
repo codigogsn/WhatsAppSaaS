@@ -712,7 +712,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             message.From, businessContext.BusinessId, cancellationToken);
 
                         if (customer is not null && !string.IsNullOrWhiteSpace(customer.Name))
-                            state.CustomerName = customer.Name;
+                            state.CustomerName = NormalizeDisplayName(customer.Name);
 
                         await SendGreetingSequenceAsync(message.From, phoneNumberId, businessContext, conversationId, customer, cancellationToken);
 
@@ -1392,7 +1392,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Message 1: Welcome — personalized for returning customers
         var greeting = customer?.OrdersCount > 0 && !string.IsNullOrWhiteSpace(customer.Name)
-            ? Msg.ReturningGreeting(businessName, customer.Name)
+            ? Msg.ReturningGreeting(businessName, NormalizeDisplayName(customer.Name))
             : !string.IsNullOrWhiteSpace(biz.Greeting)
                 ? biz.Greeting
                 : Msg.DefaultGreeting(businessName);
@@ -2167,7 +2167,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             if (line.StartsWith("Nombre:", StringComparison.OrdinalIgnoreCase) ||
                 line.StartsWith("Name:", StringComparison.OrdinalIgnoreCase))
             {
-                state.CustomerName = line[(line.IndexOf(':') + 1)..].Trim();
+                state.CustomerName = NormalizeDisplayName(line[(line.IndexOf(':') + 1)..].Trim());
                 parsed = true;
             }
             else if (line.StartsWith("Teléfono:", StringComparison.OrdinalIgnoreCase) ||
@@ -2194,7 +2194,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             if (lines.Length >= 2)
             {
                 // Two+ lines: Name / Phone / Address
-                state.CustomerName = lines[0];
+                state.CustomerName = NormalizeDisplayName(lines[0]);
                 state.CustomerPhone = lines[1];
                 if (lines.Length >= 3) state.Address = lines[2];
                 parsed = true;
@@ -2226,6 +2226,35 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     internal static string Normalize(string input)
         => input.Trim().ToLowerInvariant();
+
+    /// <summary>
+    /// Normalizes a customer display name for WhatsApp rendering:
+    /// strips decorative chars (* etc.), collapses spaces, title-cases each word.
+    /// "GONZALO" → "Gonzalo", "* GONZALO" → "Gonzalo", "gOnZaLo" → "Gonzalo"
+    /// </summary>
+    internal static string NormalizeDisplayName(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return name;
+
+        // Strip leading/trailing decorative characters and whitespace
+        var cleaned = name.Trim().TrimStart('*', '#', '-', '_', '~').TrimEnd('*', '#', '-', '_', '~').Trim();
+
+        // Collapse repeated internal spaces
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+", " ");
+
+        if (string.IsNullOrWhiteSpace(cleaned)) return name.Trim();
+
+        // Title-case each word: first letter upper, rest lower
+        var words = cleaned.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        for (var i = 0; i < words.Length; i++)
+        {
+            if (words[i].Length == 1)
+                words[i] = words[i].ToUpperInvariant();
+            else
+                words[i] = char.ToUpperInvariant(words[i][0]) + words[i][1..].ToLowerInvariant();
+        }
+        return string.Join(" ", words);
+    }
 
     private static string StripAccents(string input)
     {
@@ -3904,7 +3933,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return null;
         }
 
-        form.CustomerName = CleanFieldValue(GetLabeledValue("nombre"));
+        var rawName = CleanFieldValue(GetLabeledValue("nombre"));
+        form.CustomerName = rawName != null ? NormalizeDisplayName(rawName) : null;
         form.CustomerIdNumber = CleanFieldValue(GetLabeledValue("cedula"));
         form.CustomerPhone = CleanFieldValue(GetLabeledValue("telefono"));
         form.Address = CleanFieldValue(GetLabeledValue("direccion"));
@@ -3988,7 +4018,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
             // Name detection: first remaining human-looking text (alpha, short-ish)
             if (form.CustomerName is null && Regex.IsMatch(clean, @"^[A-Za-zÀ-ÿ\s\.\-']+$") && clean.Length <= 80)
             {
-                form.CustomerName = CleanFieldValue(clean);
+                var cleanedName = CleanFieldValue(clean);
+                form.CustomerName = cleanedName != null ? NormalizeDisplayName(cleanedName) : null;
                 continue;
             }
 

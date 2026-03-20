@@ -1364,4 +1364,41 @@ public class RealWorldOrderingConversationTests
         total.Should().Be(58.50m);
         reply.Body.Should().Contain("$58.50");
     }
+
+    // ═══════════════════════════════════════════════════════════
+    //  REGRESSION — Customer name normalization
+    // ═══════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("GONZALO", "Gonzalo")]
+    [InlineData("* GONZALO", "Gonzalo")]
+    [InlineData("gOnZaLo", "Gonzalo")]
+    [InlineData("  *gonzalo  ", "Gonzalo")]
+    [InlineData("Gonzalo", "Gonzalo")]
+    [InlineData("MARIA JOSE", "Maria Jose")]
+    [InlineData("*  MARIA  JOSE *", "Maria Jose")]
+    [InlineData("juan carlos", "Juan Carlos")]
+    public void NormalizeDisplayName_VariousCases(string input, string expected)
+    {
+        WebhookProcessor.NormalizeDisplayName(input).Should().Be(expected);
+    }
+
+    [Fact]
+    public void ReturningGreeting_NormalizedName_NoAsterisksOrAllCaps()
+    {
+        var greeting = Msg.ReturningGreeting("Mi Restaurant",
+            WebhookProcessor.NormalizeDisplayName("* GONZALO"));
+
+        greeting.Should().Contain("Gonzalo");
+        greeting.Should().NotContain("GONZALO");
+        // The bold markers *name* should wrap "Gonzalo", not "* GONZALO"
+        greeting.Should().Contain("*Gonzalo*");
+    }
+
+    [Fact]
+    public void NormalizeDisplayName_EmptyOrWhitespace_ReturnsSafely()
+    {
+        WebhookProcessor.NormalizeDisplayName("").Should().Be("");
+        WebhookProcessor.NormalizeDisplayName("   ").Should().Be("   ");
+    }
 }
