@@ -167,10 +167,9 @@ public class AdminHandoffsController : ControllerBase
         var customerPhone = parts[0];
         var phoneNumberId = parts[1];
 
-        // Resolve business access token
-        var business = entity.BusinessId.HasValue
-            ? await _db.Businesses.AsNoTracking().FirstOrDefaultAsync(b => b.Id == entity.BusinessId.Value, ct)
-            : await _db.Businesses.AsNoTracking().FirstOrDefaultAsync(b => b.PhoneNumberId == phoneNumberId, ct);
+        // Resolve business by PhoneNumberId (avoids text=uuid cast issue on legacy schemas)
+        var business = await _db.Businesses.AsNoTracking()
+            .FirstOrDefaultAsync(b => b.PhoneNumberId == phoneNumberId, ct);
 
         var accessToken = business?.AccessToken
             ?? Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN")
