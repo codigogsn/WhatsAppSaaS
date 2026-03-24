@@ -177,6 +177,97 @@
     }
     .key { width: 280px; max-width: 100%; }
 
+    /* ═══ Hero KPI Layout ═══ */
+    .hero-kpi {
+      display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 16px;
+      margin-bottom: 20px;
+    }
+    .hero-panel {
+      background: var(--card-kpi, var(--card)); border-radius: var(--radius);
+      padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,.12);
+      display: flex; flex-direction: column; gap: 20px;
+    }
+    .hero-panel-title {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--muted); padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-light);
+    }
+    .hero-stat { display: flex; flex-direction: column; gap: 4px; }
+    .hero-stat .label {
+      font-size: 11px; color: var(--text-secondary); text-transform: uppercase;
+      letter-spacing: .5px; font-weight: 600;
+    }
+    .hero-stat .value {
+      font-size: clamp(22px, 2.5vw, 36px); font-weight: 700; color: var(--text);
+      line-height: 1.1; letter-spacing: -.03em; white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .hero-stat-primary .value {
+      font-size: clamp(28px, 3.5vw, 44px); font-weight: 800;
+    }
+    .hero-mini-grid {
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 18px 16px;
+    }
+    .hero-alert-warning { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--warning-bg); }
+    .hero-alert-warning .label { color: var(--warning) !important; }
+    .hero-alert-warning .value { color: var(--warning) !important; }
+    .hero-alert-danger { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--danger-bg); }
+    .hero-alert-danger .label { color: var(--danger) !important; }
+    .hero-alert-danger .value { color: var(--danger) !important; }
+
+    /* ═══ Order Status Strip ═══ */
+    .status-strip {
+      display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 24px;
+      background: var(--card); border-radius: var(--radius);
+      padding: 14px 20px; box-shadow: var(--shadow);
+    }
+    .status-chip {
+      flex: 1; min-width: 80px; text-align: center;
+      padding: 8px 4px; border-radius: var(--radius-sm);
+    }
+    .status-chip-label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
+      font-weight: 600; color: var(--text-secondary); margin-bottom: 4px;
+    }
+    .status-chip-value {
+      font-size: 22px; font-weight: 700; color: var(--text);
+      font-variant-numeric: tabular-nums; line-height: 1.1;
+    }
+
+    /* ═══ Section Panels ═══ */
+    .section-panel {
+      background: var(--card); border-radius: var(--radius);
+      box-shadow: var(--shadow); margin-bottom: 20px; overflow: hidden;
+    }
+    .section-panel summary {
+      cursor: pointer; font-weight: 600; font-size: 13px; padding: 16px 24px;
+      color: var(--text-secondary); background: var(--card); border: none;
+      border-radius: var(--radius); list-style: none;
+      display: flex; align-items: center; gap: 10px;
+      transition: all var(--transition);
+    }
+    .section-panel summary:hover { background: var(--surface-2); }
+    .section-panel summary::before { content: '▸'; color: var(--muted); transition: transform .2s; font-size: 12px; }
+    .section-panel[open] summary::before { transform: rotate(90deg); }
+    .section-panel summary::-webkit-details-marker { display: none; }
+    .section-panel[open] > *:not(summary) { padding: 0 24px 24px; }
+    .section-badge {
+      font-size: 11px; font-weight: 700; padding: 2px 10px;
+      border-radius: 10px; color: #fff;
+    }
+    .section-badge-danger { background: var(--danger); }
+    .handoff-panel summary { color: var(--danger); }
+
+    @media (max-width: 1024px) {
+      .hero-kpi { grid-template-columns: 1fr 1fr; }
+      .hero-alerts { grid-column: 1 / -1; }
+      .hero-mini-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 640px) {
+      .hero-kpi { grid-template-columns: 1fr; }
+      .hero-mini-grid { grid-template-columns: 1fr 1fr; }
+    }
+
     /* ═══ Status pills — subtle, no borders ═══ */
     .pill { display:inline-block; padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: .2px; border: none; }
     .pill-Pending { background: rgba(255,159,10,.12); color: #CC7A00; }
@@ -412,29 +503,7 @@
     .biz-selector-area select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
     .selected-biz-name { font-weight: 600; font-size: 13px; color: var(--accent); }
 
-    /* ═══ Analytics section ═══ */
-    #extAnalytics { margin-bottom: 20px; }
-    #extAnalytics summary {
-      cursor: pointer; font-weight: 600; font-size: 13px; padding: 14px 20px;
-      color: var(--text-secondary); background: var(--surface); border: none;
-      border-radius: var(--radius); list-style: none; display: flex; align-items: center; gap: 8px;
-      box-shadow: var(--shadow); transition: all var(--transition);
-    }
-    #extAnalytics summary:hover { background: var(--surface-2); }
-    #extAnalytics summary::before { content: '▸'; color: var(--muted); transition: transform .2s; }
-    #extAnalytics[open] summary::before { transform: rotate(90deg); }
-    #extAnalytics summary::-webkit-details-marker { display: none; }
-
-    /* ═══ Handoff inbox ═══ */
-    #handoffInbox { margin-bottom: 20px; }
-    #handoffInbox summary {
-      cursor: pointer; font-weight: 600; font-size: 13px; padding: 14px 20px;
-      color: var(--danger); background: var(--surface); border: none;
-      border-radius: var(--radius); list-style: none; display: flex; align-items: center; gap: 8px;
-      box-shadow: var(--shadow); transition: all var(--transition);
-    }
-    #handoffInbox summary:hover { background: var(--surface-2); }
-    #handoffInbox summary::-webkit-details-marker { display: none; }
+    /* Analytics & handoff now use .section-panel styles */
 
     /* ═══ Responsive ═══ */
     @media (max-width: 768px) {
@@ -735,66 +804,82 @@
     </div>
   </div>
 
-  <!-- KPIs -->
-  <div class="kpi">
-    <div class="card">
-      <div class="label">Pedidos Hoy</div>
-      <div class="value" id="kpiOrdersToday">-</div>
+  <!-- Hero KPI Area -->
+  <div class="hero-kpi">
+    <!-- LEFT: Revenue focus -->
+    <div class="hero-panel hero-revenue">
+      <div class="hero-panel-title">Revenue</div>
+      <div class="hero-stat hero-stat-primary">
+        <div class="label">Ventas Hoy</div>
+        <div class="value" id="kpiRevenueToday">-</div>
+      </div>
+      <div class="hero-stat">
+        <div class="label">Ventas Totales</div>
+        <div class="value" id="kpiTotalRevenue">-</div>
+      </div>
     </div>
-    <div class="card">
-      <div class="label">Ventas Hoy</div>
-      <div class="value" id="kpiRevenueToday">-</div>
+
+    <!-- CENTER: Business performance -->
+    <div class="hero-panel hero-performance">
+      <div class="hero-panel-title">Performance</div>
+      <div class="hero-mini-grid">
+        <div class="hero-stat">
+          <div class="label">Pedidos Hoy</div>
+          <div class="value" id="kpiOrdersToday">-</div>
+        </div>
+        <div class="hero-stat">
+          <div class="label">Pedidos (Total)</div>
+          <div class="value" id="kpiOrdersTotal">-</div>
+        </div>
+        <div class="hero-stat">
+          <div class="label">Clientes</div>
+          <div class="value" id="kpiUniqueCustomers">-</div>
+        </div>
+        <div class="hero-stat">
+          <div class="label">Ticket Prom.</div>
+          <div class="value" id="kpiAvgTicket">-</div>
+        </div>
+        <div class="hero-stat">
+          <div class="label">Semana</div>
+          <div class="value" id="kpiOrdersWeek">-</div>
+        </div>
+        <div class="hero-stat">
+          <div class="label">% Recurrentes</div>
+          <div class="value" id="kpiReturning">-</div>
+        </div>
+      </div>
     </div>
-    <div class="card">
-      <div class="label">Pedidos (Total)</div>
-      <div class="value" id="kpiOrdersTotal">-</div>
-    </div>
-    <div class="card">
-      <div class="label">Clientes</div>
-      <div class="value" id="kpiUniqueCustomers">-</div>
-    </div>
-    <div class="card">
-      <div class="label">Ventas Totales</div>
-      <div class="value" id="kpiTotalRevenue">-</div>
-    </div>
-    <div class="card">
-      <div class="label">Ticket Prom.</div>
-      <div class="value" id="kpiAvgTicket">-</div>
-    </div>
-    <div class="card">
-      <div class="label">Semana</div>
-      <div class="value" id="kpiOrdersWeek">-</div>
-    </div>
-    <div class="card">
-      <div class="label">% Recurrentes</div>
-      <div class="value" id="kpiReturning">-</div>
-    </div>
-    <div class="card">
-      <div class="label">Top Producto</div>
-      <div class="value" id="kpiTopItem" style="font-size:13px;">-</div>
-    </div>
-    <div class="card" style="border-left:3px solid var(--warning);">
-      <div class="label" style="color:var(--warning);">Pagos Pendientes</div>
-      <div class="value" style="color:var(--warning);" id="kpiPaymentsPending">0</div>
-    </div>
-    <div class="card" style="border-left:3px solid var(--danger);cursor:pointer;" onclick="document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
-      <div class="label" style="color:var(--danger);">Necesitan Humano</div>
-      <div class="value" style="color:var(--danger);" id="kpiHandoffs">0</div>
+
+    <!-- RIGHT: Operational alerts -->
+    <div class="hero-panel hero-alerts">
+      <div class="hero-panel-title">Alerts</div>
+      <div class="hero-stat hero-alert-warning">
+        <div class="label">Pagos Pendientes</div>
+        <div class="value" id="kpiPaymentsPending">0</div>
+      </div>
+      <div class="hero-stat hero-alert-danger" style="cursor:pointer;" onclick="document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
+        <div class="label">Necesitan Humano</div>
+        <div class="value" id="kpiHandoffs">0</div>
+      </div>
+      <div class="hero-stat">
+        <div class="label">Top Producto</div>
+        <div class="value" id="kpiTopItem" style="font-size:13px;">-</div>
+      </div>
     </div>
   </div>
 
-  <!-- Status counters -->
-  <div class="kpi">
-    <div class="card"><div class="label">Cargados</div><div class="value" id="kpiTotal">0</div></div>
-    <div class="card"><div class="label" style="color:var(--muted);">Pending</div><div class="value" style="color:var(--muted);" id="kpiPending">0</div></div>
-    <div class="card"><div class="label" style="color:var(--warning);">Preparing</div><div class="value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
-    <div class="card"><div class="label" style="color:var(--accent);">En Camino</div><div class="value" style="color:var(--accent);" id="kpiOut">0</div></div>
-    <div class="card"><div class="label" style="color:var(--success);">Completed</div><div class="value" style="color:var(--success);" id="kpiCompleted">0</div></div>
-    <div class="card"><div class="label" style="color:var(--danger);">Cancelled</div><div class="value" style="color:var(--danger);" id="kpiCancelled">0</div></div>
+  <!-- Order Status Strip -->
+  <div class="status-strip">
+    <div class="status-chip"><div class="status-chip-label">Cargados</div><div class="status-chip-value" id="kpiTotal">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pending</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparing</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--accent);">En Camino</div><div class="status-chip-value" style="color:var(--accent);" id="kpiOut">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--success);">Completed</div><div class="status-chip-value" style="color:var(--success);" id="kpiCompleted">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--danger);">Cancelled</div><div class="status-chip-value" style="color:var(--danger);" id="kpiCancelled">0</div></div>
   </div>
 
   <!-- Extended Analytics -->
-  <details id="extAnalytics" style="margin-bottom:16px;">
+  <details id="extAnalytics" class="section-panel">
     <summary>Analíticas Avanzadas</summary>
 
     <!-- Row A: Operations -->
@@ -857,11 +942,11 @@
   </div>
 
   <!-- Human Handoff Inbox -->
-  <details id="handoffInbox" style="margin-bottom:16px;">
-    <summary style="font-weight:600;color:var(--danger);cursor:pointer;">
-      Atencion Humana <span id="handoffBadge" style="background:var(--danger);color:#fff;border-radius:10px;padding:1px 8px;font-size:12px;margin-left:6px;">0</span>
+  <details id="handoffInbox" class="section-panel handoff-panel">
+    <summary>
+      Atencion Humana <span id="handoffBadge" class="section-badge section-badge-danger">0</span>
     </summary>
-    <div id="handoffList" style="margin-top:10px;display:flex;flex-direction:column;gap:10px;"></div>
+    <div id="handoffList" style="margin-top:14px;display:flex;flex-direction:column;gap:10px;"></div>
   </details>
 
   <!-- Filters -->
