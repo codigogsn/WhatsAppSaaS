@@ -50,10 +50,11 @@
       --bg: #000000;
       --surface: #1C1C1E;
       --surface-2: #2C2C2E;
-      --card: #1C1C1E;
-      --text: #F5F5F7;
-      --text-secondary: #AEAEB2;
-      --muted: #8E8E93;
+      --card: #222224;
+      --card-kpi: linear-gradient(to bottom, #2A2A2C, #1F1F21);
+      --text: #FFFFFF;
+      --text-secondary: rgba(255,255,255,.78);
+      --muted: #98989D;
       --border: #38383A;
       --border-light: #2C2C2E;
       --accent: #0A84FF;
@@ -149,21 +150,21 @@
     }
     .nav-bar label { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .3px; }
 
-    /* ═══ Cards / KPI — soft, borderless ═══ */
+    /* ═══ Cards / KPI ═══ */
     .card {
       background: var(--card); border: none;
-      border-radius: var(--radius); padding: 18px 22px;
+      border-radius: var(--radius); padding: 22px 24px;
       box-shadow: var(--shadow);
       transition: all var(--transition);
     }
     .card:hover { box-shadow: var(--shadow-md); }
     .kpi { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
-    .kpi .card { min-width: 130px; flex: 1; }
+    .kpi .card { min-width: 130px; flex: 1; background: var(--card-kpi, var(--card)); box-shadow: 0 4px 20px rgba(0,0,0,.12); }
     .kpi .card .label {
-      font-size: 11px; color: var(--text-secondary); text-transform: uppercase;
-      letter-spacing: .6px; font-weight: 600; margin-bottom: 8px;
+      font-size: 11.5px; color: var(--text-secondary); text-transform: uppercase;
+      letter-spacing: .5px; font-weight: 600; margin-bottom: 10px;
     }
-    .kpi .card .value { font-size: 32px; font-weight: 800; color: var(--text); line-height: 1.1; letter-spacing: -.03em; }
+    .kpi .card .value { font-size: 36px; font-weight: 700; color: var(--text); line-height: 1.05; letter-spacing: -.03em; }
     .key { width: 280px; max-width: 100%; }
 
     /* ═══ Status pills — subtle, no borders ═══ */
@@ -364,7 +365,7 @@
     button.primary:hover { box-shadow: 0 4px 16px var(--accent-glow); }
 
     .card { transition: all .2s ease; }
-    .kpi .card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+    .kpi .card:hover { transform: translateY(-2px); box-shadow: 0 8px 32px rgba(0,0,0,.18); }
 
     @keyframes orderSlideIn {
       from { opacity: 0; transform: translateY(-4px); }
