@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -22,6 +23,9 @@ public sealed class CustomerService
         // Clave lógica (E.164): hoy usamos Order.From tal cual llega de WhatsApp.
         // Si luego quieres normalizar, lo hacemos sin romper (pero hoy no nos desviamos).
         var phone = order.From;
+        var normalizedName = !string.IsNullOrWhiteSpace(order.CustomerName)
+            ? WebhookProcessor.NormalizeDisplayName(order.CustomerName)
+            : order.CustomerName;
 
         var customer = await _db.Customers
             .FirstOrDefaultAsync(c => c.BusinessId == null && c.PhoneE164 == phone, ct);
@@ -34,7 +38,7 @@ public sealed class CustomerService
             {
                 BusinessId = null,
                 PhoneE164 = phone,
-                Name = order.CustomerName,
+                Name = normalizedName,
                 TotalSpent = 0m,
                 OrdersCount = 0,
                 FirstSeenAtUtc = now,
@@ -50,8 +54,11 @@ public sealed class CustomerService
             customer.LastSeenAtUtc = now;
 
             // Mejora: si antes estaba null y ya llegó, lo guardamos
-            if (string.IsNullOrWhiteSpace(customer.Name) && !string.IsNullOrWhiteSpace(order.CustomerName))
-                customer.Name = order.CustomerName;
+            if (string.IsNullOrWhiteSpace(customer.Name) && !string.IsNullOrWhiteSpace(normalizedName))
+                customer.Name = normalizedName;
+            // Re-normalize existing name if it has formatting noise
+            else if (!string.IsNullOrWhiteSpace(customer.Name))
+                customer.Name = WebhookProcessor.NormalizeDisplayName(customer.Name);
 
             await _db.SaveChangesAsync(ct);
         }

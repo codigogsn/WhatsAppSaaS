@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace Api.Controllers;
@@ -126,7 +127,7 @@ public class AdminCustomersController : ControllerBase
                 customers.Add(new
                 {
                     phone,
-                    name = name ?? "N/A",
+                    name = !string.IsNullOrWhiteSpace(name) ? WebhookProcessor.NormalizeDisplayName(name) : "N/A",
                     ordersCount,
                     totalSpent,
                     lastPurchase,
@@ -171,6 +172,86 @@ public class AdminCustomersController : ControllerBase
         p.ParameterName = name;
         p.Value = value;
         cmd.Parameters.Add(p);
+    }
+
+    /// <summary>
+    /// POST /api/admin/customers/backfill-names
+    /// Normalizes customer names in both Customers and Orders tables.
+    /// Safe: only touches Name/CustomerName columns, formatting and casing only.
+    /// </summary>
+    [HttpPost("backfill-names")]
+    public async Task<IActionResult> BackfillNames(CancellationToken ct)
+    {
+        if (!IsAdmin()) return Unauthorized();
+
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
+
+            // Phase 1: Normalize Customers.Name
+            int customersFixed = 0;
+            using (var readCmd = conn.CreateCommand())
+            {
+                readCmd.CommandText = """SELECT "Id", "Name" FROM "Customers" WHERE "Name" IS NOT NULL AND "Name" != ''""";
+                var updates = new List<(string id, string normalizedName)>();
+                using var reader = await readCmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    var id = reader["Id"]?.ToString() ?? "";
+                    var raw = reader["Name"]?.ToString() ?? "";
+                    var normalized = WebhookProcessor.NormalizeDisplayName(raw);
+                    if (normalized != raw)
+                        updates.Add((id, normalized));
+                }
+                reader.Close();
+
+                foreach (var (id, normalizedName) in updates)
+                {
+                    using var upCmd = conn.CreateCommand();
+                    upCmd.CommandText = """UPDATE "Customers" SET "Name" = @name WHERE CAST("Id" AS TEXT) = @id""";
+                    AddP(upCmd, "name", normalizedName);
+                    AddP(upCmd, "id", id);
+                    await upCmd.ExecuteNonQueryAsync(ct);
+                    customersFixed++;
+                }
+            }
+
+            // Phase 2: Normalize Orders.CustomerName
+            int ordersFixed = 0;
+            using (var readCmd = conn.CreateCommand())
+            {
+                readCmd.CommandText = """SELECT "Id", "CustomerName" FROM "Orders" WHERE "CustomerName" IS NOT NULL AND "CustomerName" != ''""";
+                var updates = new List<(string id, string normalizedName)>();
+                using var reader = await readCmd.ExecuteReaderAsync(ct);
+                while (await reader.ReadAsync(ct))
+                {
+                    var id = reader["Id"]?.ToString() ?? "";
+                    var raw = reader["CustomerName"]?.ToString() ?? "";
+                    var normalized = WebhookProcessor.NormalizeDisplayName(raw);
+                    if (normalized != raw)
+                        updates.Add((id, normalized));
+                }
+                reader.Close();
+
+                foreach (var (id, normalizedName) in updates)
+                {
+                    using var upCmd = conn.CreateCommand();
+                    upCmd.CommandText = """UPDATE "Orders" SET "CustomerName" = @name WHERE CAST("Id" AS TEXT) = @id""";
+                    AddP(upCmd, "name", normalizedName);
+                    AddP(upCmd, "id", id);
+                    await upCmd.ExecuteNonQueryAsync(ct);
+                    ordersFixed++;
+                }
+            }
+
+            return Ok(new { customersFixed, ordersFixed });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"Backfill failed: {ex.GetType().Name}: {ex.Message}" });
+        }
     }
 
     private bool IsAdmin()

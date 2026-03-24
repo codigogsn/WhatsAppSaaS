@@ -2232,7 +2232,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     /// strips decorative chars (* etc.), collapses spaces, title-cases each word.
     /// "GONZALO" → "Gonzalo", "* GONZALO" → "Gonzalo", "gOnZaLo" → "Gonzalo"
     /// </summary>
-    internal static string NormalizeDisplayName(string name)
+    public static string NormalizeDisplayName(string name)
     {
         if (string.IsNullOrWhiteSpace(name)) return name;
 

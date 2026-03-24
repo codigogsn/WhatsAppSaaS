@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using WhatsAppSaaS.Application.Interfaces;
+using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -196,7 +197,7 @@ public sealed class OrdersController : ControllerBase
         {
             ["id"] = Col("Id"),
             ["status"] = Col("Status"),
-            ["customerName"] = Col("CustomerName"),
+            ["customerName"] = !string.IsNullOrWhiteSpace(Col("CustomerName")) ? WebhookProcessor.NormalizeDisplayName(Col("CustomerName")!) : Col("CustomerName"),
             ["customerIdNumber"] = Col("CustomerIdNumber"),
             ["customerPhone"] = Col("CustomerPhone"),
             ["address"] = Col("Address"),

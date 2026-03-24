@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Application.Interfaces;
+using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace Api.Controllers;
@@ -508,7 +509,10 @@ public class AdminAnalyticsController : ControllerBase
                 {
                     topCustomers.Add(new
                     {
-                        name = r["name"] is DBNull ? (string?)null : r["name"]?.ToString(),
+                        name = r["name"] is DBNull ? (string?)null
+                            : (!string.IsNullOrWhiteSpace(r["name"]?.ToString())
+                                ? WebhookProcessor.NormalizeDisplayName(r["name"]!.ToString()!)
+                                : r["name"]?.ToString()),
                         phone = r["phone"]?.ToString() ?? "",
                         orders = Convert.ToInt32(r["orders_count"]),
                         revenue = Convert.ToDecimal(r["total_spent"])
