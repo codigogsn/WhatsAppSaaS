@@ -312,14 +312,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     var rawText = message.Text.Body;
                     var t = Normalize(rawText);
 
-                    // 0) Human handoff request
+                    // 0) Human handoff request — only sets HumanHandoffRequested.
+                    //    HumanOverride is only set when admin actually replies from dashboard.
                     if (IsHumanHandoffRequest(t))
                     {
                         state.HumanHandoffRequested = true;
                         state.HumanHandoffAtUtc = DateTime.UtcNow;
                         state.HumanHandoffNotifiedCount = 1;
-                        state.HumanOverride = true;
-                        state.HumanOverrideAtUtc = DateTime.UtcNow;
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -337,12 +336,27 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // 0b) If already in human handoff, pause all bot logic
-                    //     EXCEPT strong ordering intents that explicitly restart
+                    // 0b) If already in human handoff (customer-initiated, no admin reply yet),
+                    //     allow safe escapes: cancel, greeting, ordering intent, menu request.
                     if (state.HumanHandoffRequested)
                     {
-                        // Strong ordering intent breaks out of handoff
-                        if (IsOrderingIntent(t) || IsMenuRequest(t))
+                        // Safe escape: cancel resets everything and exits handoff
+                        if (IsCancelCommand(t))
+                        {
+                            state.ResetAfterConfirm();
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.OrderCancelled,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        // Safe escape: greeting, ordering intent, or menu request restarts conversation
+                        if (IsGreeting(t) || IsOrderingIntent(t) || IsMenuRequest(t))
                         {
                             state.HumanHandoffRequested = false;
                             state.HumanHandoffAtUtc = null;
@@ -351,17 +365,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         }
                         else
                         {
-                            // Greetings and other casual messages stay locked
+                            // Other messages: send waiting notification (max 3)
                             if (state.HumanHandoffNotifiedCount < 3)
                             {
                                 state.HumanHandoffNotifiedCount++;
-                                var handoffBody = IsGreeting(t)
-                                    ? Msg.HandoffStillActive
-                                    : Msg.HandoffWaiting;
                                 await SendAsync(new OutgoingMessage
                                 {
                                     To = message.From,
-                                    Body = handoffBody,
+                                    Body = Msg.HandoffWaiting,
                                     PhoneNumberId = phoneNumberId,
                                     AccessToken = businessContext.AccessToken
                                 }, businessContext.BusinessId, conversationId, cancellationToken);

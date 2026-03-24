@@ -755,7 +755,7 @@
       <div class="label" style="color:var(--warning);">Pagos Pendientes</div>
       <div class="value" style="color:var(--warning);" id="kpiPaymentsPending">0</div>
     </div>
-    <div class="card" style="border-left:3px solid var(--danger);">
+    <div class="card" style="border-left:3px solid var(--danger);cursor:pointer;" onclick="document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
       <div class="label" style="color:var(--danger);">Necesitan Humano</div>
       <div class="value" style="color:var(--danger);" id="kpiHandoffs">0</div>
     </div>
@@ -833,6 +833,14 @@
     </div>
     <div id="crmBody" style="font-size:12px;color:var(--muted);">Click Load to view customers.</div>
   </div>
+
+  <!-- Human Handoff Inbox -->
+  <details id="handoffInbox" style="margin-bottom:16px;">
+    <summary style="font-weight:600;color:var(--danger);cursor:pointer;">
+      Atencion Humana <span id="handoffBadge" style="background:var(--danger);color:#fff;border-radius:10px;padding:1px 8px;font-size:12px;margin-left:6px;">0</span>
+    </summary>
+    <div id="handoffList" style="margin-top:10px;display:flex;flex-direction:column;gap:10px;"></div>
+  </details>
 
   <!-- Filters -->
   <div class="filters">
@@ -1630,14 +1638,105 @@ async function loadHandoffs(){
   const qs = new URLSearchParams();
   if (bid) qs.set('businessId', bid);
   try {
-    const res = await fetch('/api/admin/handoffs?' + qs.toString(), { headers: adminHeaders(), cache: 'no-store' });
+    // Load from human endpoint (includes both handoff requested and human override)
+    const res = await fetch('/api/admin/handoffs/human?' + qs.toString(), { headers: adminHeaders(), cache: 'no-store' });
     if (!res.ok) return;
-    const list = await res.json();
+    const data = await res.json();
+    const list = data.conversations || [];
     document.getElementById('kpiHandoffs').textContent = list.length;
+    const badge = document.getElementById('handoffBadge');
+    if (badge) badge.textContent = list.length;
+
+    // Build handoff phone lookup for order cards
     for (const h of list) {
-      handoffPhones[h.fromPhone] = h;
+      handoffPhones[h.phone] = {
+        conversationId: h.conversationId,
+        handoffAtUtc: h.humanHandoffAtUtc || h.humanOverrideAtUtc,
+        notifiedCount: 0,
+        fromPhone: h.phone
+      };
     }
-  } catch {}
+
+    // Render handoff inbox
+    renderHandoffInbox(list);
+
+    // Auto-open inbox if there are pending handoffs
+    if (list.length > 0) {
+      document.getElementById('handoffInbox').open = true;
+    }
+  } catch(e) { console.warn('loadHandoffs error:', e); }
+}
+
+function renderHandoffInbox(list){
+  const container = document.getElementById('handoffList');
+  if (!container) return;
+  if (!list.length) {
+    container.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px;">No hay conversaciones que necesiten atencion humana.</div>';
+    return;
+  }
+  container.innerHTML = list.map(h => {
+    const cid = esc(h.conversationId);
+    const phone = esc(h.phone);
+    const name = esc(h.customerName || 'N/A');
+    const isOverride = h.humanOverride;
+    const since = h.humanHandoffAtUtc || h.humanOverrideAtUtc;
+    const sinceStr = since ? new Date(since).toLocaleString('es-VE') : '-';
+    const lastMsg = h.lastMessageAt ? new Date(h.lastMessageAt).toLocaleString('es-VE') : '-';
+    const statusLabel = isOverride
+      ? '<span style="color:#1565c0;font-weight:600;">HUMANO ACTIVO</span>'
+      : '<span style="color:#c62828;font-weight:600;">ESPERANDO RESPUESTA</span>';
+    return `
+      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;${isOverride ? 'border-left:3px solid var(--info);' : 'border-left:3px solid var(--danger);'}">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+          <div>
+            <b>${name}</b> &mdash; <span class="muted">${phone}</span><br/>
+            <span class="small muted">Desde: ${sinceStr} &middot; Ultimo: ${lastMsg}</span><br/>
+            ${statusLabel}
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button onclick="event.stopPropagation();returnToBot('${cid}')" style="background:var(--success);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">Devolver al Bot</button>
+          </div>
+        </div>
+        <div style="margin-top:8px;display:flex;gap:6px;align-items:center;">
+          <input type="text" id="reply-${cid}" placeholder="Escribe tu respuesta..." style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--input-bg);color:var(--text);" onkeydown="if(event.key==='Enter'){event.preventDefault();sendHandoffReply('${cid}')}" />
+          <button onclick="event.stopPropagation();sendHandoffReply('${cid}')" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Enviar</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function sendHandoffReply(conversationId){
+  const input = document.getElementById('reply-' + conversationId);
+  if (!input) return;
+  const msg = input.value.trim();
+  if (!msg) { input.focus(); return; }
+  input.disabled = true;
+  try {
+    const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/reply', {
+      method: 'POST',
+      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert('Error enviando: ' + (err.error || res.status));
+      return;
+    }
+    input.value = '';
+    await loadHandoffs();
+  } catch(e) { alert('Error de red: ' + e.message); }
+  finally { input.disabled = false; input.focus(); }
+}
+
+async function returnToBot(conversationId){
+  if (!confirm('Devolver esta conversacion al bot?')) return;
+  try {
+    const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/return-to-bot', {
+      method: 'POST', headers: adminHeaders()
+    });
+    if (!res.ok) { alert('Error devolviendo al bot'); return; }
+    await load();
+  } catch(e) { alert('Error: ' + e.message); }
 }
 
 async function resolveHandoff(conversationId){
@@ -1945,7 +2044,7 @@ async function load() {
                 <b style="color:#c62828;">NECESITA ATENCION HUMANA</b><br/>
                 <span class="small muted">Solicitado: ${handoff.handoffAtUtc ? new Date(handoff.handoffAtUtc).toLocaleString('es-VE') : '-'}</span><br/>
                 <span class="small muted">Mensajes en espera: ${handoff.notifiedCount || 0}</span><br/>
-                <button onclick="event.stopPropagation();resolveHandoff('${esc(handoff.conversationId)}')" style="margin-top:6px;background:#2e7d32;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">Resolver (reactivar bot)</button>
+                <button onclick="event.stopPropagation();returnToBot('${esc(handoff.conversationId)}')" style="margin-top:6px;background:#2e7d32;color:#fff;border:none;border-radius:4px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">Devolver al Bot</button>
               </div>` : ''}
             </div>
           </div>

@@ -127,6 +127,8 @@ public class AdminHandoffsController : ControllerBase
             dict["humanHandoffRequested"] = false;
             dict["humanHandoffAtUtc"] = null;
             dict["humanHandoffNotifiedCount"] = 0;
+            dict["humanOverride"] = false;
+            dict["humanOverrideAtUtc"] = null;
 
             entity.StateJson = JsonSerializer.Serialize(dict);
             entity.UpdatedAtUtc = DateTime.UtcNow;
