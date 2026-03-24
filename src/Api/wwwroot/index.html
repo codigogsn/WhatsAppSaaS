@@ -159,12 +159,22 @@
     }
     .card:hover { box-shadow: var(--shadow-md); }
     .kpi { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 20px; }
-    .kpi .card { min-width: 130px; flex: 1; background: var(--card-kpi, var(--card)); box-shadow: 0 4px 20px rgba(0,0,0,.12); }
+    .kpi .card {
+      min-width: 130px; flex: 1; min-height: 110px;
+      background: var(--card-kpi, var(--card)); box-shadow: 0 4px 20px rgba(0,0,0,.12);
+      display: flex; flex-direction: column; justify-content: space-between;
+      padding: 20px 22px;
+    }
     .kpi .card .label {
       font-size: 11.5px; color: var(--text-secondary); text-transform: uppercase;
-      letter-spacing: .5px; font-weight: 600; margin-bottom: 10px;
+      letter-spacing: .5px; font-weight: 600; margin: 0;
     }
-    .kpi .card .value { font-size: 36px; font-weight: 700; color: var(--text); line-height: 1.05; letter-spacing: -.03em; }
+    .kpi .card .value {
+      font-size: clamp(22px, 2.5vw, 36px); font-weight: 700; color: var(--text);
+      line-height: 1.1; letter-spacing: -.03em;
+      white-space: nowrap; font-variant-numeric: tabular-nums;
+      margin-top: auto;
+    }
     .key { width: 280px; max-width: 100%; }
 
     /* ═══ Status pills — subtle, no borders ═══ */
