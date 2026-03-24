@@ -54,6 +54,10 @@ public sealed class ConversationFields
     public DateTime? HumanHandoffAtUtc { get; set; }
     public int HumanHandoffNotifiedCount { get; set; }
 
+    // Human override: admin has actively taken over the conversation from the dashboard
+    public bool HumanOverride { get; set; }
+    public DateTime? HumanOverrideAtUtc { get; set; }
+
     public bool UpsellSent { get; set; }
     public bool ComboSuggestionSent { get; set; }
     public bool SuggestionDeclined { get; set; }

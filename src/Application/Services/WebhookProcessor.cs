@@ -136,6 +136,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await _stateStore.MarkMessageProcessedAsync(conversationId, msgId, cancellationToken);
                     }
 
+                    // 0) Human override: admin has taken over — bot is completely silent
+                    if (state.HumanOverride)
+                    {
+                        state.LastActivityUtc = DateTime.UtcNow;
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
                     // 1) Location pin (GPS)
                     if (message.Type == "location")
                     {
@@ -310,6 +318,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.HumanHandoffRequested = true;
                         state.HumanHandoffAtUtc = DateTime.UtcNow;
                         state.HumanHandoffNotifiedCount = 1;
+                        state.HumanOverride = true;
+                        state.HumanOverrideAtUtc = DateTime.UtcNow;
 
                         await SendAsync(new OutgoingMessage
                         {
