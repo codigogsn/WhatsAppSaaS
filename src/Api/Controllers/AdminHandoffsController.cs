@@ -167,11 +167,12 @@ public class AdminHandoffsController : ControllerBase
         var customerPhone = parts[0];
         var phoneNumberId = parts[1];
 
-        // Resolve business by PhoneNumberId (avoids text=uuid cast issue on legacy schemas)
-        var business = await _db.Businesses.AsNoTracking()
-            .FirstOrDefaultAsync(b => b.PhoneNumberId == phoneNumberId, ct);
-
-        var accessToken = business?.AccessToken
+        // Resolve only the access token by PhoneNumberId — projection avoids
+        // materializing Business.Id which fails on legacy text-id schemas.
+        var accessToken = await _db.Businesses.AsNoTracking()
+            .Where(b => b.PhoneNumberId == phoneNumberId)
+            .Select(b => b.AccessToken)
+            .FirstOrDefaultAsync(ct)
             ?? Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN")
             ?? Environment.GetEnvironmentVariable("META_ACCESS_TOKEN");
 
