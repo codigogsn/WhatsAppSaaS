@@ -312,6 +312,80 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     var rawText = message.Text.Body;
                     var t = Normalize(rawText);
 
+                    // ═══ GLOBAL COMMAND OVERRIDE ═══
+                    // These commands must work from ANY conversation state (observation,
+                    // checkout, cash flow, payment proof, etc.) to prevent the bot from
+                    // getting stuck in state-specific handlers that swallow all input.
+                    // Only intercept when the conversation is in a "trapping" state —
+                    // i.e. a state-specific handler would consume the message before the
+                    // normal cancel/menu/handoff checks get a chance to run.
+                    {
+                        bool isInTrappingState = state.Items.Count > 0 && (
+                            (state.ExtrasOffered && !state.ObservationAnswered)   // observation gate
+                            || (state.ObservationPromptSent && !state.ObservationAnswered) // observation capture
+                            || (state.CheckoutFormSent && !state.DeliveryDataConfirmed) // checkout form fill
+                            || (state.PaymentMethod == "efectivo" && !state.CashFlowCompleted) // cash sub-flow
+                            || state.AwaitingCashCurrency
+                            || state.AwaitingCashAmount
+                            || (state.PaymentEvidenceRequested && !state.PaymentEvidenceReceived) // proof wait
+                            || state.AwaitingPostConfirmProof
+                        );
+
+                        if (isInTrappingState)
+                        {
+                            // CANCEL — clear everything, respond, stop processing
+                            if (IsCancelCommand(t))
+                            {
+                                _logger.LogInformation("Global override: CANCEL in trapping state for {ConversationId}", conversationId);
+                                state.ResetAfterConfirm();
+
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = Msg.OrderCancelled,
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+
+                            // HUMAN HANDOFF — mark handoff, notify staff, stop processing
+                            if (IsHumanHandoffRequest(t))
+                            {
+                                _logger.LogInformation("Global override: HUMAN HANDOFF in trapping state for {ConversationId}", conversationId);
+                                state.HumanHandoffRequested = true;
+                                state.HumanHandoffAtUtc = DateTime.UtcNow;
+                                state.HumanHandoffNotifiedCount = 1;
+
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = Msg.HandoffInitiated,
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                                if (_notificationService is not null)
+                                    await _notificationService.NotifyHumanHandoffAsync(businessContext, message.From, cancellationToken);
+
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+
+                            // MENU / RESTART — clear state, fall through to restart-intent handler
+                            if (IsMenuRequest(t) || (IsGreeting(t) && !IsOrderingIntent(t)))
+                            {
+                                _logger.LogInformation("Global override: MENU/RESTART in trapping state for {ConversationId}", conversationId);
+                                state.ResetAfterConfirm();
+                                // Fall through — the existing restart-intent handler (B) will
+                                // send the greeting + menu sequence with all its business-hours
+                                // checks and customer memory logic.
+                            }
+                        }
+                    }
+
                     // 0) Human handoff request — only sets HumanHandoffRequested.
                     //    HumanOverride is only set when admin actually replies from dashboard.
                     if (IsHumanHandoffRequest(t))
