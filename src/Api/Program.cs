@@ -538,9 +538,9 @@ static void SeedFounderOwner(IServiceProvider services)
         }
         Log.Information("FOUNDER SEED: current BusinessUsers row count = {Count}", currentRowCount);
 
-        // Checkpoint 4: business lookup
+        // Checkpoint 4: business lookup — iterate to skip legacy non-GUID rows
         Log.Information("FOUNDER SEED: business lookup started");
-        Guid businessGuid;
+        Guid businessGuid = Guid.Empty;
         string? businessName = null;
         using (var bizCmd = conn.CreateCommand())
         {
@@ -548,29 +548,33 @@ static void SeedFounderOwner(IServiceProvider services)
                 SELECT "Id", "Name" FROM "Businesses"
                 WHERE CAST("IsActive" AS TEXT) IN ('true','1','t')
                 ORDER BY "CreatedAtUtc" ASC
-                LIMIT 1
             """;
             using var r = bizCmd.ExecuteReader();
-            if (!r.Read())
+            while (r.Read())
             {
-                Log.Warning("FOUNDER SEED: no eligible business found");
-                Log.Information("FOUNDER SEED: finished");
-                return;
+                var rawId = r[0];
+                if (rawId is Guid g)
+                {
+                    businessGuid = g;
+                    businessName = r[1]?.ToString();
+                    break;
+                }
+                if (Guid.TryParse(rawId?.ToString(), out var parsed))
+                {
+                    businessGuid = parsed;
+                    businessName = r[1]?.ToString();
+                    break;
+                }
+                Log.Warning("FOUNDER SEED: skipping business with invalid GUID id = {RawId}", rawId);
             }
-            var rawId = r[0];
-            if (rawId is Guid g)
-                businessGuid = g;
-            else if (Guid.TryParse(rawId?.ToString(), out var parsed))
-                businessGuid = parsed;
-            else
-            {
-                Log.Error("FOUNDER SEED: Businesses.Id is not a valid GUID: {RawId} (type={Type})", rawId, rawId?.GetType().Name);
-                Log.Information("FOUNDER SEED: finished");
-                return;
-            }
-            businessName = r[1]?.ToString();
         }
-        Log.Information("FOUNDER SEED: business found id = {BizId}, name = {BizName}", businessGuid, businessName);
+        if (businessGuid == Guid.Empty)
+        {
+            Log.Warning("FOUNDER SEED: no eligible business with valid GUID found");
+            Log.Information("FOUNDER SEED: finished");
+            return;
+        }
+        Log.Information("FOUNDER SEED: selected valid business id = {BizId}, name = {BizName}", businessGuid, businessName);
 
         // Checkpoint 5: existing founder lookup
         Guid? existingUserId = null;
