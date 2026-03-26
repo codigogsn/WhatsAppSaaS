@@ -246,6 +246,7 @@ try
         var seedSw = System.Diagnostics.Stopwatch.StartNew();
         SeedDefaultBusiness(app.Services);
         SeedZelleConfig(app.Services);
+        SeedFounderOwner(app.Services);
         Log.Information("STARTUP SEEDS completed in {Elapsed}ms", seedSw.ElapsedMilliseconds);
     }
 
@@ -473,6 +474,101 @@ static void SeedZelleConfig(IServiceProvider services)
     catch (Exception ex)
     {
         Log.Error(ex, "SEED ZELLE: failed to seed Zelle config");
+    }
+}
+
+// ──────────────────────────────────────────
+// Seed founder / owner account from env vars (idempotent)
+// ──────────────────────────────────────────
+static void SeedFounderOwner(IServiceProvider services)
+{
+    var founderEmail = Environment.GetEnvironmentVariable("FOUNDER_EMAIL");
+    if (string.IsNullOrWhiteSpace(founderEmail))
+    {
+        Log.Information("SEED FOUNDER: FOUNDER_EMAIL not set, skipping founder seed");
+        return;
+    }
+
+    var founderPassword = Environment.GetEnvironmentVariable("FOUNDER_PASSWORD");
+    if (string.IsNullOrWhiteSpace(founderPassword))
+    {
+        Log.Warning("SEED FOUNDER: FOUNDER_PASSWORD not set, skipping founder seed");
+        return;
+    }
+
+    var founderName = Environment.GetEnvironmentVariable("FOUNDER_NAME") ?? "Founder";
+    founderEmail = founderEmail.Trim().ToLowerInvariant();
+
+    using var scope = services.CreateScope();
+    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+    try
+    {
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) conn.Open();
+
+        // Find the first active business (founder gets assigned to it)
+        string? businessId = null;
+        using (var bizCmd = conn.CreateCommand())
+        {
+            bizCmd.CommandText = """
+                SELECT CAST("Id" AS TEXT) FROM "Businesses"
+                WHERE "IsActive" = true
+                ORDER BY "CreatedAtUtc" ASC
+                LIMIT 1
+            """;
+            var result = bizCmd.ExecuteScalar();
+            businessId = result as string ?? result?.ToString();
+        }
+
+        if (string.IsNullOrWhiteSpace(businessId))
+        {
+            Log.Warning("SEED FOUNDER: no active business found, skipping founder seed");
+            return;
+        }
+
+        // Check if this email already exists for this business
+        using (var checkCmd = conn.CreateCommand())
+        {
+            checkCmd.CommandText = """
+                SELECT COUNT(*) FROM "BusinessUsers"
+                WHERE "Email" = @email AND "BusinessId" = CAST(@bizId AS uuid)
+            """;
+            var pe = checkCmd.CreateParameter(); pe.ParameterName = "email"; pe.Value = founderEmail; checkCmd.Parameters.Add(pe);
+            var pb = checkCmd.CreateParameter(); pb.ParameterName = "bizId"; pb.Value = businessId; checkCmd.Parameters.Add(pb);
+            var count = Convert.ToInt64(checkCmd.ExecuteScalar());
+            if (count > 0)
+            {
+                Log.Information("SEED FOUNDER: owner {Email} already exists for business {BizId}", founderEmail, businessId);
+                return;
+            }
+        }
+
+        // Hash password and insert
+        var passwordHash = WhatsAppSaaS.Api.Controllers.AuthController.HashPassword(founderPassword);
+        var userId = Guid.NewGuid();
+
+        using (var insCmd = conn.CreateCommand())
+        {
+            insCmd.CommandText = """
+                INSERT INTO "BusinessUsers" ("Id", "BusinessId", "Name", "Email", "PasswordHash", "Role", "IsActive", "CreatedAtUtc")
+                VALUES (@id, CAST(@bizId AS uuid), @name, @email, @hash, 'Owner', true, @created)
+            """;
+            var p1 = insCmd.CreateParameter(); p1.ParameterName = "id"; p1.Value = userId; insCmd.Parameters.Add(p1);
+            var p2 = insCmd.CreateParameter(); p2.ParameterName = "bizId"; p2.Value = businessId; insCmd.Parameters.Add(p2);
+            var p3 = insCmd.CreateParameter(); p3.ParameterName = "name"; p3.Value = founderName; insCmd.Parameters.Add(p3);
+            var p4 = insCmd.CreateParameter(); p4.ParameterName = "email"; p4.Value = founderEmail; insCmd.Parameters.Add(p4);
+            var p5 = insCmd.CreateParameter(); p5.ParameterName = "hash"; p5.Value = passwordHash; insCmd.Parameters.Add(p5);
+            var p6 = insCmd.CreateParameter(); p6.ParameterName = "created"; p6.Value = DateTime.UtcNow; insCmd.Parameters.Add(p6);
+            insCmd.ExecuteNonQuery();
+        }
+
+        Log.Information("SEED FOUNDER: created Owner account {Email} (id={UserId}) for business {BizId}",
+            founderEmail, userId, businessId);
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "SEED FOUNDER: failed to seed founder owner for {Email}", founderEmail);
     }
 }
 

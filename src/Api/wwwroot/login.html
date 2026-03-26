@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>CODIGO — Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+      --radius: 16px; --radius-sm: 10px; --transition: .2s ease;
+      --bg: #F5F5F7; --surface: #FFFFFF; --card: #FFFFFF;
+      --text: #1D1D1F; --text-secondary: #6E6E73; --muted: #8E8E93;
+      --border: #E8E8ED;
+      --accent: #007AFF; --accent-hover: #0062CC;
+      --accent-glow: rgba(0,122,255,.08);
+      --danger: #FF3B30;
+      --input-bg: #F5F5F7;
+      --logo-color: #1D1D1F;
+    }
+    [data-theme="dark"] {
+      --bg: #000000; --surface: rgba(28,28,30,.78); --card: rgba(22,22,26,.74);
+      --text: #FFFFFF; --text-secondary: rgba(255,255,255,.78); --muted: #98989D;
+      --border: rgba(255,255,255,.10);
+      --accent: #0A84FF; --accent-hover: #409CFF;
+      --accent-glow: rgba(10,132,255,.18);
+      --danger: #FF453A;
+      --input-bg: rgba(44,44,46,.65);
+      --logo-color: #F5F5F7;
+    }
+    * { box-sizing: border-box; margin: 0; }
+    html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+    body {
+      font-family: var(--font); background: var(--bg); color: var(--text);
+      margin: 0; padding: 0; min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      transition: background var(--transition), color var(--transition);
+    }
+
+    .login-container {
+      width: 100%; max-width: 400px; padding: 20px;
+    }
+
+    .login-card {
+      background: var(--card);
+      border: 1px solid rgba(0,0,0,.08);
+      border-radius: var(--radius);
+      padding: 40px 36px 36px;
+      position: relative;
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.70),
+        inset 0 0 0 2px rgba(0,0,0,.025),
+        inset 0 2px 4px rgba(0,0,0,.04),
+        inset 0 -1px 3px rgba(0,0,0,.025),
+        0 1px 2px rgba(0,0,0,.05),
+        0 4px 16px rgba(0,0,0,.08),
+        0 0 0 .5px rgba(0,0,0,.07);
+    }
+    .login-card::before {
+      content: ''; position: absolute; inset: 0;
+      border-radius: inherit; pointer-events: none; z-index: 1;
+      background: transparent;
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.80),
+        inset 0 0 6px 1px rgba(0,0,0,.035);
+    }
+
+    .brand { text-align: center; margin-bottom: 32px; position: relative; z-index: 2; }
+    .brand-logo { font-size: 22px; font-weight: 800; letter-spacing: 3px; color: var(--logo-color); }
+    .brand-sub { font-size: 11px; color: var(--muted); letter-spacing: .6px; text-transform: uppercase; margin-top: 6px; }
+
+    .form-group { margin-bottom: 18px; position: relative; z-index: 2; }
+    .form-group label {
+      display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary);
+      margin-bottom: 6px; letter-spacing: .3px;
+    }
+    .form-group input {
+      width: 100%; padding: 10px 14px;
+      border: 1px solid rgba(0,0,0,.08);
+      border-radius: var(--radius-sm);
+      font-size: 14px; font-family: var(--font);
+      background: var(--input-bg); color: var(--text);
+      transition: border var(--transition), box-shadow var(--transition);
+      outline: none;
+      box-shadow:
+        inset 0 0 0 1px rgba(0,0,0,.03),
+        inset 0 2px 4px rgba(0,0,0,.05),
+        inset 0 -1px 2px rgba(255,255,255,.60);
+    }
+    .form-group input:focus {
+      border-color: var(--accent);
+      box-shadow:
+        0 0 0 3px var(--accent-glow),
+        inset 0 0 0 1px rgba(0,0,0,.02),
+        inset 0 2px 4px rgba(0,0,0,.04);
+    }
+
+    .login-btn {
+      width: 100%; padding: 12px 20px;
+      background: var(--accent); color: #fff; border: none;
+      border-radius: var(--radius-sm);
+      font-size: 14px; font-weight: 600; font-family: var(--font);
+      cursor: pointer; transition: all var(--transition);
+      position: relative; z-index: 2;
+      border: 1px solid rgba(0,80,200,.14);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.12),
+        inset 0 0 0 2px rgba(0,0,0,.04),
+        inset 0 2px 3px rgba(0,0,0,.08),
+        inset 0 -1px 2px rgba(0,80,200,.06),
+        0 2px 6px rgba(0,122,255,.16),
+        0 0 0 .5px rgba(0,80,200,.10);
+    }
+    .login-btn:hover {
+      background: var(--accent-hover);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.15),
+        inset 0 0 0 2px rgba(0,0,0,.03),
+        inset 0 2px 3px rgba(0,0,0,.06),
+        0 4px 14px rgba(0,122,255,.20),
+        0 0 0 .5px rgba(0,80,200,.12);
+      transform: translateY(-1px);
+    }
+    .login-btn:active { transform: translateY(0) scale(.98); }
+    .login-btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+
+    .error-msg {
+      color: var(--danger); font-size: 13px; text-align: center;
+      margin-top: 14px; min-height: 20px; position: relative; z-index: 2;
+    }
+
+    .theme-toggle {
+      position: fixed; top: 16px; right: 16px;
+      background: var(--surface); border: 1px solid var(--border);
+      color: var(--muted); width: 34px; height: 34px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; font-size: 15px; padding: 0; line-height: 1;
+      transition: all var(--transition);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.65),
+        inset 0 0 0 2px rgba(0,0,0,.025),
+        0 1px 3px rgba(0,0,0,.06);
+    }
+    .theme-toggle:hover { color: var(--text); }
+
+    .admin-fallback {
+      text-align: center; margin-top: 20px; position: relative; z-index: 2;
+    }
+    .admin-fallback a {
+      color: var(--muted); font-size: 12px; text-decoration: none;
+      transition: color var(--transition);
+    }
+    .admin-fallback a:hover { color: var(--text-secondary); }
+
+    /* Dark mode glass */
+    [data-theme="dark"] .login-card {
+      border: 1px solid rgba(255,255,255,.13);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.08),
+        inset 0 0 0 2px rgba(0,0,0,.15),
+        inset 0 2px 5px rgba(0,0,0,.22),
+        inset 0 -1px 3px rgba(255,255,255,.04),
+        0 1px 2px rgba(0,0,0,.28),
+        0 6px 24px rgba(0,0,0,.40),
+        0 0 0 .5px rgba(255,255,255,.08);
+      -webkit-backdrop-filter: blur(20px);
+      backdrop-filter: blur(20px);
+    }
+    [data-theme="dark"] .login-card::before {
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.06),
+        inset 0 0 8px 2px rgba(0,0,0,.12);
+    }
+    [data-theme="dark"] .form-group input {
+      border: 1px solid rgba(255,255,255,.08);
+      box-shadow:
+        inset 0 0 0 1px rgba(0,0,0,.15),
+        inset 0 2px 4px rgba(0,0,0,.22),
+        inset 0 -1px 2px rgba(255,255,255,.03);
+    }
+    [data-theme="dark"] .form-group input:focus {
+      border-color: var(--accent);
+      box-shadow:
+        0 0 0 3px var(--accent-glow),
+        inset 0 0 0 1px rgba(0,0,0,.10),
+        inset 0 2px 4px rgba(0,0,0,.14);
+    }
+    [data-theme="dark"] .login-btn {
+      background: rgba(10,125,245,.82);
+      border: 1px solid rgba(90,170,255,.22);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.08),
+        inset 0 0 0 2px rgba(0,0,0,.10),
+        inset 0 2px 4px rgba(0,0,0,.14),
+        inset 0 -1px 2px rgba(80,160,255,.08),
+        0 2px 8px rgba(10,132,255,.30),
+        0 0 0 .5px rgba(90,170,255,.15);
+    }
+    [data-theme="dark"] .login-btn:hover {
+      background: rgba(25,140,255,.86);
+      border-color: rgba(100,180,255,.28);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.10),
+        inset 0 0 0 2px rgba(0,0,0,.08),
+        0 4px 16px rgba(10,132,255,.35),
+        0 0 0 .5px rgba(100,180,255,.18);
+    }
+    [data-theme="dark"] .theme-toggle {
+      background: rgba(48,48,52,.70);
+      border: 1px solid rgba(255,255,255,.14);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.05),
+        inset 0 0 0 2px rgba(0,0,0,.12),
+        0 2px 6px rgba(0,0,0,.28);
+    }
+  </style>
+</head>
+<body>
+  <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
+    <span id="themeIcon">&#9790;</span>
+  </button>
+
+  <div class="login-container">
+    <div class="login-card">
+      <div class="brand">
+        <div class="brand-logo">CODIGO</div>
+        <div class="brand-sub">WhatsApp Agent</div>
+      </div>
+
+      <form id="loginForm" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="email">Email</label>
+          <input type="email" id="email" placeholder="tu@email.com" autocomplete="email" required />
+        </div>
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="Password" autocomplete="current-password" required />
+        </div>
+        <button type="submit" class="login-btn" id="loginBtn">Iniciar Sesion</button>
+        <div class="error-msg" id="errorMsg"></div>
+      </form>
+
+      <div class="admin-fallback">
+        <a href="/?bypass=adminkey">Acceso con Admin Key</a>
+      </div>
+    </div>
+  </div>
+
+<script>
+// Theme
+(function(){
+  const saved = localStorage.getItem('THEME');
+  if (saved) { applyTheme(saved); return; }
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  applyTheme(prefersDark ? 'dark' : 'light');
+})();
+function applyTheme(t){
+  document.documentElement.setAttribute('data-theme', t);
+  const icon = document.getElementById('themeIcon');
+  if (icon) icon.textContent = t === 'dark' ? '\u2600' : '\u263E';
+}
+function toggleTheme(){
+  const current = document.documentElement.getAttribute('data-theme') || 'light';
+  const next = current === 'dark' ? 'light' : 'dark';
+  localStorage.setItem('THEME', next);
+  applyTheme(next);
+}
+
+// Already logged in? Go to dashboard
+if (localStorage.getItem('AUTH_TOKEN')) {
+  window.location.href = '/';
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  const errEl = document.getElementById('errorMsg');
+  errEl.textContent = '';
+  btn.disabled = true;
+  btn.textContent = 'Verificando...';
+
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email: document.getElementById('email').value.trim(),
+        password: document.getElementById('password').value
+      })
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      errEl.textContent = data.error || 'Credenciales invalidas';
+      btn.disabled = false;
+      btn.textContent = 'Iniciar Sesion';
+      return;
+    }
+
+    // Store auth state
+    localStorage.setItem('AUTH_TOKEN', data.token);
+    localStorage.setItem('AUTH_USER', JSON.stringify(data.user));
+    // Also set admin key from business for backward compatibility
+    if (data.user?.businessId) {
+      // The JWT gives API access; for admin endpoints the dashboard
+      // still uses X-Admin-Key, so we keep that path working too.
+    }
+
+    window.location.href = '/';
+  } catch (err) {
+    errEl.textContent = 'Error de conexion';
+    btn.disabled = false;
+    btn.textContent = 'Iniciar Sesion';
+  }
+}
+</script>
+</body>
+</html>

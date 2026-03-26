@@ -502,6 +502,17 @@
   </div><!-- /.app-container -->
 
 <script>
+// Auth gate (same as dashboard)
+(function(){
+  const hasToken = !!localStorage.getItem('AUTH_TOKEN');
+  const hasAdminKey = !!localStorage.getItem('ADMIN_KEY');
+  const bypassParam = new URLSearchParams(window.location.search).get('bypass') === 'adminkey';
+  if (!hasToken && !hasAdminKey && !bypassParam) {
+    window.location.href = '/login.html';
+    return;
+  }
+})();
+
 // Theme system (shared with dashboard via localStorage)
 (function initTheme(){
   const saved = localStorage.getItem('THEME');
