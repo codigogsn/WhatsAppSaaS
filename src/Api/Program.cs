@@ -478,26 +478,32 @@ static void SeedZelleConfig(IServiceProvider services)
 }
 
 // ──────────────────────────────────────────
-// Seed founder / owner account from env vars (idempotent)
+// Seed founder / owner account from env vars (upsert — creates or updates)
 // ──────────────────────────────────────────
 static void SeedFounderOwner(IServiceProvider services)
 {
-    var founderEmail = Environment.GetEnvironmentVariable("FOUNDER_EMAIL");
-    if (string.IsNullOrWhiteSpace(founderEmail))
-    {
-        Log.Information("SEED FOUNDER: FOUNDER_EMAIL not set, skipping founder seed");
-        return;
-    }
-
-    var founderPassword = Environment.GetEnvironmentVariable("FOUNDER_PASSWORD");
-    if (string.IsNullOrWhiteSpace(founderPassword))
-    {
-        Log.Warning("SEED FOUNDER: FOUNDER_PASSWORD not set, skipping founder seed");
-        return;
-    }
-
+    var rawEmail = Environment.GetEnvironmentVariable("FOUNDER_EMAIL");
+    var rawPassword = Environment.GetEnvironmentVariable("FOUNDER_PASSWORD");
     var founderName = Environment.GetEnvironmentVariable("FOUNDER_NAME") ?? "Founder";
-    founderEmail = founderEmail.Trim().ToLowerInvariant();
+
+    Log.Information("SEED FOUNDER: start — FOUNDER_EMAIL={HasEmail} FOUNDER_PASSWORD={HasPw} FOUNDER_NAME={Name}",
+        !string.IsNullOrWhiteSpace(rawEmail) ? "SET" : "EMPTY",
+        !string.IsNullOrWhiteSpace(rawPassword) ? "SET" : "EMPTY",
+        founderName);
+
+    if (string.IsNullOrWhiteSpace(rawEmail))
+    {
+        Log.Information("SEED FOUNDER: FOUNDER_EMAIL not set, skipping");
+        return;
+    }
+    if (string.IsNullOrWhiteSpace(rawPassword))
+    {
+        Log.Warning("SEED FOUNDER: FOUNDER_PASSWORD not set, skipping");
+        return;
+    }
+
+    var founderEmail = rawEmail.Trim().ToLowerInvariant();
+    Log.Information("SEED FOUNDER: normalized email = {Email}", founderEmail);
 
     using var scope = services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -507,69 +513,134 @@ static void SeedFounderOwner(IServiceProvider services)
         var conn = db.Database.GetDbConnection();
         if (conn.State != System.Data.ConnectionState.Open) conn.Open();
 
-        // Find the first active business (founder gets assigned to it)
-        // Use CAST for IsActive to handle both boolean and integer column types
-        string? businessId = null;
+        // Step 1: Verify BusinessUsers table exists
+        bool tableExists;
+        using (var tblCmd = conn.CreateCommand())
+        {
+            tblCmd.CommandText = "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='BusinessUsers'";
+            tableExists = tblCmd.ExecuteScalar() is not null;
+        }
+        if (!tableExists)
+        {
+            Log.Error("SEED FOUNDER: BusinessUsers table does NOT exist — cannot seed founder");
+            return;
+        }
+        Log.Information("SEED FOUNDER: BusinessUsers table confirmed present");
+
+        // Step 2: Find first active business
+        Guid businessGuid;
+        string? businessName = null;
         using (var bizCmd = conn.CreateCommand())
         {
             bizCmd.CommandText = """
-                SELECT CAST("Id" AS TEXT) FROM "Businesses"
+                SELECT "Id", "Name" FROM "Businesses"
                 WHERE CAST("IsActive" AS TEXT) IN ('true','1','t')
                 ORDER BY "CreatedAtUtc" ASC
                 LIMIT 1
             """;
-            var result = bizCmd.ExecuteScalar();
-            businessId = result as string ?? result?.ToString();
+            using var r = bizCmd.ExecuteReader();
+            if (!r.Read())
+            {
+                Log.Warning("SEED FOUNDER: no active business found, skipping");
+                return;
+            }
+            // Read Id — handle both uuid and text types
+            var rawId = r[0];
+            if (rawId is Guid g)
+                businessGuid = g;
+            else if (Guid.TryParse(rawId?.ToString(), out var parsed))
+                businessGuid = parsed;
+            else
+            {
+                Log.Error("SEED FOUNDER: Businesses.Id is not a valid GUID: {RawId}", rawId);
+                return;
+            }
+            businessName = r[1]?.ToString();
         }
+        Log.Information("SEED FOUNDER: target business = {BizId} ({BizName})", businessGuid, businessName);
 
-        if (string.IsNullOrWhiteSpace(businessId))
-        {
-            Log.Warning("SEED FOUNDER: no active business found, skipping founder seed");
-            return;
-        }
-
-        // Check if this email already exists for this business
+        // Step 3: Check if founder email already exists (any business)
+        Guid? existingUserId = null;
         using (var checkCmd = conn.CreateCommand())
         {
             checkCmd.CommandText = """
-                SELECT COUNT(*) FROM "BusinessUsers"
-                WHERE "Email" = @email AND "BusinessId" = CAST(@bizId AS uuid)
+                SELECT "Id" FROM "BusinessUsers" WHERE "Email" = @email LIMIT 1
             """;
             var pe = checkCmd.CreateParameter(); pe.ParameterName = "email"; pe.Value = founderEmail; checkCmd.Parameters.Add(pe);
-            var pb = checkCmd.CreateParameter(); pb.ParameterName = "bizId"; pb.Value = businessId; checkCmd.Parameters.Add(pb);
-            var count = Convert.ToInt64(checkCmd.ExecuteScalar());
-            if (count > 0)
-            {
-                Log.Information("SEED FOUNDER: owner {Email} already exists for business {BizId}", founderEmail, businessId);
-                return;
-            }
+            var result = checkCmd.ExecuteScalar();
+            if (result is Guid eg)
+                existingUserId = eg;
+            else if (result is not null && Guid.TryParse(result.ToString(), out var eparsed))
+                existingUserId = eparsed;
         }
 
-        // Hash password and insert
-        var passwordHash = WhatsAppSaaS.Api.Controllers.AuthController.HashPassword(founderPassword);
-        var userId = Guid.NewGuid();
+        var passwordHash = WhatsAppSaaS.Api.Controllers.AuthController.HashPassword(rawPassword);
 
-        using (var insCmd = conn.CreateCommand())
+        if (existingUserId.HasValue)
         {
+            // UPDATE: refresh password hash, role, active, business assignment
+            Log.Information("SEED FOUNDER: user {Email} exists (id={UserId}), updating password + role + active",
+                founderEmail, existingUserId.Value);
+            using var updCmd = conn.CreateCommand();
+            updCmd.CommandText = """
+                UPDATE "BusinessUsers"
+                SET "PasswordHash" = @hash, "Role" = 'Owner', "IsActive" = true, "BusinessId" = @bizId, "Name" = @name
+                WHERE "Id" = @uid
+            """;
+            var p1 = updCmd.CreateParameter(); p1.ParameterName = "hash"; p1.Value = passwordHash; updCmd.Parameters.Add(p1);
+            var p2 = updCmd.CreateParameter(); p2.ParameterName = "bizId"; p2.Value = businessGuid; updCmd.Parameters.Add(p2);
+            var p3 = updCmd.CreateParameter(); p3.ParameterName = "name"; p3.Value = founderName; updCmd.Parameters.Add(p3);
+            var p4 = updCmd.CreateParameter(); p4.ParameterName = "uid"; p4.Value = existingUserId.Value; updCmd.Parameters.Add(p4);
+            var rows = updCmd.ExecuteNonQuery();
+            Log.Information("SEED FOUNDER: updated {Rows} row(s) for {Email}", rows, founderEmail);
+        }
+        else
+        {
+            // INSERT new founder
+            var userId = Guid.NewGuid();
+            Log.Information("SEED FOUNDER: inserting new owner {Email} (id={UserId}) for business {BizId}",
+                founderEmail, userId, businessGuid);
+            using var insCmd = conn.CreateCommand();
             insCmd.CommandText = """
                 INSERT INTO "BusinessUsers" ("Id", "BusinessId", "Name", "Email", "PasswordHash", "Role", "IsActive", "CreatedAtUtc")
-                VALUES (@id, CAST(@bizId AS uuid), @name, @email, @hash, 'Owner', true, @created)
+                VALUES (@id, @bizId, @name, @email, @hash, 'Owner', true, @created)
             """;
             var p1 = insCmd.CreateParameter(); p1.ParameterName = "id"; p1.Value = userId; insCmd.Parameters.Add(p1);
-            var p2 = insCmd.CreateParameter(); p2.ParameterName = "bizId"; p2.Value = businessId; insCmd.Parameters.Add(p2);
+            var p2 = insCmd.CreateParameter(); p2.ParameterName = "bizId"; p2.Value = businessGuid; insCmd.Parameters.Add(p2);
             var p3 = insCmd.CreateParameter(); p3.ParameterName = "name"; p3.Value = founderName; insCmd.Parameters.Add(p3);
             var p4 = insCmd.CreateParameter(); p4.ParameterName = "email"; p4.Value = founderEmail; insCmd.Parameters.Add(p4);
             var p5 = insCmd.CreateParameter(); p5.ParameterName = "hash"; p5.Value = passwordHash; insCmd.Parameters.Add(p5);
             var p6 = insCmd.CreateParameter(); p6.ParameterName = "created"; p6.Value = DateTime.UtcNow; insCmd.Parameters.Add(p6);
             insCmd.ExecuteNonQuery();
+            Log.Information("SEED FOUNDER: inserted owner {Email} OK", founderEmail);
         }
 
-        Log.Information("SEED FOUNDER: created Owner account {Email} (id={UserId}) for business {BizId}",
-            founderEmail, userId, businessId);
+        // Step 4: Verify the row is readable (same query login will use)
+        using (var verCmd = conn.CreateCommand())
+        {
+            verCmd.CommandText = """
+                SELECT u."Id", u."Email", u."Role", u."IsActive", b."Name" AS "BizName"
+                FROM "BusinessUsers" u
+                INNER JOIN "Businesses" b ON CAST(b."Id" AS TEXT) = CAST(u."BusinessId" AS TEXT)
+                WHERE u."Email" = @email
+                LIMIT 1
+            """;
+            var pv = verCmd.CreateParameter(); pv.ParameterName = "email"; pv.Value = founderEmail; verCmd.Parameters.Add(pv);
+            using var vr = verCmd.ExecuteReader();
+            if (vr.Read())
+            {
+                Log.Information("SEED FOUNDER: VERIFIED — {Email} readable, role={Role}, active={Active}, biz={Biz}",
+                    vr["Email"], vr["Role"], vr["IsActive"], vr["BizName"]);
+            }
+            else
+            {
+                Log.Error("SEED FOUNDER: VERIFICATION FAILED — {Email} was inserted but cannot be read back via login query!", founderEmail);
+            }
+        }
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "SEED FOUNDER: failed to seed founder owner for {Email}", founderEmail);
+        Log.Error(ex, "SEED FOUNDER: FAILED for {Email} — {Message}", founderEmail, ex.Message);
     }
 }
 
