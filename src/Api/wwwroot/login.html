@@ -214,6 +214,21 @@
         inset 0 0 0 2px rgba(0,0,0,.12),
         0 2px 6px rgba(0,0,0,.28);
     }
+
+    /* Password toggle */
+    .password-wrap { position: relative; }
+    .password-wrap input { width: 100%; padding-right: 42px; }
+    .eye-toggle {
+      position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+      background: none; border: none; box-shadow: none;
+      cursor: pointer; padding: 6px 8px; font-size: 16px; line-height: 1;
+      color: var(--muted); transition: color var(--transition);
+      z-index: 3;
+    }
+    .eye-toggle:hover { color: var(--text-secondary); background: none; box-shadow: none; transform: translateY(-50%); }
+    .eye-toggle:active { transform: translateY(-50%); background: none; box-shadow: none; }
+    [data-theme="dark"] .eye-toggle { box-shadow: none; border: none; background: none; }
+    [data-theme="dark"] .eye-toggle:hover { box-shadow: none; background: none; }
   </style>
 </head>
 <body>
@@ -235,7 +250,12 @@
         </div>
         <div class="form-group">
           <label for="password">Password</label>
-          <input type="password" id="password" placeholder="Password" autocomplete="current-password" required />
+          <div class="password-wrap">
+            <input type="password" id="password" placeholder="Password" autocomplete="current-password" required />
+            <button type="button" class="eye-toggle" onclick="togglePasswordVisibility()" tabindex="-1" title="Mostrar/ocultar">
+              <span id="eyeIcon">&#128065;</span>
+            </button>
+          </div>
         </div>
         <button type="submit" class="login-btn" id="loginBtn">Iniciar Sesion</button>
         <div class="error-msg" id="errorMsg"></div>
@@ -267,6 +287,19 @@ function toggleTheme(){
   applyTheme(next);
 }
 
+// Password visibility toggle
+function togglePasswordVisibility() {
+  const pw = document.getElementById('password');
+  const icon = document.getElementById('eyeIcon');
+  if (pw.type === 'password') {
+    pw.type = 'text';
+    icon.textContent = '\u{1F648}'; // see-no-evil monkey (hidden)
+  } else {
+    pw.type = 'password';
+    icon.textContent = '\u{1F441}'; // eye (visible)
+  }
+}
+
 // Already logged in? Go to dashboard
 if (localStorage.getItem('AUTH_TOKEN')) {
   window.location.href = '/';
@@ -290,10 +323,17 @@ async function handleLogin(e) {
       })
     });
 
-    const data = await res.json();
+    let data;
+    const contentType = res.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      data = await res.json();
+    } else {
+      const text = await res.text();
+      data = { error: text || ('Error del servidor (HTTP ' + res.status + ')') };
+    }
 
     if (!res.ok) {
-      errEl.textContent = data.error || 'Credenciales invalidas';
+      errEl.textContent = data.error || ('Error (HTTP ' + res.status + ')');
       btn.disabled = false;
       btn.textContent = 'Iniciar Sesion';
       return;
@@ -302,15 +342,10 @@ async function handleLogin(e) {
     // Store auth state
     localStorage.setItem('AUTH_TOKEN', data.token);
     localStorage.setItem('AUTH_USER', JSON.stringify(data.user));
-    // Also set admin key from business for backward compatibility
-    if (data.user?.businessId) {
-      // The JWT gives API access; for admin endpoints the dashboard
-      // still uses X-Admin-Key, so we keep that path working too.
-    }
 
     window.location.href = '/';
   } catch (err) {
-    errEl.textContent = 'Error de conexion';
+    errEl.textContent = 'Error de conexion: ' + (err.message || err);
     btn.disabled = false;
     btn.textContent = 'Iniciar Sesion';
   }

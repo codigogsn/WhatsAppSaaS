@@ -12,11 +12,13 @@ public sealed class AuthController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly JwtService _jwt;
+    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(AppDbContext db, JwtService jwt)
+    public AuthController(AppDbContext db, JwtService jwt, ILogger<AuthController> logger)
     {
         _db = db;
         _jwt = jwt;
+        _logger = logger;
     }
 
     public sealed class LoginRequest
@@ -31,29 +33,101 @@ public sealed class AuthController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password))
             return BadRequest(new { error = "Email and password are required" });
 
-        var user = await _db.BusinessUsers
-            .Include(u => u.Business)
-            .FirstOrDefaultAsync(u => u.Email == req.Email.Trim().ToLowerInvariant() && u.IsActive, ct);
+        var email = req.Email.Trim().ToLowerInvariant();
 
-        if (user is null || !VerifyPassword(req.Password, user.PasswordHash))
+        // Raw SQL to avoid EF materialization crashes on legacy PostgreSQL schema
+        var conn = _db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync(ct);
+
+        Guid userId = Guid.Empty;
+        Guid businessId = Guid.Empty;
+        string passwordHash = "";
+        string userName = "";
+        string userEmail = "";
+        string userRole = "";
+        bool userActive = false;
+        string businessName = "";
+        bool businessActive = false;
+
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                SELECT u."Id", u."BusinessId", u."PasswordHash", u."Name", u."Email", u."Role", u."IsActive",
+                       b."Name" AS "BizName", b."IsActive" AS "BizActive"
+                FROM "BusinessUsers" u
+                INNER JOIN "Businesses" b ON b."Id" = u."BusinessId"
+                WHERE u."Email" = @email
+                LIMIT 1
+            """;
+            var p = cmd.CreateParameter();
+            p.ParameterName = "email";
+            p.Value = email;
+            cmd.Parameters.Add(p);
+
+            using var r = await cmd.ExecuteReaderAsync(ct);
+            if (!await r.ReadAsync(ct))
+            {
+                _logger.LogWarning("Login failed: no user found for {Email}", email);
+                return Unauthorized(new { error = "Invalid credentials" });
+            }
+
+            userId = r.GetGuid(0);
+            businessId = r.GetGuid(1);
+            passwordHash = r.GetString(2);
+            userName = r.GetString(3);
+            userEmail = r.GetString(4);
+            userRole = r.GetString(5);
+
+            var rawActive = r["IsActive"];
+            userActive = rawActive switch
+            {
+                bool bv => bv, int iv => iv != 0, long lv => lv != 0,
+                string sv => sv is "1" or "true" or "True", _ => true
+            };
+
+            businessName = r["BizName"]?.ToString() ?? "";
+            var rawBizActive = r["BizActive"];
+            businessActive = rawBizActive switch
+            {
+                bool bv => bv, int iv => iv != 0, long lv => lv != 0,
+                string sv => sv is "1" or "true" or "True", _ => true
+            };
+        }
+
+        if (!userActive)
+        {
+            _logger.LogWarning("Login failed: user {Email} is inactive", email);
             return Unauthorized(new { error = "Invalid credentials" });
+        }
 
-        if (user.Business is null || !user.Business.IsActive)
+        if (!VerifyPassword(req.Password, passwordHash))
+        {
+            _logger.LogWarning("Login failed: wrong password for {Email}", email);
+            return Unauthorized(new { error = "Invalid credentials" });
+        }
+
+        if (!businessActive)
+        {
+            _logger.LogWarning("Login failed: business {BizId} is inactive for {Email}", businessId, email);
             return Unauthorized(new { error = "Business is inactive" });
+        }
 
-        var token = _jwt.GenerateToken(user.Id, user.BusinessId, user.Role, user.Email);
+        var token = _jwt.GenerateToken(userId, businessId, userRole, userEmail);
+
+        _logger.LogInformation("Login success: {Email} role={Role} bizId={BizId}", userEmail, userRole, businessId);
 
         return Ok(new
         {
             token,
             user = new
             {
-                user.Id,
-                user.BusinessId,
-                businessName = user.Business.Name,
-                user.Name,
-                user.Email,
-                user.Role
+                id = userId,
+                businessId,
+                businessName,
+                name = userName,
+                email = userEmail,
+                role = userRole
             }
         });
     }
