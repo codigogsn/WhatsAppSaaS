@@ -508,12 +508,13 @@ static void SeedFounderOwner(IServiceProvider services)
         if (conn.State != System.Data.ConnectionState.Open) conn.Open();
 
         // Find the first active business (founder gets assigned to it)
+        // Use CAST for IsActive to handle both boolean and integer column types
         string? businessId = null;
         using (var bizCmd = conn.CreateCommand())
         {
             bizCmd.CommandText = """
                 SELECT CAST("Id" AS TEXT) FROM "Businesses"
-                WHERE "IsActive" = true
+                WHERE CAST("IsActive" AS TEXT) IN ('true','1','t')
                 ORDER BY "CreatedAtUtc" ASC
                 LIMIT 1
             """;
@@ -876,8 +877,13 @@ static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_MenuItems_CategoryId" ON "MenuItems" ("CategoryId")""");
     ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_MenuItemAliases_MenuItemId" ON "MenuItemAliases" ("MenuItemId")""");
 
-    // ── BusinessUsers table ──
-    ExecSql(conn, """CREATE TABLE IF NOT EXISTS "BusinessUsers" ("Id" uuid NOT NULL PRIMARY KEY, "BusinessId" uuid NOT NULL REFERENCES "Businesses"("Id") ON DELETE CASCADE, "Name" text NOT NULL, "Email" text NOT NULL, "PasswordHash" text NOT NULL, "Role" text NOT NULL DEFAULT 'Operator', "IsActive" boolean NOT NULL DEFAULT true, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
+    // ── BusinessUsers table (create without FK first, add FK separately to avoid type-mismatch failures) ──
+    if (!ExecSql(conn, """CREATE TABLE IF NOT EXISTS "BusinessUsers" ("Id" uuid NOT NULL PRIMARY KEY, "BusinessId" uuid NOT NULL REFERENCES "Businesses"("Id") ON DELETE CASCADE, "Name" text NOT NULL, "Email" text NOT NULL, "PasswordHash" text NOT NULL, "Role" text NOT NULL DEFAULT 'Operator', "IsActive" boolean NOT NULL DEFAULT true, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())"""))
+    {
+        // FK creation failed (likely Businesses.Id is text not uuid) — create without FK
+        Log.Warning("LEGACY REPAIR: BusinessUsers with FK failed, creating without FK constraint");
+        ExecSql(conn, """CREATE TABLE IF NOT EXISTS "BusinessUsers" ("Id" uuid NOT NULL PRIMARY KEY, "BusinessId" uuid NOT NULL, "Name" text NOT NULL, "Email" text NOT NULL, "PasswordHash" text NOT NULL, "Role" text NOT NULL DEFAULT 'Operator', "IsActive" boolean NOT NULL DEFAULT true, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
+    }
     ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_BusinessUsers_BusinessId_Email" ON "BusinessUsers" ("BusinessId", "Email")""");
 
     // ── BackgroundJobs table ──

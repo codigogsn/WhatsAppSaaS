@@ -56,7 +56,7 @@ public sealed class AuthController : ControllerBase
                 SELECT u."Id", u."BusinessId", u."PasswordHash", u."Name", u."Email", u."Role", u."IsActive",
                        b."Name" AS "BizName", b."IsActive" AS "BizActive"
                 FROM "BusinessUsers" u
-                INNER JOIN "Businesses" b ON b."Id" = u."BusinessId"
+                INNER JOIN "Businesses" b ON CAST(b."Id" AS TEXT) = CAST(u."BusinessId" AS TEXT)
                 WHERE u."Email" = @email
                 LIMIT 1
             """;
