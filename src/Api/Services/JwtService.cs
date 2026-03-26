@@ -13,11 +13,20 @@ public sealed class JwtService
 
     public JwtService(IConfiguration config)
     {
-        _secret = config["Jwt:Secret"]
-                   ?? Environment.GetEnvironmentVariable("JWT_SECRET")
-                   ?? throw new InvalidOperationException("JWT_SECRET or Jwt:Secret is required");
+        // Resolve secret: prefer config, fall back to env var, reject empty/whitespace
+        var configSecret = config["Jwt:Secret"];
+        var envSecret = Environment.GetEnvironmentVariable("JWT_SECRET");
+
+        _secret = !string.IsNullOrWhiteSpace(configSecret) ? configSecret.Trim()
+                : !string.IsNullOrWhiteSpace(envSecret) ? envSecret.Trim()
+                : throw new InvalidOperationException("JWT secret is required. Set Jwt:Secret in config or JWT_SECRET env var.");
+
         _issuer = config["Jwt:Issuer"] ?? "WhatsAppSaaS";
         _expirationHours = int.TryParse(config["Jwt:ExpirationHours"], out var h) ? h : 24;
+
+        // Safe diagnostic — never log the actual secret
+        var source = !string.IsNullOrWhiteSpace(configSecret) ? "Jwt:Secret config" : "JWT_SECRET env";
+        Console.WriteLine($"[JwtService] secret source = {source}, length = {_secret.Length}");
     }
 
     public string GenerateToken(Guid userId, Guid businessId, string role, string email)
