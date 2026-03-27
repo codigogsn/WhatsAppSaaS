@@ -1045,11 +1045,15 @@
       background: var(--card); color: var(--text);
       border-left: 3px solid var(--success);
       padding: 16px 18px 12px; border-radius: var(--radius); width: 100%;
-      transform: translateX(110%) scale(.96); opacity: 0;
-      transition: transform .45s cubic-bezier(.22,1,.36,1), opacity .35s ease;
+      transform: translateY(12px) scale(.96); opacity: 0;
+      transition: transform .4s cubic-bezier(.22,1,.36,1), opacity .3s ease, box-shadow .4s ease;
       pointer-events: auto; position: relative; overflow: hidden;
     }
-    .order-toast.show { transform: translateX(0) scale(1); opacity: 1; }
+    .order-toast.show {
+      transform: translateY(0) scale(1); opacity: 1;
+      box-shadow: 0 0 20px rgba(34,197,94,.12), var(--shadow-md);
+    }
+    .order-toast.settled { box-shadow: var(--shadow-md); }
     .order-toast.removing { transform: translateX(110%) scale(.96); opacity: 0; }
     .order-toast-close {
       position: absolute; top: 10px; right: 12px; background: none; border: none;
@@ -1112,17 +1116,19 @@
     .filters { transition: all .25s ease; }
     .pill { transition: all .2s ease; }
 
+    /* ─── New order row entrance ─── */
     @keyframes orderSlideIn {
-      0% { opacity: 0; transform: translateY(-6px); }
-      60% { opacity: 1; }
-      100% { opacity: 1; transform: translateY(0); }
+      0% { opacity: 0; transform: translateY(6px) scale(.98); }
+      50% { opacity: 1; }
+      100% { opacity: 1; transform: translateY(0) scale(1); }
     }
-    @keyframes newRowGlow {
-      0% { box-shadow: inset 3px 0 0 var(--success), 0 0 12px rgba(52,199,89,.15); }
-      100% { box-shadow: inset 3px 0 0 var(--success), 0 0 0 transparent; }
+    @keyframes newRowAccent {
+      0% { box-shadow: inset 4px 0 0 var(--success), 0 0 20px rgba(34,197,94,.25); background: rgba(34,197,94,.10); }
+      60% { box-shadow: inset 4px 0 0 var(--success), 0 0 8px rgba(34,197,94,.10); background: rgba(34,197,94,.04); }
+      100% { box-shadow: inset 3px 0 0 var(--success), 0 0 0 transparent; background: transparent; }
     }
     tr.new-order-row {
-      animation: orderSlideIn .4s cubic-bezier(.22,1,.36,1), newRowGlow 1.5s ease-out .3s;
+      animation: orderSlideIn .45s cubic-bezier(.22,1,.36,1), newRowAccent 2.5s ease-out .2s both;
     }
 
     tr.order-unread { border-left: 3px solid var(--success); background: var(--success-bg); }
@@ -1136,17 +1142,17 @@
 
     /* ─── Global dashboard pulse on new order ─── */
     @keyframes dashPulse {
-      0% { box-shadow: inset 0 0 0 rgba(52,199,89,0); }
-      25% { box-shadow: inset 0 0 60px rgba(52,199,89,.04); }
-      100% { box-shadow: inset 0 0 0 rgba(52,199,89,0); }
+      0% { box-shadow: inset 0 0 0 0 rgba(34,197,94,0); }
+      30% { box-shadow: inset 0 0 80px 0 rgba(34,197,94,.08), 0 0 40px rgba(34,197,94,.06); }
+      100% { box-shadow: inset 0 0 0 0 rgba(34,197,94,0); }
     }
-    [data-theme="dark"] .dash-pulse { animation: dashPulseDark 1.2s ease-out; }
     @keyframes dashPulseDark {
-      0% { box-shadow: inset 0 0 0 rgba(48,209,88,0); }
-      25% { box-shadow: inset 0 0 80px rgba(48,209,88,.06); }
-      100% { box-shadow: inset 0 0 0 rgba(48,209,88,0); }
+      0% { box-shadow: inset 0 0 0 0 rgba(48,209,88,0); }
+      30% { box-shadow: inset 0 0 100px 0 rgba(48,209,88,.12), 0 0 50px rgba(48,209,88,.08); }
+      100% { box-shadow: inset 0 0 0 0 rgba(48,209,88,0); }
     }
-    .dash-pulse { animation: dashPulse 1.2s ease-out; }
+    .dash-pulse { animation: dashPulse .7s ease-out; }
+    [data-theme="dark"] .dash-pulse { animation: dashPulseDark .7s ease-out; }
 
     @keyframes kpiPulse {
       0% { box-shadow: var(--shadow), 0 0 0 0 rgba(52,199,89,.2); }
@@ -1816,8 +1822,12 @@ function showOrderToast(order) {
   };
   stack.appendChild(el);
   // Stagger entrance for batch orders
-  const delay = stack.children.length > 1 ? (stack.children.length - 1) * 120 : 0;
-  setTimeout(() => requestAnimationFrame(() => el.classList.add('show')), delay);
+  const delay = stack.children.length > 1 ? (stack.children.length - 1) * 150 : 0;
+  setTimeout(() => {
+    requestAnimationFrame(() => el.classList.add('show'));
+    // Remove entry glow after 1s, settle to normal shadow
+    setTimeout(() => el.classList.add('settled'), 1000);
+  }, delay);
   // Auto-dismiss after 8s, pause on hover
   let timer = setTimeout(() => dismissToast(el), 8000 + delay);
   el.onmouseenter = () => clearTimeout(timer);
