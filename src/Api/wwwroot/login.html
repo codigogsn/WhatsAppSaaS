@@ -36,17 +36,40 @@
       margin: 0; padding: 0; min-height: 100vh;
       display: flex; align-items: center; justify-content: center;
       transition: background var(--transition), color var(--transition);
+      position: relative; overflow: hidden;
+    }
+
+    /* ─── Subtle grid background ─── */
+    body::before {
+      content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background-image:
+        linear-gradient(rgba(0,0,0,.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,.04) 1px, transparent 1px);
+      background-size: 38px 38px;
+      -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, black 30%, transparent 80%);
+      mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, black 30%, transparent 80%);
+    }
+    [data-theme="dark"] body::before {
+      background-image:
+        linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+    }
+    /* Soft vignette overlay */
+    body::after {
+      content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
+      background: radial-gradient(ellipse 80% 80% at 50% 50%, transparent 40%, var(--bg) 100%);
     }
 
     .login-container {
       width: 100%; max-width: 400px; padding: 20px;
+      position: relative; z-index: 1;
     }
 
     .login-card {
       background: var(--card);
       border: 1px solid rgba(0,0,0,.08);
       border-radius: var(--radius);
-      padding: 40px 36px 36px;
+      padding: 44px 38px 38px;
       position: relative;
       box-shadow:
         inset 0 0 0 1px rgba(255,255,255,.70),
@@ -54,8 +77,9 @@
         inset 0 2px 4px rgba(0,0,0,.04),
         inset 0 -1px 3px rgba(0,0,0,.025),
         0 1px 2px rgba(0,0,0,.05),
-        0 4px 16px rgba(0,0,0,.08),
+        0 8px 32px rgba(0,0,0,.08),
         0 0 0 .5px rgba(0,0,0,.07);
+      transition: box-shadow .3s ease, border-color .3s ease;
     }
     .login-card::before {
       content: ''; position: absolute; inset: 0;
@@ -66,22 +90,22 @@
         inset 0 0 6px 1px rgba(0,0,0,.035);
     }
 
-    .brand { text-align: center; margin-bottom: 32px; position: relative; z-index: 2; }
-    .brand-logo { font-size: 22px; font-weight: 800; letter-spacing: 3px; color: var(--logo-color); }
-    .brand-sub { font-size: 11px; color: var(--muted); letter-spacing: .6px; text-transform: uppercase; margin-top: 6px; }
+    .brand { text-align: center; margin-bottom: 36px; position: relative; z-index: 2; }
+    .brand-logo { font-size: 22px; font-weight: 800; letter-spacing: 4px; color: var(--logo-color); }
+    .brand-sub { font-size: 10.5px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-top: 8px; font-weight: 500; }
 
-    .form-group { margin-bottom: 18px; position: relative; z-index: 2; }
+    .form-group { margin-bottom: 20px; position: relative; z-index: 2; }
     .form-group label {
-      display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary);
-      margin-bottom: 6px; letter-spacing: .3px;
+      display: block; font-size: 11.5px; font-weight: 600; color: var(--text-secondary);
+      margin-bottom: 7px; letter-spacing: .4px; text-transform: uppercase;
     }
     .form-group input {
-      width: 100%; padding: 10px 14px;
+      width: 100%; padding: 11px 14px;
       border: 1px solid rgba(0,0,0,.08);
       border-radius: var(--radius-sm);
       font-size: 14px; font-family: var(--font);
       background: var(--input-bg); color: var(--text);
-      transition: border var(--transition), box-shadow var(--transition);
+      transition: border .25s ease, box-shadow .25s ease, background .25s ease;
       outline: none;
       box-shadow:
         inset 0 0 0 1px rgba(0,0,0,.03),
@@ -91,17 +115,19 @@
     .form-group input:focus {
       border-color: var(--accent);
       box-shadow:
-        0 0 0 3px var(--accent-glow),
+        0 0 0 3.5px var(--accent-glow),
         inset 0 0 0 1px rgba(0,0,0,.02),
         inset 0 2px 4px rgba(0,0,0,.04);
     }
+    .form-group input::placeholder { color: var(--muted); opacity: .7; }
 
     .login-btn {
-      width: 100%; padding: 12px 20px;
+      width: 100%; padding: 12px 20px; margin-top: 4px;
       background: var(--accent); color: #fff; border: none;
       border-radius: var(--radius-sm);
       font-size: 14px; font-weight: 600; font-family: var(--font);
-      cursor: pointer; transition: all var(--transition);
+      cursor: pointer;
+      transition: all .25s cubic-bezier(.4,0,.2,1);
       position: relative; z-index: 2;
       border: 1px solid rgba(0,80,200,.14);
       box-shadow:
@@ -109,7 +135,7 @@
         inset 0 0 0 2px rgba(0,0,0,.04),
         inset 0 2px 3px rgba(0,0,0,.08),
         inset 0 -1px 2px rgba(0,80,200,.06),
-        0 2px 6px rgba(0,122,255,.16),
+        0 2px 8px rgba(0,122,255,.18),
         0 0 0 .5px rgba(0,80,200,.10);
     }
     .login-btn:hover {
@@ -118,12 +144,12 @@
         inset 0 0 0 1px rgba(255,255,255,.15),
         inset 0 0 0 2px rgba(0,0,0,.03),
         inset 0 2px 3px rgba(0,0,0,.06),
-        0 4px 14px rgba(0,122,255,.20),
+        0 6px 20px rgba(0,122,255,.22),
         0 0 0 .5px rgba(0,80,200,.12);
       transform: translateY(-1px);
     }
-    .login-btn:active { transform: translateY(0) scale(.98); }
-    .login-btn:disabled { opacity: .6; cursor: not-allowed; transform: none; }
+    .login-btn:active { transform: translateY(0) scale(.98); transition-duration: .1s; }
+    .login-btn:disabled { opacity: .55; cursor: not-allowed; transform: none; box-shadow: none; }
 
     .error-msg {
       color: var(--danger); font-size: 13px; text-align: center;
@@ -131,21 +157,23 @@
     }
 
     .theme-toggle {
-      position: fixed; top: 16px; right: 16px;
+      position: fixed; top: 18px; right: 18px;
       background: var(--surface); border: 1px solid var(--border);
-      color: var(--muted); width: 34px; height: 34px; border-radius: 50%;
+      color: var(--muted); width: 36px; height: 36px; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
       cursor: pointer; font-size: 15px; padding: 0; line-height: 1;
-      transition: all var(--transition);
+      transition: all .25s ease;
       box-shadow:
         inset 0 0 0 1px rgba(255,255,255,.65),
         inset 0 0 0 2px rgba(0,0,0,.025),
         0 1px 3px rgba(0,0,0,.06);
+      z-index: 10;
     }
-    .theme-toggle:hover { color: var(--text); }
+    .theme-toggle:hover { color: var(--text); transform: scale(1.05); }
+    .theme-toggle:active { transform: scale(.95); }
 
     .admin-fallback {
-      text-align: center; margin-top: 20px; position: relative; z-index: 2;
+      text-align: center; margin-top: 24px; position: relative; z-index: 2;
     }
     .admin-fallback a {
       color: var(--muted); font-size: 12px; text-decoration: none;
@@ -155,17 +183,17 @@
 
     /* Dark mode glass */
     [data-theme="dark"] .login-card {
-      border: 1px solid rgba(255,255,255,.13);
+      border: 1px solid rgba(255,255,255,.12);
       box-shadow:
-        inset 0 0 0 1px rgba(255,255,255,.08),
+        inset 0 0 0 1px rgba(255,255,255,.07),
         inset 0 0 0 2px rgba(0,0,0,.15),
         inset 0 2px 5px rgba(0,0,0,.22),
         inset 0 -1px 3px rgba(255,255,255,.04),
         0 1px 2px rgba(0,0,0,.28),
-        0 6px 24px rgba(0,0,0,.40),
-        0 0 0 .5px rgba(255,255,255,.08);
-      -webkit-backdrop-filter: blur(20px);
-      backdrop-filter: blur(20px);
+        0 12px 40px rgba(0,0,0,.45),
+        0 0 0 .5px rgba(255,255,255,.07);
+      -webkit-backdrop-filter: blur(24px) saturate(140%);
+      backdrop-filter: blur(24px) saturate(140%);
     }
     [data-theme="dark"] .login-card::before {
       box-shadow:
