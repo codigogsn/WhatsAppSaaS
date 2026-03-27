@@ -48,9 +48,13 @@ public class AdminHandoffsController : ControllerBase
         if (!string.IsNullOrWhiteSpace(globalKey) && ConstantTimeEquals(headerKey.ToString(), globalKey))
             return true;
 
-        // Also accept per-business admin keys
-        var bizKey = _db.Businesses.AsNoTracking().Any(b => b.AdminKey == headerKey.ToString() && b.IsActive);
-        return bizKey;
+        // Also accept per-business admin keys (fetch then constant-time compare)
+        var key = headerKey.ToString().Trim();
+        var bizKeys = _db.Businesses.AsNoTracking()
+            .Where(b => b.IsActive && b.AdminKey != null)
+            .Select(b => b.AdminKey!)
+            .ToList();
+        return bizKeys.Any(bk => ConstantTimeEquals(key, bk));
     }
 
     /// <summary>

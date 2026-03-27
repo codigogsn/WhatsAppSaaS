@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Api.Services;
@@ -70,7 +71,10 @@ public class WebhookController : ControllerBase
             return StatusCode(500, "Verify token not configured");
         }
 
-        if (verifyToken != expectedToken)
+        if (string.IsNullOrWhiteSpace(verifyToken)
+            || !CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(verifyToken),
+                Encoding.UTF8.GetBytes(expectedToken)))
         {
             Log.Warning("Webhook verification failed: token mismatch");
             return StatusCode(403);

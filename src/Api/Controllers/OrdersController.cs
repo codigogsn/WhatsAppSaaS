@@ -438,10 +438,10 @@ public sealed class OrdersController : ControllerBase
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
         var jwtBizId = GetJwtBusinessId();
-        var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
+        var order = jwtBizId.HasValue
+            ? await _context.Orders.SingleOrDefaultAsync(o => o.Id == id && o.BusinessId == jwtBizId.Value)
+            : await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { error = "Order not found" });
-        if (jwtBizId.HasValue && order.BusinessId != jwtBizId.Value)
-            return NotFound(new { error = "Order not found" });
 
         order.PaymentVerifiedAtUtc = DateTime.UtcNow;
         order.PaymentVerifiedBy = "dashboard";
@@ -474,10 +474,10 @@ public sealed class OrdersController : ControllerBase
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
         var jwtBizId = GetJwtBusinessId();
-        var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
+        var order = jwtBizId.HasValue
+            ? await _context.Orders.SingleOrDefaultAsync(o => o.Id == id && o.BusinessId == jwtBizId.Value)
+            : await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { error = "Order not found" });
-        if (jwtBizId.HasValue && order.BusinessId != jwtBizId.Value)
-            return NotFound(new { error = "Order not found" });
 
         order.PaymentVerifiedAtUtc = null;
         order.PaymentVerifiedBy = null;

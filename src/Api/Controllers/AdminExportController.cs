@@ -41,7 +41,8 @@ public class AdminExportController : ControllerBase
             .Select(b => new { b.Id, b.AdminKey })
             .FirstOrDefaultAsync(ct);
 
-        if (biz is null || biz.AdminKey != headerKey.ToString())
+        if (biz is null || string.IsNullOrWhiteSpace(biz.AdminKey)
+            || !AdminAuth.SafeEquals(headerKey.ToString().Trim(), biz.AdminKey.Trim()))
             return null;
 
         return biz.Id;

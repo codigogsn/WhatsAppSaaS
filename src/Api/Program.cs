@@ -193,33 +193,36 @@ try
     var app = builder.Build();
 
     // ────────────────────────────────────────
-    // DEBUG: DB info endpoint
+    // DEBUG: DB info endpoint (Development only)
     // ────────────────────────────────────────
-    app.MapGet("/debug/db", (IHostEnvironment env, AppDbContext db) =>
+    if (app.Environment.IsDevelopment())
     {
-        var conn = db.Database.GetDbConnection();
-        var expected = Path.GetFullPath(Path.Combine(env.ContentRootPath, "app.db"));
-
-        string? sqliteDataSource = null;
-        try
+        app.MapGet("/debug/db", (IHostEnvironment env, AppDbContext db) =>
         {
-            if (conn is Microsoft.Data.Sqlite.SqliteConnection sqliteConn)
-                sqliteDataSource = sqliteConn.DataSource;
-        }
-        catch { }
+            var conn = db.Database.GetDbConnection();
+            var expected = Path.GetFullPath(Path.Combine(env.ContentRootPath, "app.db"));
 
-        return Results.Ok(new
-        {
-            env = env.EnvironmentName,
-            provider = db.Database.ProviderName,
-            connectionString = conn.ConnectionString,
-            sqliteDataSource,
-            contentRoot = env.ContentRootPath,
-            cwd = Directory.GetCurrentDirectory(),
-            expectedAppDb = expected,
-            expectedAppDbExists = File.Exists(expected)
+            string? sqliteDataSource = null;
+            try
+            {
+                if (conn is Microsoft.Data.Sqlite.SqliteConnection sqliteConn)
+                    sqliteDataSource = sqliteConn.DataSource;
+            }
+            catch { }
+
+            return Results.Ok(new
+            {
+                env = env.EnvironmentName,
+                provider = db.Database.ProviderName,
+                connectionString = conn.ConnectionString,
+                sqliteDataSource,
+                contentRoot = env.ContentRootPath,
+                cwd = Directory.GetCurrentDirectory(),
+                expectedAppDb = expected,
+                expectedAppDbExists = File.Exists(expected)
+            });
         });
-    });
+    }
 
     // ────────────────────────────────────────
     // AUTO-MIGRATE (both SQLite and Postgres)
