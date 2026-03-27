@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using WhatsAppSaaS.Application.DTOs;
 using WhatsAppSaaS.Application.Interfaces;
 
@@ -12,6 +13,7 @@ namespace WhatsAppSaaS.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("ai")]
+[EnableRateLimiting("admin")]
 public sealed class AiController : ControllerBase
 {
     private readonly IAiParser _aiParser;

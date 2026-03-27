@@ -167,13 +167,24 @@ try
                     Window = TimeSpan.FromMinutes(1)
                 }));
 
-        // Admin: 30 requests per minute per IP
+        // Admin: 120 requests per minute per IP
+        // (dashboard auto-refresh fires ~5 parallel requests every 10s ≈ 30/min baseline)
         options.AddPolicy("admin", context =>
             RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
                 factory: _ => new FixedWindowRateLimiterOptions
                 {
-                    PermitLimit = 30,
+                    PermitLimit = 120,
+                    Window = TimeSpan.FromMinutes(1)
+                }));
+
+        // Login: 10 requests per minute per IP (brute-force protection)
+        options.AddPolicy("login", context =>
+            RateLimitPartition.GetFixedWindowLimiter(
+                partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                factory: _ => new FixedWindowRateLimiterOptions
+                {
+                    PermitLimit = 10,
                     Window = TimeSpan.FromMinutes(1)
                 }));
     });

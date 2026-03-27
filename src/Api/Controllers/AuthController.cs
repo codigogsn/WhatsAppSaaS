@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Api.Services;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -8,6 +9,7 @@ namespace WhatsAppSaaS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[EnableRateLimiting("login")]
 public sealed class AuthController : ControllerBase
 {
     private readonly AppDbContext _db;

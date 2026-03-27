@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -6,6 +7,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/admin/exchange-rates")]
+[EnableRateLimiting("admin")]
 public class AdminExchangeRateController : ControllerBase
 {
     private readonly AppDbContext _db;
