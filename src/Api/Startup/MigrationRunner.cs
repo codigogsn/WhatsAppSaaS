@@ -106,6 +106,13 @@ public static class MigrationRunner
     {
         try
         {
+            // Fast path: check if sentinel columns already have correct types
+            if (AreColumnTypesCorrect(conn))
+            {
+                Log.Information("SCHEMA FIX: skipped (column types already correct)");
+                return;
+            }
+
             Log.Information("SCHEMA FIX: executing column type conversions...");
             using var fixCmd = conn.CreateCommand();
             fixCmd.CommandText = """
@@ -221,6 +228,32 @@ public static class MigrationRunner
         {
             Log.Fatal(schemaEx, "SCHEMA FIX FAILED: {Type}: {Message}", schemaEx.GetType().Name, schemaEx.Message);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Quick check: if sentinel columns are already numeric/boolean, skip the full fix pass.
+    /// Checks Orders.SubtotalAmount (numeric) and Orders.CashChangeRequired (boolean) as sentinels.
+    /// </summary>
+    private static bool AreColumnTypesCorrect(System.Data.Common.DbConnection conn)
+    {
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT COUNT(*) FROM information_schema.columns
+                WHERE table_schema='public' AND (
+                    (table_name='Orders' AND column_name='SubtotalAmount' AND data_type='numeric')
+                    OR
+                    (table_name='Orders' AND column_name='CashChangeRequired' AND data_type='boolean')
+                )
+            """;
+            var count = Convert.ToInt32(cmd.ExecuteScalar());
+            return count == 2; // Both sentinel columns have correct types
+        }
+        catch
+        {
+            return false; // If check fails, run the full fix
         }
     }
 }

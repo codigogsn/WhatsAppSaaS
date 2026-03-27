@@ -6,10 +6,72 @@ namespace WhatsAppSaaS.Api.Startup;
 /// Legacy schema repair: bring a partially-migrated production DB
 /// in line with the current EF model BEFORE running migrations.
 /// All statements are idempotent (IF NOT EXISTS / IF EXISTS).
+///
+/// Once the schema is stable (all migrations recorded, correct column types),
+/// the full repair is skipped on subsequent startups.
 /// </summary>
 public static class SchemaRepair
 {
     public static void RepairLegacySchema(System.Data.Common.DbConnection conn)
+    {
+        // ── Fast path: skip full repair if schema is already stable ──
+        if (IsSchemaStable(conn))
+        {
+            Log.Information("LEGACY SCHEMA REPAIR: skipped (schema already stable)");
+            return;
+        }
+
+        Log.Information("LEGACY SCHEMA REPAIR: schema needs repair — running full repair");
+
+        RunFullRepair(conn);
+    }
+
+    /// <summary>
+    /// Checks sentinel conditions to determine if the schema is already fully repaired.
+    /// If all known migrations are recorded AND key columns have correct types, skip repair.
+    /// </summary>
+    private static bool IsSchemaStable(System.Data.Common.DbConnection conn)
+    {
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            // Check: (1) __EFMigrationsHistory exists and has our latest migration,
+            //         (2) Businesses.Id is uuid (not text),
+            //         (3) Orders.BusinessId column exists,
+            //         (4) BusinessUsers table exists
+            cmd.CommandText = """
+                SELECT
+                    (SELECT COUNT(*) FROM "__EFMigrationsHistory"
+                     WHERE "MigrationId" = '20260315000747_AddMenuPdfUpload') AS has_latest_migration,
+                    (SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema='public' AND table_name='Businesses'
+                       AND column_name='Id' AND data_type='uuid') AS biz_id_is_uuid,
+                    (SELECT COUNT(*) FROM information_schema.columns
+                     WHERE table_schema='public' AND table_name='Orders'
+                       AND column_name='BusinessId') AS orders_has_biz_id,
+                    (SELECT COUNT(*) FROM information_schema.tables
+                     WHERE table_schema='public' AND table_name='BusinessUsers') AS has_biz_users
+            """;
+
+            using var r = cmd.ExecuteReader();
+            if (r.Read())
+            {
+                var hasLatestMigration = Convert.ToInt32(r["has_latest_migration"]) > 0;
+                var bizIdIsUuid = Convert.ToInt32(r["biz_id_is_uuid"]) > 0;
+                var ordersHasBizId = Convert.ToInt32(r["orders_has_biz_id"]) > 0;
+                var hasBizUsers = Convert.ToInt32(r["has_biz_users"]) > 0;
+
+                return hasLatestMigration && bizIdIsUuid && ordersHasBizId && hasBizUsers;
+            }
+        }
+        catch
+        {
+            // If check fails (e.g. __EFMigrationsHistory doesn't exist yet), repair is needed
+        }
+        return false;
+    }
+
+    private static void RunFullRepair(System.Data.Common.DbConnection conn)
     {
         Log.Information("LEGACY SCHEMA REPAIR START");
 
@@ -97,16 +159,11 @@ public static class SchemaRepair
                 Log.Information("LEGACY COLUMN ADDED: {Col}", sql.Replace("""ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS """, "Businesses."));
         }
 
-        // ── Missing column on Orders (SpecialInstructions) ──
         ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "SpecialInstructions" text""");
-
-        // ── Payment proof columns on Orders ──
         ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PaymentProofMediaId" text""");
         ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PaymentProofSubmittedAtUtc" timestamp""");
         ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PaymentVerifiedAtUtc" timestamp""");
         ExecSql(conn, """ALTER TABLE "Orders" ADD COLUMN IF NOT EXISTS "PaymentVerifiedBy" text""");
-
-        // ── Missing columns on Customers (scale features) ──
         ExecSql(conn, """ALTER TABLE "Customers" ADD COLUMN IF NOT EXISTS "LastDeliveryAddress" text""");
 
         // ── Menu system tables ──
