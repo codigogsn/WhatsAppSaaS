@@ -40,25 +40,7 @@ public static class DatabaseSeeder
             var conn = db.Database.GetDbConnection();
             if (conn.State != System.Data.ConnectionState.Open) conn.Open();
 
-            var isPostgres = conn.GetType().Name.Contains("Npgsql", StringComparison.OrdinalIgnoreCase);
-            if (isPostgres)
-            {
-                try
-                {
-                    using var diagCmd = conn.CreateCommand();
-                    diagCmd.CommandText = """
-                        SELECT COUNT(*) FROM "Businesses"
-                        WHERE CAST("Id" AS TEXT) !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                    """;
-                    var legacyCount = Convert.ToInt64(diagCmd.ExecuteScalar());
-                    if (legacyCount > 0)
-                        Log.Warning("SEED: found {LegacyCount} business row(s) with non-UUID Id — skipped by EF, safe in raw SQL", legacyCount);
-                }
-                catch (Exception ex)
-                {
-                    Log.Debug(ex, "SEED: legacy Id diagnostic query failed (non-critical)");
-                }
-            }
+            // Legacy non-UUID business IDs are now cleaned up by SchemaRepair.CleanupInvalidBusinessIds
 
             string? existingId = null;
             string? existingToken = null;
@@ -274,7 +256,7 @@ public static class DatabaseSeeder
                         businessName = r[1]?.ToString();
                         break;
                     }
-                    Log.Warning("FOUNDER SEED: skipping business with invalid GUID id = {RawId}", rawId);
+                    Log.Debug("FOUNDER SEED: skipping business with non-UUID id = {RawId}", rawId);
                 }
             }
             if (businessGuid == Guid.Empty)

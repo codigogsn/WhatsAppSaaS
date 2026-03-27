@@ -75,6 +75,9 @@ public static class SchemaRepair
     {
         Log.Information("LEGACY SCHEMA REPAIR START");
 
+        // ── Remove legacy non-UUID business rows that block text→uuid conversion ──
+        CleanupInvalidBusinessIds(conn);
+
         // Ensure __EFMigrationsHistory exists
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "__EFMigrationsHistory" ("MigrationId" varchar(150) NOT NULL PRIMARY KEY, "ProductVersion" varchar(32) NOT NULL)""");
 
@@ -262,6 +265,121 @@ public static class SchemaRepair
         }
 
         Log.Information("LEGACY SCHEMA REPAIR DONE");
+    }
+
+    /// <summary>
+    /// Removes rows from Businesses where Id is not a valid UUID (e.g. "biz_demo_001").
+    /// These legacy demo rows block the text→uuid column type conversion.
+    /// Also cleans up any FK references in related tables.
+    /// </summary>
+    private static void CleanupInvalidBusinessIds(System.Data.Common.DbConnection conn)
+    {
+        try
+        {
+            // Check if Businesses.Id is still text type (cleanup only needed during text→uuid transition)
+            using var typeCheck = conn.CreateCommand();
+            typeCheck.CommandText = """
+                SELECT data_type FROM information_schema.columns
+                WHERE table_schema='public' AND table_name='Businesses' AND column_name='Id'
+            """;
+            var dataType = typeCheck.ExecuteScalar()?.ToString();
+            if (dataType != "text")
+            {
+                // Column is already uuid — no invalid IDs possible
+                return;
+            }
+
+            // Find non-UUID rows
+            using var findCmd = conn.CreateCommand();
+            findCmd.CommandText = """
+                SELECT "Id", "Name" FROM "Businesses"
+                WHERE CAST("Id" AS TEXT) !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+            """;
+            var invalidIds = new List<(string id, string? name)>();
+            using (var r = findCmd.ExecuteReader())
+            {
+                while (r.Read())
+                    invalidIds.Add((r[0]?.ToString() ?? "", r[1]?.ToString()));
+            }
+
+            if (invalidIds.Count == 0)
+            {
+                Log.Information("LEGACY ID CLEANUP: no invalid business IDs found");
+                return;
+            }
+
+            foreach (var (id, name) in invalidIds)
+            {
+                Log.Warning("LEGACY ID CLEANUP: removing invalid business Id={Id} Name={Name}", id, name);
+
+                // Delete referencing rows in tables that have BusinessId FK (text column)
+                // These are all demo/orphan data from the legacy row
+                string[] relatedTables = ["Orders", "OrderItems", "Customers", "ConversationStates",
+                    "MenuCategories", "MenuItems", "MenuItemAliases", "MenuPdfs",
+                    "BusinessUsers", "BackgroundJobs"];
+
+                foreach (var table in relatedTables)
+                {
+                    try
+                    {
+                        using var delRef = conn.CreateCommand();
+                        // Use text cast to safely match regardless of column type
+                        delRef.CommandText = table switch
+                        {
+                            // OrderItems references Orders, not Businesses directly
+                            "OrderItems" => $"""
+                                DELETE FROM "OrderItems" WHERE CAST("OrderId" AS TEXT) IN (
+                                    SELECT CAST("Id" AS TEXT) FROM "Orders" WHERE CAST("BusinessId" AS TEXT) = @bid
+                                )
+                            """,
+                            // MenuItems references MenuCategories, not Businesses directly
+                            "MenuItems" => $"""
+                                DELETE FROM "MenuItems" WHERE CAST("CategoryId" AS TEXT) IN (
+                                    SELECT CAST("Id" AS TEXT) FROM "MenuCategories" WHERE CAST("BusinessId" AS TEXT) = @bid
+                                )
+                            """,
+                            // MenuItemAliases references MenuItems
+                            "MenuItemAliases" => $"""
+                                DELETE FROM "MenuItemAliases" WHERE CAST("MenuItemId" AS TEXT) IN (
+                                    SELECT CAST("Id" AS TEXT) FROM "MenuItems" WHERE CAST("CategoryId" AS TEXT) IN (
+                                        SELECT CAST("Id" AS TEXT) FROM "MenuCategories" WHERE CAST("BusinessId" AS TEXT) = @bid
+                                    )
+                                )
+                            """,
+                            // Direct BusinessId reference
+                            _ => $"""DELETE FROM "{table}" WHERE CAST("BusinessId" AS TEXT) = @bid"""
+                        };
+                        var p = delRef.CreateParameter();
+                        p.ParameterName = "bid";
+                        p.Value = id;
+                        delRef.Parameters.Add(p);
+                        var rows = delRef.ExecuteNonQuery();
+                        if (rows > 0)
+                            Log.Information("LEGACY ID CLEANUP: deleted {Rows} row(s) from {Table} referencing {Id}", rows, table, id);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Debug(ex, "LEGACY ID CLEANUP: {Table} cleanup skipped for {Id} (table may not exist yet)", table, id);
+                    }
+                }
+
+                // Delete the business row itself
+                using var delBiz = conn.CreateCommand();
+                delBiz.CommandText = """DELETE FROM "Businesses" WHERE CAST("Id" AS TEXT) = @bid""";
+                var pb = delBiz.CreateParameter();
+                pb.ParameterName = "bid";
+                pb.Value = id;
+                delBiz.Parameters.Add(pb);
+                delBiz.ExecuteNonQuery();
+                Log.Information("LEGACY ID CLEANUP: deleted business Id={Id}", id);
+            }
+
+            Log.Information("LEGACY ID CLEANUP: removed {Count} invalid business row(s)", invalidIds.Count);
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "LEGACY ID CLEANUP: failed (non-fatal, text→uuid repair may still fail)");
+        }
     }
 
     public static bool ExecSql(System.Data.Common.DbConnection conn, string sql)
