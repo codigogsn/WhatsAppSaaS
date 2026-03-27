@@ -689,16 +689,16 @@
     body::before {
       content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
       background-image:
-        linear-gradient(rgba(0,0,0,.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,0,0,.035) 1px, transparent 1px);
-      background-size: 38px 38px;
+        linear-gradient(rgba(0,0,0,.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,.06) 1px, transparent 1px);
+      background-size: 40px 40px;
       -webkit-mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, black 20%, transparent 75%);
       mask-image: radial-gradient(ellipse 80% 70% at 50% 30%, black 20%, transparent 75%);
     }
     [data-theme="dark"] body::before {
       background-image:
-        linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+        linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px);
     }
 
     .app-container { max-width: 1320px; margin: 0 auto; padding: 0 24px 48px; position: relative; z-index: 1; }

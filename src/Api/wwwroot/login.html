@@ -43,16 +43,16 @@
     body::before {
       content: ''; position: fixed; inset: 0; z-index: 0; pointer-events: none;
       background-image:
-        linear-gradient(rgba(0,0,0,.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0,0,0,.04) 1px, transparent 1px);
-      background-size: 38px 38px;
+        linear-gradient(rgba(0,0,0,.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0,0,0,.06) 1px, transparent 1px);
+      background-size: 40px 40px;
       -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, black 30%, transparent 80%);
       mask-image: radial-gradient(ellipse 70% 60% at 50% 50%, black 30%, transparent 80%);
     }
     [data-theme="dark"] body::before {
       background-image:
-        linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+        linear-gradient(rgba(255,255,255,.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px);
     }
     /* Soft vignette overlay */
     body::after {
