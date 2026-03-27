@@ -39,6 +39,12 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> GetAll([FromQuery] int take = 50, [FromQuery] string? status = null, [FromQuery] Guid? businessId = null)
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
+
+        // JWT users are scoped to their own business
+        var jwtBizId = GetJwtBusinessId();
+        if (jwtBizId.HasValue)
+            businessId = jwtBizId.Value;
+
         if (take < 1) take = 1;
         if (take > 200) take = 200;
 
@@ -127,14 +133,17 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> GetById(Guid id)
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
+        var jwtBizId = GetJwtBusinessId();
         try
         {
             var conn = _context.Database.GetDbConnection();
             if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
 
+            var bizScope = jwtBizId.HasValue ? """ AND CAST("BusinessId" AS TEXT) = @bid""" : "";
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = """SELECT * FROM "Orders" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@oid) LIMIT 1""";
+            cmd.CommandText = $"""SELECT * FROM "Orders" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@oid){bizScope} LIMIT 1""";
             AddP(cmd, "oid", id.ToString());
+            if (jwtBizId.HasValue) AddP(cmd, "bid", jwtBizId.Value.ToString());
 
             Dictionary<string, object?>? orderData = null;
             string orderId = "";
@@ -251,6 +260,7 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateStatusRequest request)
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
+        var jwtBizId = GetJwtBusinessId();
         var raw = (request?.Status ?? "").Trim();
 
         if (string.IsNullOrWhiteSpace(raw))
@@ -282,11 +292,13 @@ public sealed class OrdersController : ControllerBase
 
             using (var readCmd = conn.CreateCommand())
             {
-                readCmd.CommandText = """
+                var bizScope = jwtBizId.HasValue ? """ AND CAST("BusinessId" AS TEXT) = @bid""" : "";
+                readCmd.CommandText = $"""
                     SELECT "Status", "From", "PhoneNumberId", "LastNotifiedStatus", "LastNotifiedAtUtc"
-                    FROM "Orders" WHERE "Id" = @oid LIMIT 1
+                    FROM "Orders" WHERE "Id" = @oid{bizScope} LIMIT 1
                 """;
                 AddP(readCmd, "oid", id);
+                if (jwtBizId.HasValue) AddP(readCmd, "bid", jwtBizId.Value.ToString());
 
                 using var r = await readCmd.ExecuteReaderAsync();
                 if (await r.ReadAsync())
@@ -423,8 +435,11 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> VerifyPayment(Guid id)
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
+        var jwtBizId = GetJwtBusinessId();
         var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { error = "Order not found" });
+        if (jwtBizId.HasValue && order.BusinessId != jwtBizId.Value)
+            return NotFound(new { error = "Order not found" });
 
         order.PaymentVerifiedAtUtc = DateTime.UtcNow;
         order.PaymentVerifiedBy = "dashboard";
@@ -456,8 +471,11 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> RejectPayment(Guid id)
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
+        var jwtBizId = GetJwtBusinessId();
         var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { error = "Order not found" });
+        if (jwtBizId.HasValue && order.BusinessId != jwtBizId.Value)
+            return NotFound(new { error = "Order not found" });
 
         order.PaymentVerifiedAtUtc = null;
         order.PaymentVerifiedBy = null;
@@ -495,6 +513,7 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> MarkCashChangeReturned(Guid id, [FromBody] CashChangeReturnedRequest? req = null)
     {
         if (!IsAdmin()) return Unauthorized();
+        var jwtBizId = GetJwtBusinessId();
 
         try
         {
@@ -508,14 +527,16 @@ public sealed class OrdersController : ControllerBase
 
             using (var readCmd = conn.CreateCommand())
             {
-                readCmd.CommandText = """
+                var bizScope = jwtBizId.HasValue ? """ AND CAST("BusinessId" AS TEXT) = @bid""" : "";
+                readCmd.CommandText = $"""
                     SELECT "From", "PhoneNumberId", "CustomerName", CAST("BusinessId" AS TEXT),
                            "CashChangeRequired", "CashChangeReturned",
                            "CashChangeAmountBs", "CashChangeAmount"
-                    FROM "Orders" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@oid) LIMIT 1
+                    FROM "Orders" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@oid){bizScope} LIMIT 1
                 """;
                 var p = readCmd.CreateParameter(); p.ParameterName = "oid"; p.Value = id.ToString();
                 readCmd.Parameters.Add(p);
+                if (jwtBizId.HasValue) AddP(readCmd, "bid", jwtBizId.Value.ToString());
 
                 using var reader = await readCmd.ExecuteReaderAsync();
                 if (!await reader.ReadAsync())
@@ -622,6 +643,7 @@ public sealed class OrdersController : ControllerBase
     {
         if (!IsAdmin())
             return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
+        var jwtBizId = GetJwtBusinessId();
 
         try
         {
@@ -631,6 +653,8 @@ public sealed class OrdersController : ControllerBase
                 .SingleOrDefaultAsync(ct);
 
             if (order is null)
+                return NotFound(new { error = "Order not found" });
+            if (jwtBizId.HasValue && order.BusinessId != jwtBizId.Value)
                 return NotFound(new { error = "Order not found" });
 
             if (string.IsNullOrWhiteSpace(order.PaymentProofMediaId))
@@ -795,6 +819,12 @@ public sealed class OrdersController : ControllerBase
 
     private static string SafeContentType(string ct) =>
         AllowedProofTypes.Contains(ct) ? ct : "application/octet-stream";
+
+    private Guid? GetJwtBusinessId()
+    {
+        var claim = User.FindFirstValue("businessId");
+        return Guid.TryParse(claim, out var id) ? id : null;
+    }
 
     private bool IsAdmin()
     {

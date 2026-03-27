@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
@@ -26,6 +27,12 @@ public class AdminExportsController : ControllerBase
         _db = db;
         _config = config;
         _logger = logger;
+    }
+
+    private Guid? GetJwtBusinessId()
+    {
+        var claim = User.FindFirstValue("businessId");
+        return Guid.TryParse(claim, out var id) ? id : null;
     }
 
     private bool IsAuthorized()
@@ -71,11 +78,23 @@ public class AdminExportsController : ControllerBase
     {
         try
         {
-            if (businessId.HasValue)
+            // JWT users are scoped to their own business
+            var jwtBizId = GetJwtBusinessId();
+            if (jwtBizId.HasValue)
+                businessId = jwtBizId.Value;
+
+            // JWT auth for scoped business
+            var role = User.FindFirstValue(ClaimTypes.Role);
+            var isJwtAuth = role is "Owner" or "Manager" && jwtBizId.HasValue && businessId == jwtBizId.Value;
+
+            if (!isJwtAuth)
             {
-                if (!await IsAuthorizedForBusinessAsync(businessId.Value, ct)) return Unauthorized();
+                if (businessId.HasValue)
+                {
+                    if (!await IsAuthorizedForBusinessAsync(businessId.Value, ct)) return Unauthorized();
+                }
+                else if (!IsAuthorized()) return Unauthorized();
             }
-            else if (!IsAuthorized()) return Unauthorized();
 
             var max = ClampTake(take);
             var conn = _db.Database.GetDbConnection();
@@ -135,11 +154,22 @@ public class AdminExportsController : ControllerBase
     {
         try
         {
-            if (businessId.HasValue)
+            // JWT users are scoped to their own business
+            var jwtBizId = GetJwtBusinessId();
+            if (jwtBizId.HasValue)
+                businessId = jwtBizId.Value;
+
+            var role = User.FindFirstValue(ClaimTypes.Role);
+            var isJwtAuth = role is "Owner" or "Manager" && jwtBizId.HasValue && businessId == jwtBizId.Value;
+
+            if (!isJwtAuth)
             {
-                if (!await IsAuthorizedForBusinessAsync(businessId.Value, ct)) return Unauthorized();
+                if (businessId.HasValue)
+                {
+                    if (!await IsAuthorizedForBusinessAsync(businessId.Value, ct)) return Unauthorized();
+                }
+                else if (!IsAuthorized()) return Unauthorized();
             }
-            else if (!IsAuthorized()) return Unauthorized();
 
             var max = ClampTake(take);
             var conn = _db.Database.GetDbConnection();

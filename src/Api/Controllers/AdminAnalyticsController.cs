@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
@@ -30,9 +31,24 @@ public class AdminAnalyticsController : ControllerBase
         _config = config;
     }
 
+    private Guid? GetJwtBusinessId()
+    {
+        var claim = User.FindFirstValue("businessId");
+        return Guid.TryParse(claim, out var id) ? id : null;
+    }
+
     // ── Auth helper: raw ADO.NET because Businesses.IsActive is integer ──
     private async Task<bool> IsAuthorizedAsync(Guid? businessId, CancellationToken ct)
     {
+        // JWT auth: Owner/Manager scoped to their own business
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        if (role is "Owner" or "Manager" && businessId.HasValue)
+        {
+            var jwtBizId = GetJwtBusinessId();
+            if (jwtBizId.HasValue && jwtBizId.Value == businessId.Value)
+                return true;
+        }
+
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk) || string.IsNullOrWhiteSpace(hk))
             return false;
 
@@ -93,6 +109,11 @@ public class AdminAnalyticsController : ControllerBase
     [HttpGet("/api/admin/analytics/summary")]
     public async Task<IActionResult> GetSummary([FromQuery] Guid? businessId, CancellationToken ct)
     {
+        // JWT users are scoped to their own business
+        var jwtBizId = GetJwtBusinessId();
+        if (jwtBizId.HasValue)
+            businessId = jwtBizId.Value;
+
         if (!await IsAuthorizedAsync(businessId, ct))
             return Unauthorized();
 
@@ -213,6 +234,11 @@ public class AdminAnalyticsController : ControllerBase
     [HttpGet("/api/admin/analytics/extended")]
     public async Task<IActionResult> GetExtended([FromQuery] Guid? businessId, CancellationToken ct)
     {
+        // JWT users are scoped to their own business
+        var jwtBizId = GetJwtBusinessId();
+        if (jwtBizId.HasValue)
+            businessId = jwtBizId.Value;
+
         if (!await IsAuthorizedAsync(businessId, ct))
             return Unauthorized();
 

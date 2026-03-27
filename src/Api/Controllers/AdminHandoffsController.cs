@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -27,8 +28,19 @@ public class AdminHandoffsController : ControllerBase
         _whatsAppClient = whatsAppClient;
     }
 
+    private Guid? GetJwtBusinessId()
+    {
+        var claim = User.FindFirstValue("businessId");
+        return Guid.TryParse(claim, out var id) ? id : null;
+    }
+
     private bool IsAuthorized()
     {
+        // JWT auth: Owner/Manager
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        if (role is "Owner" or "Manager")
+            return true;
+
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || string.IsNullOrWhiteSpace(headerKey))
             return false;
 
@@ -50,6 +62,11 @@ public class AdminHandoffsController : ControllerBase
     {
         if (!IsAuthorized())
             return Unauthorized();
+
+        // JWT users are scoped to their own business
+        var jwtBizId = GetJwtBusinessId();
+        if (jwtBizId.HasValue)
+            businessId = jwtBizId.Value;
 
         var q = _db.ConversationStates.AsNoTracking().AsQueryable();
 
@@ -249,6 +266,11 @@ public class AdminHandoffsController : ControllerBase
     {
         if (!IsAuthorized())
             return Unauthorized();
+
+        // JWT users are scoped to their own business
+        var jwtBizId = GetJwtBusinessId();
+        if (jwtBizId.HasValue)
+            businessId = jwtBizId.Value;
 
         var q = _db.ConversationStates.AsNoTracking().AsQueryable();
 

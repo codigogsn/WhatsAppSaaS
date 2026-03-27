@@ -1916,7 +1916,7 @@ async function loadBusinesses(){
   if (!key) { console.warn('loadBusinesses: no admin key'); if(statusEl) statusEl.innerHTML='<span class="danger">Sin admin key</span>'; return; }
   try {
     if(statusEl) statusEl.innerHTML='<span class="muted">Cargando negocios...</span>';
-    const res = await fetch('/api/admin/businesses', { headers: adminHeaders() });
+    const res = await fetch('/api/admin/businesses', { headers: jwtHeaders() });
     if (!res.ok) {
       let detail = 'HTTP ' + res.status;
       try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
@@ -1971,7 +1971,7 @@ function toggleBizPanel(){
 
 async function loadBizProfile(bizId){
   try {
-    const res = await fetch('/api/admin/businesses/' + bizId, { headers: adminHeaders() });
+    const res = await fetch('/api/admin/businesses/' + bizId, { headers: jwtHeaders() });
     if (!res.ok) {
       let detail = 'HTTP ' + res.status;
       try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
@@ -2030,7 +2030,7 @@ async function saveBizProfile(){
   try {
     const res = await fetch('/api/admin/businesses/' + bid, {
       method: 'PUT',
-      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
     if (!res.ok) { document.getElementById('bizSaveMsg').innerHTML = '<span class="danger">Error guardando</span>'; return; }
@@ -2057,7 +2057,7 @@ async function uploadBizMenuPdf(){
   document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="muted">Subiendo...</span>';
   try {
     const res = await fetch('/api/admin/businesses/' + bid + '/menu-pdf', {
-      method: 'POST', headers: adminHeaders(), body: fd
+      method: 'POST', headers: jwtHeaders(), body: fd
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -2078,7 +2078,7 @@ async function deleteBizMenuPdf(){
   if (!confirm('Eliminar el PDF del menu? El bot usara el menu por defecto.')) return;
   try {
     const res = await fetch('/api/admin/businesses/' + bid + '/menu-pdf', {
-      method: 'DELETE', headers: adminHeaders()
+      method: 'DELETE', headers: jwtHeaders()
     });
     if (res.ok) {
       document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="ok">PDF eliminado</span>';
@@ -2097,7 +2097,7 @@ async function toggleBizActive(){
   try {
     const res = await fetch('/api/admin/businesses/' + bid + '/toggle', {
       method: 'PATCH',
-      headers: adminHeaders()
+      headers: jwtHeaders()
     });
     if (!res.ok) { alert('Error cambiando estado'); return; }
     const result = await res.json();
@@ -2173,7 +2173,7 @@ async function submitCreateBiz(){
   try {
     const res = await fetch('/api/admin/businesses', {
       method: 'POST',
-      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
     if (!res.ok) {
@@ -2194,7 +2194,7 @@ async function submitCreateBiz(){
       try {
         const pdfRes = await fetch('/api/admin/businesses/' + result.id + '/menu-pdf', {
           method: 'POST',
-          headers: adminHeaders(),
+          headers: jwtHeaders(),
           body: fd
         });
         if (pdfRes.ok) {
@@ -2260,15 +2260,16 @@ function fmtDate(d){
 
 // ── KPIs ──
 async function loadSummary(){
+  const jwt = getJwt();
   const key = getAdminKey();
   const ids = ['kpiOrdersTotal','kpiUniqueCustomers','kpiTotalRevenue','kpiAvgTicket','kpiOrdersToday','kpiRevenueToday','kpiOrdersWeek','kpiReturning','kpiTopItem','kpiPaymentsPending'];
-  if (!key) { ids.forEach(id => document.getElementById(id).textContent = '-'); return; }
+  if (!jwt && !key) { ids.forEach(id => document.getElementById(id).textContent = '-'); return; }
 
   const bid = getBusinessId();
   const qs = new URLSearchParams({ts: Date.now()});
   if (bid) qs.set('businessId', bid);
   try {
-    const res = await fetch('/api/admin/analytics/summary?' + qs.toString(), { headers: adminHeaders(), cache: 'no-store' });
+    const res = await fetch('/api/admin/analytics/summary?' + qs.toString(), { headers: jwtHeaders(), cache: 'no-store' });
     if (!res.ok) { ids.forEach(id => document.getElementById(id).textContent = 'err'); return; }
     const s = await res.json();
     document.getElementById('kpiOrdersTotal').textContent = s.totalOrders ?? 0;
@@ -2285,13 +2286,14 @@ async function loadSummary(){
 }
 
 async function loadExtended(){
+  const jwt = getJwt();
   const key = getAdminKey();
-  if (!key) return;
+  if (!jwt && !key) return;
   const bid = getBusinessId();
   const qs = new URLSearchParams({ts: Date.now()});
   if (bid) qs.set('businessId', bid);
   try {
-    const res = await fetch('/api/admin/analytics/extended?' + qs.toString(), { headers: adminHeaders(), cache: 'no-store' });
+    const res = await fetch('/api/admin/analytics/extended?' + qs.toString(), { headers: jwtHeaders(), cache: 'no-store' });
     if (!res.ok) { console.warn('Extended analytics:', res.status); return; }
     const d = await res.json();
 
@@ -2367,14 +2369,15 @@ function setTodayKpis(list){
 // ── Handoffs ──
 async function loadHandoffs(){
   handoffPhones = {};
+  const jwt = getJwt();
   const key = getAdminKey();
-  if (!key) return;
+  if (!jwt && !key) return;
   const bid = getBusinessId();
   const qs = new URLSearchParams();
   if (bid) qs.set('businessId', bid);
   try {
     // Load from human endpoint (includes both handoff requested and human override)
-    const res = await fetch('/api/admin/handoffs/human?' + qs.toString(), { headers: adminHeaders(), cache: 'no-store' });
+    const res = await fetch('/api/admin/handoffs/human?' + qs.toString(), { headers: jwtHeaders(), cache: 'no-store' });
     if (!res.ok) return;
     const data = await res.json();
     const list = data.conversations || [];
@@ -2449,7 +2452,7 @@ async function sendHandoffReply(conversationId){
   try {
     const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/reply', {
       method: 'POST',
-      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg })
     });
     if (!res.ok) {
@@ -2467,7 +2470,7 @@ async function returnToBot(conversationId){
   if (!confirm('Devolver esta conversacion al bot?')) return;
   try {
     const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/return-to-bot', {
-      method: 'POST', headers: adminHeaders()
+      method: 'POST', headers: jwtHeaders()
     });
     if (!res.ok) { alert('Error devolviendo al bot'); return; }
     await load();
@@ -2477,7 +2480,7 @@ async function returnToBot(conversationId){
 async function resolveHandoff(conversationId){
   if (!confirm('Resolver handoff y reactivar el bot para esta conversacion?')) return;
   const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/resolve', {
-    method: 'POST', headers: adminHeaders()
+    method: 'POST', headers: jwtHeaders()
   });
   if (!res.ok) { alert('Error resolviendo handoff'); return; }
   await load();
@@ -2835,7 +2838,7 @@ async function updateStatus(btn) {
 async function verifyPayment(orderId){
   if (!confirm('Verificar el pago de este pedido?')) return;
   const res = await fetch('/api/orders/' + orderId + '/verify-payment', {
-    method: 'PATCH', headers: adminHeaders()
+    method: 'PATCH', headers: jwtHeaders()
   });
   if (!res.ok) { alert('Error verificando pago'); return; }
   await load();
@@ -2844,7 +2847,7 @@ async function verifyPayment(orderId){
 async function rejectPayment(orderId){
   if (!confirm('Rechazar el comprobante de pago?')) return;
   const res = await fetch('/api/orders/' + orderId + '/reject-payment', {
-    method: 'PATCH', headers: adminHeaders()
+    method: 'PATCH', headers: jwtHeaders()
   });
   if (!res.ok) { alert('Error rechazando pago'); return; }
   await load();
@@ -2854,7 +2857,7 @@ async function markChangeReturned(orderId){
   const ref = prompt('Referencia de transferencia (opcional):');
   if (ref === null) return; // user cancelled prompt
   const res = await fetch('/api/orders/' + orderId + '/cash-change-returned', {
-    method: 'PATCH', headers: {...adminHeaders(), 'Content-Type': 'application/json'},
+    method: 'PATCH', headers: {...jwtHeaders(), 'Content-Type': 'application/json'},
     body: JSON.stringify({ reference: ref || null })
   });
   if (!res.ok) { showErrorToast('Error', 'No se pudo marcar el vuelto como devuelto'); return; }
@@ -2874,7 +2877,7 @@ async function showProofPreview(orderId){
   overlay.classList.add('open');
 
   try {
-    const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: adminHeaders() });
+    const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: jwtHeaders() });
     if (!res.ok) {
       // Try to parse JSON error body from the backend
       let serverMsg = '';
@@ -2940,7 +2943,7 @@ async function rejectFromModal(){
 
 async function openProofNewTab(orderId){
   try {
-    const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: adminHeaders() });
+    const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: jwtHeaders() });
     if (!res.ok) {
       let msg = 'Error obteniendo comprobante (HTTP ' + res.status + ')';
       try { const j = await res.json(); if (j.error) msg = j.error; } catch(_){}
@@ -2958,7 +2961,7 @@ async function downloadOrdersCsv(){
     const bid = getBusinessId();
     const eqs = new URLSearchParams({take: 5000});
     if (bid) eqs.set('businessId', bid);
-    const res = await fetch('/api/admin/exports/orders.csv?' + eqs.toString(), { headers: adminHeaders() });
+    const res = await fetch('/api/admin/exports/orders.csv?' + eqs.toString(), { headers: jwtHeaders() });
     if (!res.ok) { showErrorToast('CSV Export Failed', 'Could not generate orders CSV. Please try again.'); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -2972,7 +2975,7 @@ async function downloadCustomersCsv(){
     const bid = getBusinessId();
     const cqs = new URLSearchParams({take: 5000});
     if (bid) cqs.set('businessId', bid);
-    const res = await fetch('/api/admin/exports/customers.csv?' + cqs.toString(), { headers: adminHeaders() });
+    const res = await fetch('/api/admin/exports/customers.csv?' + cqs.toString(), { headers: jwtHeaders() });
     if (!res.ok) { showErrorToast('CSV Export Failed', 'Could not generate customers CSV. Please try again.'); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -3096,7 +3099,7 @@ async function loadCrm(){
   if (bid) qs.set('businessId', bid);
   if (search) qs.set('search', search);
   try {
-    const res = await fetch('/api/admin/customers/crm?' + qs.toString(), { headers: adminHeaders() });
+    const res = await fetch('/api/admin/customers/crm?' + qs.toString(), { headers: jwtHeaders() });
     if (!res.ok) { body.textContent = 'Error loading customers'; return; }
     const data = await res.json();
     if (!data.customers || data.customers.length === 0) {
@@ -3306,7 +3309,7 @@ async function updatePromoCount(){
   el.textContent = 'Loading...';
   const filter = document.getElementById('promoFilter').value;
   try {
-    const res = await fetch('/api/admin/promotions/recipients?filter=' + filter, { headers: adminHeaders() });
+    const res = await fetch('/api/admin/promotions/recipients?filter=' + filter, { headers: jwtHeaders() });
     if (!res.ok) { el.textContent = 'Error loading count'; return; }
     const data = await res.json();
     el.textContent = data.count + ' recipient' + (data.count !== 1 ? 's' : '') + ' matched';
@@ -3324,7 +3327,7 @@ async function sendPromotion(){
   try {
     const res = await fetch('/api/admin/promotions/send', {
       method: 'POST',
-      headers: { ...adminHeaders(), 'Content-Type': 'application/json' },
+      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, filter })
     });
     const data = await res.json();
