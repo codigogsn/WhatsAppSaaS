@@ -62,9 +62,11 @@ public class WebhookController : ControllerBase
         if (string.IsNullOrWhiteSpace(expectedToken))
             expectedToken = _whatsAppOptions.VerifyToken;
 
-        if (string.IsNullOrWhiteSpace(expectedToken) || expectedToken == "your-verify-token-here")
+        if (string.IsNullOrWhiteSpace(expectedToken)
+            || expectedToken == "your-verify-token-here"
+            || expectedToken == "dev-verify-token-123")
         {
-            Log.Error("Webhook verification failed: WHATSAPP_VERIFY_TOKEN not configured.");
+            Log.Error("Webhook verification failed: WHATSAPP_VERIFY_TOKEN not configured (set env var).");
             return StatusCode(500, "Verify token not configured");
         }
 

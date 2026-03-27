@@ -261,6 +261,23 @@ try
         Log.Information("STARTUP SEEDS completed in {Elapsed}ms", seedSw.ElapsedMilliseconds);
     }
 
+    // ── Production config warnings ──
+    {
+        var envName = app.Environment.EnvironmentName;
+        if (!string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")))
+                Log.Warning("CONFIG: WHATSAPP_VERIFY_TOKEN not set — webhook verification will reject all requests");
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN"))
+                && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("META_ACCESS_TOKEN")))
+                Log.Warning("CONFIG: No WhatsApp access token set (WHATSAPP_ACCESS_TOKEN / META_ACCESS_TOKEN)");
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ADMIN_KEY")))
+                Log.Warning("CONFIG: ADMIN_KEY not set — admin endpoints will reject all requests");
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("JWT_SECRET")))
+                Log.Warning("CONFIG: JWT_SECRET not set — founder login will not work");
+        }
+    }
+
     app.UseGlobalExceptionHandling();
     app.UseRequestLogging();
     app.UseRateLimiter();
@@ -447,6 +464,19 @@ static void SeedDefaultBusiness(IServiceProvider services)
 // ──────────────────────────────────────────
 static void SeedZelleConfig(IServiceProvider services)
 {
+    // Require explicit env vars — never inject hardcoded payment recipient into production businesses
+    var zelleRecipient = Environment.GetEnvironmentVariable("ZELLE_RECIPIENT")?.Trim();
+    var zelleInstructions = Environment.GetEnvironmentVariable("ZELLE_INSTRUCTIONS")?.Trim();
+
+    if (string.IsNullOrWhiteSpace(zelleRecipient))
+    {
+        Log.Information("SEED ZELLE: skipped — ZELLE_RECIPIENT env var not set (will not inject default payment data)");
+        return;
+    }
+
+    if (string.IsNullOrWhiteSpace(zelleInstructions))
+        zelleInstructions = "Enviar comprobante por WhatsApp";
+
     using var scope = services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
@@ -462,25 +492,10 @@ static void SeedZelleConfig(IServiceProvider services)
             SET "ZelleRecipient" = @recip, "ZelleInstructions" = @instr
             WHERE CAST("IsActive" AS TEXT) IN ('true','1','t') AND "ZelleRecipient" IS NULL
         """;
-        var p1 = cmd.CreateParameter(); p1.ParameterName = "recip"; p1.Value = "insertatuzelle@gmail.com"; cmd.Parameters.Add(p1);
-        var p2 = cmd.CreateParameter(); p2.ParameterName = "instr"; p2.Value = "Enviar comprobante por WhatsApp"; cmd.Parameters.Add(p2);
+        var p1 = cmd.CreateParameter(); p1.ParameterName = "recip"; p1.Value = zelleRecipient; cmd.Parameters.Add(p1);
+        var p2 = cmd.CreateParameter(); p2.ParameterName = "instr"; p2.Value = zelleInstructions; cmd.Parameters.Add(p2);
         var rows = cmd.ExecuteNonQuery();
-        Log.Information("SEED ZELLE: updated {Rows} business(es) with ZelleRecipient/ZelleInstructions", rows);
-
-        // Verify
-        using var verify = conn.CreateCommand();
-        verify.CommandText = """
-            SELECT "Id", "Name", "ZelleRecipient", "ZelleInstructions"
-            FROM "Businesses" WHERE CAST("IsActive" AS TEXT) IN ('true','1','t') LIMIT 5
-        """;
-        using var r = verify.ExecuteReader();
-        while (r.Read())
-        {
-            Log.Information("SEED ZELLE VERIFY: bizId={Id} name={Name} ZelleRecipient={Recip} ZelleInstructions={Instr}",
-                r["Id"], r["Name"],
-                r["ZelleRecipient"] is DBNull ? "(null)" : r["ZelleRecipient"],
-                r["ZelleInstructions"] is DBNull ? "(null)" : r["ZelleInstructions"]);
-        }
+        Log.Information("SEED ZELLE: updated {Rows} business(es) with ZelleRecipient/ZelleInstructions from env vars", rows);
     }
     catch (Exception ex)
     {
