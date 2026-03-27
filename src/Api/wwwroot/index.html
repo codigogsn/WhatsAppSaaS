@@ -1044,10 +1044,10 @@
     .order-toast {
       background: var(--card); color: var(--text);
       border-left: 3px solid var(--success);
-      padding: 16px 18px; border-radius: var(--radius); width: 100%;
+      padding: 16px 18px 12px; border-radius: var(--radius); width: 100%;
       transform: translateX(110%) scale(.96); opacity: 0;
       transition: transform .45s cubic-bezier(.22,1,.36,1), opacity .35s ease;
-      pointer-events: auto; position: relative;
+      pointer-events: auto; position: relative; overflow: hidden;
     }
     .order-toast.show { transform: translateX(0) scale(1); opacity: 1; }
     .order-toast.removing { transform: translateX(110%) scale(.96); opacity: 0; }
@@ -1063,6 +1063,14 @@
     .order-toast-footer { display: flex; justify-content: space-between; align-items: center; }
     .order-toast-total { font-size: 16px; font-weight: 700; color: var(--text); }
     .order-toast-time { font-size: 11px; color: var(--muted); }
+    /* Toast progress bar */
+    .order-toast-progress {
+      position: absolute; bottom: 0; left: 0; height: 2px; background: var(--success);
+      opacity: .5; border-radius: 0 0 0 var(--radius);
+      animation: toastCountdown 8s linear forwards;
+    }
+    .order-toast:hover .order-toast-progress { animation-play-state: paused; }
+    @keyframes toastCountdown { from { width: 100%; } to { width: 0%; } }
 
     /* ═══ iOS-style toggle ═══ */
     .toggle-switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
@@ -1105,10 +1113,17 @@
     .pill { transition: all .2s ease; }
 
     @keyframes orderSlideIn {
-      from { opacity: 0; transform: translateY(-4px); }
-      to { opacity: 1; transform: translateY(0); }
+      0% { opacity: 0; transform: translateY(-6px); }
+      60% { opacity: 1; }
+      100% { opacity: 1; transform: translateY(0); }
     }
-    tr.new-order-row { animation: orderSlideIn .35s ease-out; }
+    @keyframes newRowGlow {
+      0% { box-shadow: inset 3px 0 0 var(--success), 0 0 12px rgba(52,199,89,.15); }
+      100% { box-shadow: inset 3px 0 0 var(--success), 0 0 0 transparent; }
+    }
+    tr.new-order-row {
+      animation: orderSlideIn .4s cubic-bezier(.22,1,.36,1), newRowGlow 1.5s ease-out .3s;
+    }
 
     tr.order-unread { border-left: 3px solid var(--success); background: var(--success-bg); }
     tr.order-unread td:first-child { position: relative; }
@@ -1118,6 +1133,20 @@
       background: var(--success); color: #fff; padding: 2px 6px; border-radius: 4px;
       text-transform: uppercase; margin-left: 4px; vertical-align: middle;
     }
+
+    /* ─── Global dashboard pulse on new order ─── */
+    @keyframes dashPulse {
+      0% { box-shadow: inset 0 0 0 rgba(52,199,89,0); }
+      25% { box-shadow: inset 0 0 60px rgba(52,199,89,.04); }
+      100% { box-shadow: inset 0 0 0 rgba(52,199,89,0); }
+    }
+    [data-theme="dark"] .dash-pulse { animation: dashPulseDark 1.2s ease-out; }
+    @keyframes dashPulseDark {
+      0% { box-shadow: inset 0 0 0 rgba(48,209,88,0); }
+      25% { box-shadow: inset 0 0 80px rgba(48,209,88,.06); }
+      100% { box-shadow: inset 0 0 0 rgba(48,209,88,0); }
+    }
+    .dash-pulse { animation: dashPulse 1.2s ease-out; }
 
     @keyframes kpiPulse {
       0% { box-shadow: var(--shadow), 0 0 0 0 rgba(52,199,89,.2); }
@@ -1723,35 +1752,36 @@ function playNewOrderSound() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const now = ctx.currentTime;
-    // Premium three-note chime with harmonics (C5 → E5 → G5)
-    const notes = [
-      { freq: 523, time: 0, dur: 0.18 },
-      { freq: 659, time: 0.12, dur: 0.18 },
-      { freq: 784, time: 0.24, dur: 0.28 },
-    ];
-    notes.forEach(n => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = n.freq;
-      gain.gain.setValueAtTime(0.18, now + n.time);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + n.time + n.dur);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(now + n.time);
-      osc.stop(now + n.time + n.dur + 0.05);
-      // Soft harmonic overtone
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.type = 'sine';
-      osc2.frequency.value = n.freq * 2;
-      gain2.gain.setValueAtTime(0.04, now + n.time);
-      gain2.gain.exponentialRampToValueAtTime(0.001, now + n.time + n.dur * 0.7);
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      osc2.start(now + n.time);
-      osc2.stop(now + n.time + n.dur + 0.05);
-    });
+    // Double-pulse premium chime: first phrase → pause → softer echo phrase
+    function playChime(startAt, vol) {
+      const notes = [
+        { freq: 523, time: 0,    dur: 0.16 },   // C5
+        { freq: 659, time: 0.10, dur: 0.16 },   // E5
+        { freq: 784, time: 0.20, dur: 0.26 },   // G5
+      ];
+      notes.forEach(n => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = n.freq;
+        const t = startAt + n.time;
+        gain.gain.setValueAtTime(vol, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + n.dur);
+        osc.connect(gain); gain.connect(ctx.destination);
+        osc.start(t); osc.stop(t + n.dur + 0.05);
+        // Soft harmonic overtone
+        const osc2 = ctx.createOscillator();
+        const gain2 = ctx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.value = n.freq * 2;
+        gain2.gain.setValueAtTime(vol * 0.22, t);
+        gain2.gain.exponentialRampToValueAtTime(0.001, t + n.dur * 0.7);
+        osc2.connect(gain2); gain2.connect(ctx.destination);
+        osc2.start(t); osc2.stop(t + n.dur + 0.05);
+      });
+    }
+    playChime(now, 0.18);            // First pulse — full volume
+    playChime(now + 0.50, 0.10);     // Second pulse — softer echo after 500ms
   } catch(e) { /* audio not available */ }
 }
 
@@ -1775,6 +1805,7 @@ function showOrderToast(order) {
       <span class="order-toast-total">${totalStr}</span>
       <span class="order-toast-time">justo ahora</span>
     </div>
+    <div class="order-toast-progress"></div>
   `;
   // Click toast → expand order detail row + mark as read
   el.onclick = function() {
@@ -1784,9 +1815,11 @@ function showOrderToast(order) {
     dismissToast(el);
   };
   stack.appendChild(el);
-  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
+  // Stagger entrance for batch orders
+  const delay = stack.children.length > 1 ? (stack.children.length - 1) * 120 : 0;
+  setTimeout(() => requestAnimationFrame(() => el.classList.add('show')), delay);
   // Auto-dismiss after 8s, pause on hover
-  let timer = setTimeout(() => dismissToast(el), 8000);
+  let timer = setTimeout(() => dismissToast(el), 8000 + delay);
   el.onmouseenter = () => clearTimeout(timer);
   el.onmouseleave = () => { timer = setTimeout(() => dismissToast(el), 4000); };
 }
@@ -1866,6 +1899,9 @@ function checkNewOrders(data) {
     // Pulse KPI
     const kpiCard = document.getElementById('kpiOrdersToday')?.closest('.card');
     if (kpiCard) { kpiCard.classList.remove('kpi-pulse'); void kpiCard.offsetWidth; kpiCard.classList.add('kpi-pulse'); }
+    // Global dashboard pulse
+    const appContainer = document.querySelector('.app-container');
+    if (appContainer) { appContainer.classList.remove('dash-pulse'); void appContainer.offsetWidth; appContainer.classList.add('dash-pulse'); }
     // Browser notification if tab hidden
     if (document.hidden) triggerBrowserNotification(newOrders);
   }
