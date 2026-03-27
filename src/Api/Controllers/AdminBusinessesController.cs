@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Api.Auth;
 using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -34,20 +35,28 @@ public class AdminBusinessesController : ControllerBase
     }
 
     /// <summary>
-    /// Raw ADO.NET auth — production Businesses.IsActive is integer, not boolean.
-    /// EF queries throw InvalidCastException on this column.
+    /// JWT-first auth, then raw ADO.NET X-Admin-Key fallback — production
+    /// Businesses.IsActive is integer, not boolean.
     /// </summary>
     private async Task<Business?> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
     {
-        if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || string.IsNullOrWhiteSpace(headerKey))
-            return null;
+        // Path 1: JWT with business scope
+        var isJwt = AdminAuth.IsJwtAuthorizedForBusiness(User, businessId);
 
-        var key = headerKey.ToString().Trim();
+        // Path 2: X-Admin-Key
+        var isGlobal = false;
+        string? key = null;
+        if (!isJwt)
+        {
+            if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || string.IsNullOrWhiteSpace(headerKey))
+                return null;
 
-        // Accept global admin key
-        var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
-        var isGlobal = !string.IsNullOrWhiteSpace(globalKey) && ConstantTimeEquals(key, globalKey);
-        if (!isGlobal && IsGlobalAdminLegacy(key)) isGlobal = true;
+            key = headerKey.ToString().Trim();
+
+            var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
+            isGlobal = !string.IsNullOrWhiteSpace(globalKey) && ConstantTimeEquals(key, globalKey);
+            if (!isGlobal && IsGlobalAdminLegacy(key)) isGlobal = true;
+        }
 
         try
         {
@@ -116,8 +125,8 @@ public class AdminBusinessesController : ControllerBase
                 biz.CreatedAtUtc = created;
 
             // Check key
-            if (isGlobal) return biz;
-            if (!string.IsNullOrWhiteSpace(biz.AdminKey) && ConstantTimeEquals(key, biz.AdminKey.Trim()))
+            if (isJwt || isGlobal) return biz;
+            if (key is not null && !string.IsNullOrWhiteSpace(biz.AdminKey) && ConstantTimeEquals(key, biz.AdminKey.Trim()))
                 return biz;
 
             return null;
@@ -129,19 +138,29 @@ public class AdminBusinessesController : ControllerBase
     }
 
     // GET /api/admin/businesses
-    // Global admin key → all businesses. Per-business key → only matching business.
+    // JWT Owner → own business. Global admin key → all businesses. Per-business key → matching business.
     // Uses raw ADO.NET to be immune to column-type mismatches (text vs uuid) in legacy schemas.
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
-        if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey))
-            return Unauthorized(new { error = "Missing X-Admin-Key header" });
+        // Path 1: JWT auth — Owner/Manager sees their own business
+        var jwtBizId = AdminAuth.GetBusinessId(User);
+        var isJwtAuth = AdminAuth.HasJwtAdminAccess(User) && jwtBizId.HasValue;
 
-        var key = headerKey.ToString().Trim();
-        if (string.IsNullOrWhiteSpace(key))
-            return Unauthorized(new { error = "Empty X-Admin-Key header" });
+        // Path 2: X-Admin-Key fallback
+        string? key = null;
+        var isGlobal = false;
+        if (!isJwtAuth)
+        {
+            if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey))
+                return Unauthorized(new { error = "Missing authorization" });
 
-        var isGlobal = IsGlobalAdmin() || IsGlobalAdminLegacy(key);
+            key = headerKey.ToString().Trim();
+            if (string.IsNullOrWhiteSpace(key))
+                return Unauthorized(new { error = "Empty authorization" });
+
+            isGlobal = IsGlobalAdmin() || IsGlobalAdminLegacy(key);
+        }
 
         try
         {
@@ -153,7 +172,16 @@ public class AdminBusinessesController : ControllerBase
 
             // Build query — read ALL columns as their raw DB type (text-safe)
             // SELECT * avoids "column does not exist" if legacy schema is missing columns
-            if (isGlobal)
+            if (isJwtAuth)
+            {
+                // JWT users see only their own business
+                cmd.CommandText = """SELECT * FROM "Businesses" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@bid) LIMIT 1""";
+                var p = cmd.CreateParameter();
+                p.ParameterName = "bid";
+                p.Value = jwtBizId!.Value.ToString();
+                cmd.Parameters.Add(p);
+            }
+            else if (isGlobal)
             {
                 cmd.CommandText = """SELECT * FROM "Businesses" ORDER BY "CreatedAtUtc" DESC""";
             }
@@ -162,7 +190,7 @@ public class AdminBusinessesController : ControllerBase
                 cmd.CommandText = """SELECT * FROM "Businesses" WHERE "AdminKey" = @key ORDER BY "CreatedAtUtc" DESC""";
                 var p = cmd.CreateParameter();
                 p.ParameterName = "key";
-                p.Value = key;
+                p.Value = key!;
                 cmd.Parameters.Add(p);
             }
 
@@ -218,7 +246,7 @@ public class AdminBusinessesController : ControllerBase
                 });
             }
 
-            if (isGlobal)
+            if (isJwtAuth || isGlobal)
                 return Ok(items);
 
             if (items.Count == 0)

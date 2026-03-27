@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Api.Auth;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace Api.Controllers;
@@ -12,14 +13,25 @@ namespace Api.Controllers;
 public class AdminExportController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
 
-    public AdminExportController(AppDbContext db)
+    public AdminExportController(AppDbContext db, IConfiguration config)
     {
         _db = db;
+        _config = config;
     }
 
     private async Task<Guid?> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
     {
+        // Path 1: JWT with business scope (preferred)
+        if (AdminAuth.IsJwtAuthorizedForBusiness(User, businessId))
+            return businessId;
+
+        // Path 2: Global admin key
+        if (AdminAuth.IsGlobalAdminKey(Request, _config))
+            return businessId;
+
+        // Path 3: Per-business admin key (legacy)
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || string.IsNullOrWhiteSpace(headerKey))
             return null;
 

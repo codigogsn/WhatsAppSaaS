@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Api.Auth;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -55,7 +56,10 @@ public class AdminPromotionsController : ControllerBase
         [FromQuery] Guid? businessId = null,
         CancellationToken ct = default)
     {
-        if (!IsAdmin()) return Unauthorized();
+        // JWT users are scoped to their own business
+        businessId = AdminAuth.ScopeBusinessId(User, businessId);
+
+        if (!AdminAuth.IsAuthorized(User, Request, _config)) return Unauthorized();
 
         try
         {
@@ -76,7 +80,11 @@ public class AdminPromotionsController : ControllerBase
     [HttpPost("send")]
     public async Task<IActionResult> Send([FromBody] SendPromotionRequest req, CancellationToken ct)
     {
-        if (!IsAdmin()) return Unauthorized();
+        // JWT scope: use JWT businessId if present
+        if (AdminAuth.GetBusinessId(User) is { } jwtBiz)
+            req.BusinessId = jwtBiz;
+
+        if (!AdminAuth.IsAuthorized(User, Request, _config)) return Unauthorized();
 
         var message = req.Message?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(message))

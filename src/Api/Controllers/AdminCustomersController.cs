@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Api.Auth;
 using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -34,7 +35,10 @@ public class AdminCustomersController : ControllerBase
         [FromQuery] int take = 100,
         CancellationToken ct = default)
     {
-        if (!IsAdmin()) return Unauthorized();
+        // JWT users are scoped to their own business
+        businessId = AdminAuth.ScopeBusinessId(User, businessId);
+
+        if (!AdminAuth.IsAuthorized(User, Request, _config)) return Unauthorized();
         if (take < 1) take = 1;
         if (take > 500) take = 500;
 
@@ -182,7 +186,7 @@ public class AdminCustomersController : ControllerBase
     [HttpPost("backfill-names")]
     public async Task<IActionResult> BackfillNames(CancellationToken ct)
     {
-        if (!IsAdmin()) return Unauthorized();
+        if (!AdminAuth.IsAuthorized(User, Request, _config)) return Unauthorized();
 
         try
         {

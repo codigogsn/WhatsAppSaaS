@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Api.Auth;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace WhatsAppSaaS.Api.Controllers;
@@ -57,34 +58,24 @@ public sealed class AdminMenuController : ControllerBase
     };
 
     /// <summary>
-    /// Auth check using raw ADO.NET because the Businesses table has legacy
+    /// Auth check: JWT-first (Owner/Manager scoped to business), then X-Admin-Key fallback.
+    /// Uses raw ADO.NET for per-business key because the Businesses table has legacy
     /// text/integer column types (from SQLite-generated InitV2 migration).
-    /// EF queries against Businesses would throw InvalidCastException.
     /// </summary>
     private async Task<bool> IsAuthorizedForBusinessAsync(Guid businessId, CancellationToken ct)
     {
+        // Path 1: JWT with business scope (preferred)
+        if (AdminAuth.IsJwtAuthorizedForBusiness(User, businessId))
+            return true;
+
+        // Path 2: Global admin key
+        if (AdminAuth.IsGlobalAdminKey(Request, _config))
+            return true;
+
+        // Path 3: Per-business admin key (legacy)
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk) || string.IsNullOrWhiteSpace(hk))
             return false;
 
-        var key = hk.ToString().Trim();
-
-        // Accept global admin key (no DB query needed)
-        var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
-        if (!string.IsNullOrWhiteSpace(globalKey) && SafeEquals(key, globalKey))
-            return true;
-
-        // Check legacy global key sources
-        string?[] legacySources = [
-            Environment.GetEnvironmentVariable("WHATSAPP_ADMIN_KEY"),
-            _config["WhatsApp:AdminKey"],
-        ];
-        foreach (var src in legacySources)
-        {
-            if (!string.IsNullOrWhiteSpace(src) && SafeEquals(key, src.Trim()))
-                return true;
-        }
-
-        // Per-business key: raw SQL against legacy Businesses table
         try
         {
             var conn = await GetOpenConnectionAsync(ct);
@@ -99,7 +90,7 @@ public sealed class AdminMenuController : ControllerBase
             var result = await cmd.ExecuteScalarAsync(ct);
             if (result is null or DBNull) return false;
 
-            return SafeEquals(key, result.ToString()?.Trim() ?? "");
+            return SafeEquals(hk.ToString().Trim(), result.ToString()?.Trim() ?? "");
         }
         catch
         {
@@ -108,12 +99,7 @@ public sealed class AdminMenuController : ControllerBase
     }
 
     private bool IsAuthorized()
-    {
-        var adminKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
-        if (string.IsNullOrWhiteSpace(adminKey)) return false;
-        if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk)) return false;
-        return SafeEquals(hk.ToString(), adminKey);
-    }
+        => AdminAuth.IsAuthorized(User, Request, _config);
 
     private static bool SafeEquals(string a, string b)
         => CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
