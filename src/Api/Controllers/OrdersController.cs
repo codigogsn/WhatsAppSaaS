@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
@@ -797,6 +798,12 @@ public sealed class OrdersController : ControllerBase
 
     private bool IsAdmin()
     {
+        // Path 1: valid JWT with Owner/Manager role
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        if (role is "Owner" or "Manager")
+            return true;
+
+        // Path 2: valid X-Admin-Key header
         var adminKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
         if (string.IsNullOrWhiteSpace(adminKey)) return false;
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey)) return false;

@@ -2533,7 +2533,7 @@ async function load() {
 
   const isHandoffFilter = status === 'NeedsHuman';
   const fetchUrl = '/api/orders?' + qs.toString().replace('status=NeedsHuman','');
-  const res = await fetch(fetchUrl, { cache: 'no-store' });
+  const res = await fetch(fetchUrl, { cache: 'no-store', headers: jwtHeaders() });
   if (!res.ok) { document.getElementById('msg').textContent = 'Error cargando pedidos'; console.error(`${tag} fetch failed: ${res.status}`); return; }
 
   let data = await res.json();
@@ -2824,7 +2824,7 @@ async function updateStatus(btn) {
   try {
     const res = await fetch(`/api/orders/${id}/status`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
     if (!res.ok) { const t = await res.text(); alert('Error: ' + t); return; }
