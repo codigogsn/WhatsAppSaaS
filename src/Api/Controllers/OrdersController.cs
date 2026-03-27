@@ -37,6 +37,7 @@ public sealed class OrdersController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] int take = 50, [FromQuery] string? status = null, [FromQuery] Guid? businessId = null)
     {
+        if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
         if (take < 1) take = 1;
         if (take > 200) take = 200;
 
@@ -124,6 +125,7 @@ public sealed class OrdersController : ControllerBase
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetById(Guid id)
     {
+        if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
         try
         {
             var conn = _context.Database.GetDbConnection();
@@ -247,6 +249,7 @@ public sealed class OrdersController : ControllerBase
     [HttpPatch("{id:guid}/status")]
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateStatusRequest request)
     {
+        if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
         var raw = (request?.Status ?? "").Trim();
 
         if (string.IsNullOrWhiteSpace(raw))
@@ -418,6 +421,7 @@ public sealed class OrdersController : ControllerBase
     [HttpPatch("{id:guid}/verify-payment")]
     public async Task<IActionResult> VerifyPayment(Guid id)
     {
+        if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
         var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { error = "Order not found" });
 
@@ -450,6 +454,7 @@ public sealed class OrdersController : ControllerBase
     [HttpPatch("{id:guid}/reject-payment")]
     public async Task<IActionResult> RejectPayment(Guid id)
     {
+        if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
         var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { error = "Order not found" });
 

@@ -506,8 +506,7 @@
 (function(){
   const hasToken = !!localStorage.getItem('AUTH_TOKEN');
   const hasAdminKey = !!localStorage.getItem('ADMIN_KEY');
-  const bypassParam = new URLSearchParams(window.location.search).get('bypass') === 'adminkey';
-  if (!hasToken && !hasAdminKey && !bypassParam) {
+  if (!hasToken && !hasAdminKey) {
     window.location.href = '/login.html';
     return;
   }

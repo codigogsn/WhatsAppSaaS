@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -38,7 +40,7 @@ public class AdminAnalyticsController : ControllerBase
 
         // Global admin key — always authorized
         var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
-        if (!string.IsNullOrWhiteSpace(globalKey) && key == globalKey)
+        if (!string.IsNullOrWhiteSpace(globalKey) && SafeEquals(key, globalKey))
             return true;
 
         // Legacy global key sources
@@ -48,7 +50,7 @@ public class AdminAnalyticsController : ControllerBase
         ];
         foreach (var src in legacySources)
         {
-            if (!string.IsNullOrWhiteSpace(src) && key == src.Trim())
+            if (!string.IsNullOrWhiteSpace(src) && SafeEquals(key, src.Trim()))
                 return true;
         }
 
@@ -75,13 +77,17 @@ public class AdminAnalyticsController : ControllerBase
             var result = await cmd.ExecuteScalarAsync(ct);
             if (result is null or DBNull) return false;
 
-            return result.ToString()?.Trim() == key;
+            var dbKey = result.ToString()?.Trim() ?? "";
+            return SafeEquals(key, dbKey);
         }
         catch
         {
             return false;
         }
     }
+
+    private static bool SafeEquals(string a, string b)
+        => CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
 
     // ── Legacy summary — raw ADO.NET for production schema compatibility ──
     [HttpGet("/api/admin/analytics/summary")]

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -68,7 +70,7 @@ public sealed class AdminMenuController : ControllerBase
 
         // Accept global admin key (no DB query needed)
         var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
-        if (!string.IsNullOrWhiteSpace(globalKey) && key == globalKey)
+        if (!string.IsNullOrWhiteSpace(globalKey) && SafeEquals(key, globalKey))
             return true;
 
         // Check legacy global key sources
@@ -78,7 +80,7 @@ public sealed class AdminMenuController : ControllerBase
         ];
         foreach (var src in legacySources)
         {
-            if (!string.IsNullOrWhiteSpace(src) && key == src.Trim())
+            if (!string.IsNullOrWhiteSpace(src) && SafeEquals(key, src.Trim()))
                 return true;
         }
 
@@ -97,7 +99,7 @@ public sealed class AdminMenuController : ControllerBase
             var result = await cmd.ExecuteScalarAsync(ct);
             if (result is null or DBNull) return false;
 
-            return result.ToString()?.Trim() == key;
+            return SafeEquals(key, result.ToString()?.Trim() ?? "");
         }
         catch
         {
@@ -109,8 +111,12 @@ public sealed class AdminMenuController : ControllerBase
     {
         var adminKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
         if (string.IsNullOrWhiteSpace(adminKey)) return false;
-        return Request.Headers.TryGetValue("X-Admin-Key", out var hk) && hk.ToString() == adminKey;
+        if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk)) return false;
+        return SafeEquals(hk.ToString(), adminKey);
     }
+
+    private static bool SafeEquals(string a, string b)
+        => CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
 
     // ── Categories ──
 

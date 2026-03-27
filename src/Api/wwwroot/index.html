@@ -1619,12 +1619,11 @@
 
 <script>
 // ═══ Auth Gate ═══
-// Require login OR admin key OR bypass param. Fallback preserves access during transition.
+// Require login token OR admin key to access dashboard.
 (function authGate(){
   const hasToken = !!localStorage.getItem('AUTH_TOKEN');
   const hasAdminKey = !!localStorage.getItem('ADMIN_KEY');
-  const bypassParam = new URLSearchParams(window.location.search).get('bypass') === 'adminkey';
-  if (!hasToken && !hasAdminKey && !bypassParam) {
+  if (!hasToken && !hasAdminKey) {
     window.location.href = '/login.html';
     return;
   }

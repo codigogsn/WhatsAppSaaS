@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -33,9 +34,9 @@ public class AdminExportsController : ControllerBase
             return false;
         var key = hk.ToString().Trim();
         var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
-        if (!string.IsNullOrWhiteSpace(globalKey) && key == globalKey) return true;
+        if (!string.IsNullOrWhiteSpace(globalKey) && SafeEquals(key, globalKey)) return true;
         string?[] legacy = [Environment.GetEnvironmentVariable("WHATSAPP_ADMIN_KEY"), _config["WhatsApp:AdminKey"]];
-        return legacy.Any(s => !string.IsNullOrWhiteSpace(s) && key == s!.Trim());
+        return legacy.Any(s => !string.IsNullOrWhiteSpace(s) && SafeEquals(key, s!.Trim()));
     }
 
     private async Task<bool> IsAuthorizedForBusinessAsync(Guid businessId, CancellationToken ct)
@@ -56,10 +57,13 @@ public class AdminExportsController : ControllerBase
             var p = cmd.CreateParameter(); p.ParameterName = "bid"; p.Value = businessId.ToString();
             cmd.Parameters.Add(p);
             var result = await cmd.ExecuteScalarAsync(ct);
-            return result is not null and not DBNull && result.ToString()?.Trim() == hk.ToString().Trim();
+            return result is not null and not DBNull && SafeEquals(hk.ToString().Trim(), result.ToString()?.Trim() ?? "");
         }
         catch { return false; }
     }
+
+    private static bool SafeEquals(string a, string b)
+        => CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
 
     // GET /api/admin/exports/orders.csv?take=5000&businessId=xxx
     [HttpGet("orders.csv")]

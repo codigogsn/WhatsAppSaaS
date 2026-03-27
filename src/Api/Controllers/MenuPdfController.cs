@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -139,14 +141,17 @@ public sealed class MenuPdfController : ControllerBase
 
         // Accept global admin key
         var globalKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
-        if (!string.IsNullOrWhiteSpace(globalKey) && key == globalKey)
+        if (!string.IsNullOrWhiteSpace(globalKey) && SafeEquals(key, globalKey))
             return await _db.Businesses.FirstOrDefaultAsync(b => b.Id == businessId, ct);
 
         // Accept per-business admin key
         var biz = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == businessId, ct);
-        if (biz is not null && biz.AdminKey == key)
+        if (biz is not null && !string.IsNullOrWhiteSpace(biz.AdminKey) && SafeEquals(key, biz.AdminKey))
             return biz;
 
         return null;
     }
+
+    private static bool SafeEquals(string a, string b)
+        => CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
 }
