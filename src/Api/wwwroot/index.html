@@ -1024,6 +1024,32 @@
     .modal .form-grid input, .modal .form-grid textarea, .modal .form-grid select { width: 100%; }
     .modal .form-grid .full { grid-column: 1 / -1; }
 
+    /* ── Isolated override: Nuevo Negocio modal ── */
+    #createBizModal {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 9999 !important;
+      display: none;
+      background: rgba(0,0,0,.55) !important;
+      backdrop-filter: blur(12px) !important;
+      -webkit-backdrop-filter: blur(12px) !important;
+      overflow-y: auto !important;
+      padding: 0 !important;
+    }
+    #createBizModal.open {
+      display: block !important;
+    }
+    #createBizModal .modal {
+      position: relative !important;
+      width: min(560px, calc(100vw - 32px)) !important;
+      margin: 72px auto 32px auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+      transform: none !important;
+      top: auto !important;
+      left: auto !important;
+    }
+
     /* ═══ Proof modal ═══ */
     .proof-modal { max-width:720px; }
     .proof-modal img { max-width:100%; max-height:70vh; border-radius:var(--radius); display:block; margin:0 auto; }
@@ -2209,15 +2235,19 @@ async function toggleBizActive(){
 
 function openCreateBiz(){
   if (!getAdminKey()) { alert('Ingresa tu Admin Key primero'); return; }
-  document.getElementById('createBizModal').classList.add('open');
-  document.getElementById('createBizMsg').textContent = '';
+  var overlay = document.getElementById('createBizModal');
   // Clear form
-  ['newBizName','newBizPhone','newBizToken','newBizGreeting','newBizAddress','newBizSchedule','newBizPmBank','newBizPmId','newBizPmPhone','newBizNotifPhone'].forEach(id => {
+  document.getElementById('createBizMsg').textContent = '';
+  ['newBizName','newBizPhone','newBizToken','newBizGreeting','newBizAddress','newBizSchedule','newBizPmBank','newBizPmId','newBizPmPhone','newBizNotifPhone'].forEach(function(id){
     document.getElementById(id).value = '';
   });
   document.getElementById('newBizType').value = '';
   document.getElementById('newBizTypeDesc').textContent = '';
   document.getElementById('newBizMenuPdf').value = '';
+  // Open
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  overlay.scrollTop = 0;
 }
 // Template type descriptions + live preview
 document.getElementById('newBizType')?.addEventListener('change', async function(){
@@ -2242,7 +2272,9 @@ document.getElementById('newBizType')?.addEventListener('change', async function
 });
 
 function closeCreateBiz(){
-  document.getElementById('createBizModal').classList.remove('open');
+  var overlay = document.getElementById('createBizModal');
+  overlay.classList.remove('open');
+  document.body.style.overflow = '';
 }
 
 // ── Autofill Nuevo Negocio ──
