@@ -2210,17 +2210,29 @@ async function toggleBizActive(){
 function openCreateBiz(){
   if (!getAdminKey()) { alert('Ingresa tu Admin Key primero'); return; }
   const overlay = document.getElementById('createBizModal');
-  overlay.classList.add('open');
-  overlay.scrollTop = 0;
-  document.body.style.overflow = 'hidden';
+  // Clear form BEFORE opening to avoid scroll-to-input side effects
   document.getElementById('createBizMsg').textContent = '';
-  // Clear form
   ['newBizName','newBizPhone','newBizToken','newBizGreeting','newBizAddress','newBizSchedule','newBizPmBank','newBizPmId','newBizPmPhone','newBizNotifPhone'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('newBizType').value = '';
   document.getElementById('newBizTypeDesc').textContent = '';
   document.getElementById('newBizMenuPdf').value = '';
+  // Now open
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  overlay.scrollTop = 0;
+  const modal = overlay.querySelector('.modal');
+  if (modal) modal.scrollTop = 0;
+  // Force scroll to top after render
+  requestAnimationFrame(function(){
+    overlay.scrollTop = 0;
+    if (modal) modal.scrollTop = 0;
+  });
+  setTimeout(function(){
+    overlay.scrollTop = 0;
+    if (modal) modal.scrollTop = 0;
+  }, 0);
 }
 // Template type descriptions + live preview
 document.getElementById('newBizType')?.addEventListener('change', async function(){
@@ -2245,7 +2257,11 @@ document.getElementById('newBizType')?.addEventListener('change', async function
 });
 
 function closeCreateBiz(){
-  document.getElementById('createBizModal').classList.remove('open');
+  const overlay = document.getElementById('createBizModal');
+  overlay.classList.remove('open');
+  overlay.scrollTop = 0;
+  var modal = overlay.querySelector('.modal');
+  if (modal) modal.scrollTop = 0;
   document.body.style.overflow = '';
 }
 
