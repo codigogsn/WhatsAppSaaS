@@ -1399,8 +1399,33 @@
       </div>
       <div class="biz-actions" style="margin-top:16px;">
         <button class="primary" onclick="submitCreateBiz()">Crear Negocio</button>
+        <button onclick="openAutofillBiz()" style="background:var(--accent-subtle);color:var(--accent);font-weight:600;">Autollenar desde texto</button>
         <button onclick="closeCreateBiz()">Cancelar</button>
         <span id="createBizMsg" class="small"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Autofill Nuevo Negocio Modal -->
+  <div id="autofillBizModal" class="modal-overlay" onclick="if(event.target===this)closeAutofillBiz()">
+    <div class="modal" style="max-width:600px;">
+      <h3>Autollenar Nuevo Negocio</h3>
+      <div class="helper" style="margin-bottom:10px;">Pega los datos del negocio en formato <b>Campo: Valor</b>, uno por linea.</div>
+      <textarea id="autofillBizInput" rows="14" style="width:100%;font-family:'SF Mono',Menlo,monospace;font-size:12px;resize:vertical;margin-bottom:10px;" placeholder="Nombre: La Pagoda
+Phone Number ID: 123456789
+Access Token: EAAB...
+Saludo: Hola, bienvenido a La Pagoda
+Direccion: Las Mercedes, Caracas
+Horario: Lun-Dom 12pm-10pm
+Banco: Banesco
+CI/RIF: J-12345678-9
+Tel Pago Movil: 04141234567
+Tel Notificaciones: +584141234567
+Tipo: burger"></textarea>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="primary" onclick="applyAutofillBiz()">Aplicar</button>
+        <button onclick="closeAutofillBiz()">Cancelar</button>
+        <span id="autofillBizMsg" class="small"></span>
       </div>
     </div>
   </div>
@@ -2218,6 +2243,87 @@ document.getElementById('newBizType')?.addEventListener('change', async function
 
 function closeCreateBiz(){
   document.getElementById('createBizModal').classList.remove('open');
+}
+
+// ── Autofill Nuevo Negocio ──
+function openAutofillBiz(){
+  document.getElementById('autofillBizModal').classList.add('open');
+  document.getElementById('autofillBizInput').value='';
+  document.getElementById('autofillBizMsg').textContent='';
+}
+function closeAutofillBiz(){
+  document.getElementById('autofillBizModal').classList.remove('open');
+}
+function applyAutofillBiz(){
+  const raw=document.getElementById('autofillBizInput').value.trim();
+  const msgEl=document.getElementById('autofillBizMsg');
+  if(!raw){msgEl.innerHTML='<span style="color:var(--danger);">Pega datos primero</span>';return;}
+
+  const fieldMap=[
+    {ids:['nombre','negocio','restaurant name','name'],target:'newBizName'},
+    {ids:['phone number id','phonenumberid','numero id','phone id'],target:'newBizPhone'},
+    {ids:['access token','token','accesstoken'],target:'newBizToken'},
+    {ids:['saludo','bienvenida','greeting'],target:'newBizGreeting'},
+    {ids:['direccion','dirección','address','direcció'],target:'newBizAddress'},
+    {ids:['horario','schedule','hours'],target:'newBizSchedule'},
+    {ids:['banco','banco pago movil','bank'],target:'newBizPmBank'},
+    {ids:['ci/rif','rif','cedula','cédula','ci','c.i./rif'],target:'newBizPmId'},
+    {ids:['tel pago movil','telefono pago movil','pago movil','tel pagomovil'],target:'newBizPmPhone'},
+    {ids:['tel notificaciones','telefono notificaciones','whatsapp notificaciones','tel notif'],target:'newBizNotifPhone'},
+    {ids:['tipo','tipo de restaurante','restaurant type','type'],target:'newBizType',isSelect:true},
+  ];
+
+  const typeAliases={'hamburguesa':'burger','hamburguesas':'burger','burger':'burger','pizza':'pizza','pizzeria':'pizza','pizzería':'pizza','sushi':'sushi','arepa':'arepa','arepera':'arepa','cafe':'cafe','cafeteria':'cafe','cafetería':'cafe','restaurant':'','restaurante':''};
+
+  const lines=raw.split('\n');
+  const parsed={};
+  let currentKey=null;
+
+  for(const line of lines){
+    const colonIdx=line.indexOf(':');
+    if(colonIdx>0){
+      const label=line.substring(0,colonIdx).trim().toLowerCase();
+      const value=line.substring(colonIdx+1).trim();
+      const match=fieldMap.find(f=>f.ids.includes(label));
+      if(match){
+        parsed[match.target]=value;
+        currentKey=match.target==='newBizGreeting'?match.target:null;
+        continue;
+      }
+    }
+    if(currentKey && line.trim()){
+      parsed[currentKey]+='\n'+line.trim();
+    }
+  }
+
+  let filled=0;
+  for(const[target,value] of Object.entries(parsed)){
+    if(!value) continue;
+    const el=document.getElementById(target);
+    if(!el) continue;
+    const fm=fieldMap.find(f=>f.target===target);
+    if(fm&&fm.isSelect){
+      const normalized=value.toLowerCase().trim();
+      const mapped=typeAliases[normalized];
+      if(mapped!==undefined){el.value=mapped;el.dispatchEvent(new Event('change'));filled++;}
+    }else{
+      el.value=value;
+      filled++;
+    }
+  }
+
+  if(filled===0){
+    msgEl.innerHTML='<span style="color:var(--danger);">No se reconocieron campos. Usa formato "Campo: Valor"</span>';
+    return;
+  }
+
+  document.getElementById('autofillBizModal').classList.remove('open');
+  const t=document.createElement('div');
+  t.textContent=filled+' campo'+(filled>1?'s':'')+' autollenado'+(filled>1?'s':'');
+  Object.assign(t.style,{position:'fixed',bottom:'24px',left:'50%',transform:'translateX(-50%)',background:'var(--success)',color:'#fff',padding:'10px 22px',borderRadius:'10px',fontSize:'13px',fontWeight:'600',zIndex:'2000',boxShadow:'0 4px 16px rgba(0,0,0,.2)',opacity:'0',transition:'opacity .3s ease'});
+  document.body.appendChild(t);
+  requestAnimationFrame(()=>t.style.opacity='1');
+  setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3000);
 }
 
 async function submitCreateBiz(){
