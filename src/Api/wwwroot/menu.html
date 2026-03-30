@@ -460,6 +460,7 @@
     <button onclick="loadBusinesses()">&#x21bb;</button>
     <span id="bizStatus" class="small"></span>
     <span id="msg" class="muted small"></span>
+    <button onclick="openImportModal()" style="background:var(--accent);color:#fff;font-weight:600;font-size:13px;">Importar Menu</button>
     <span style="flex:1;"></span>
     <a href="/" class="small" style="font-weight:500;">← Dashboard</a>
   </div>
@@ -735,9 +736,198 @@ async function deleteAlias(id){
   await loadAll();
 }
 
+// ── Bulk Import Modal ──
+
+function openImportModal(){
+  if(!bid()) return alert('Selecciona un negocio primero');
+  document.getElementById('importModal').style.display='flex';
+  document.getElementById('importRaw').value='';
+  document.getElementById('importPreview').innerHTML='';
+  document.getElementById('importResult').innerHTML='';
+  document.getElementById('importBtn').disabled=true;
+}
+function closeImportModal(){
+  document.getElementById('importModal').style.display='none';
+}
+
+function parseImportPreview(){
+  const mode = document.getElementById('importMode').value;
+  const raw = document.getElementById('importRaw').value.trim();
+  const preview = document.getElementById('importPreview');
+  const importBtn = document.getElementById('importBtn');
+  document.getElementById('importResult').innerHTML='';
+  if(!raw){ preview.innerHTML='<span class="muted">Pega el contenido arriba</span>'; importBtn.disabled=true; return; }
+
+  let categories = [];
+  let warnings = [];
+
+  if(mode==='json'){
+    try {
+      const arr = JSON.parse(raw);
+      if(!Array.isArray(arr)){ preview.innerHTML='<span class="danger">JSON debe ser un array</span>'; importBtn.disabled=true; return; }
+      for(const c of arr){
+        const cat = {name: c.category||'', items:[]};
+        for(const it of (c.items||[])){
+          cat.items.push({
+            name: it.name||'',
+            price: parseFloat(it.price)||0,
+            description: it.description||'',
+            aliases: Array.isArray(it.aliases)?it.aliases:[]
+          });
+        }
+        categories.push(cat);
+      }
+    } catch(e){
+      preview.innerHTML='<span class="danger">JSON invalido: '+esc(e.message)+'</span>';
+      importBtn.disabled=true;
+      return;
+    }
+  } else {
+    let current = null;
+    const lines = raw.split('\n');
+    for(let i=0;i<lines.length;i++){
+      const line = lines[i].trim();
+      if(!line) continue;
+      if(/^(category|categoria|categoría)\s*:/i.test(line)){
+        const catName = line.substring(line.indexOf(':')+1).trim();
+        if(!catName){ warnings.push('Linea '+(i+1)+': categoria sin nombre'); continue; }
+        current = {name:catName, items:[]};
+        categories.push(current);
+        continue;
+      }
+      if(line.startsWith('-') && current){
+        const content = line.substring(1).trim();
+        const parts = content.split('|');
+        if(parts.length<2){ warnings.push('Linea '+(i+1)+': se necesita nombre|precio'); continue; }
+        const name = parts[0].trim();
+        const priceStr = parts[1].trim().replace(',','.');
+        const price = parseFloat(priceStr);
+        if(isNaN(price)||price<0){ warnings.push('Linea '+(i+1)+': precio invalido "'+parts[1].trim()+'"'); continue; }
+        const desc = parts.length>2?parts[2].trim():'';
+        const aliases = parts.length>3?parts[3].split(',').map(a=>a.trim()).filter(Boolean):[];
+        if(!name){ warnings.push('Linea '+(i+1)+': nombre vacio'); continue; }
+        current.items.push({name,price,description:desc,aliases});
+        continue;
+      }
+      if(!current && line.startsWith('-')){
+        warnings.push('Linea '+(i+1)+': item sin categoria');
+      }
+    }
+  }
+
+  if(categories.length===0){
+    preview.innerHTML='<span class="danger">No se detectaron categorias</span>';
+    importBtn.disabled=true;
+    return;
+  }
+
+  let totalItems=0, totalAliases=0;
+  let html='<table style="margin-top:0;"><thead><tr><th>Categoria</th><th>Item</th><th>Precio</th><th>Descripcion</th><th>Aliases</th></tr></thead><tbody>';
+  for(const c of categories){
+    for(const it of c.items){
+      totalItems++;
+      totalAliases+=it.aliases.length;
+      html+=`<tr>
+        <td class="muted small">${esc(c.name)}</td>
+        <td><b>${esc(it.name)}</b></td>
+        <td>${it.price.toFixed(2)}</td>
+        <td class="muted small">${esc(it.description||'')}</td>
+        <td class="small">${it.aliases.map(a=>'<span class="pill" style="font-size:11px;">'+esc(a)+'</span>').join(' ')||'—'}</td>
+      </tr>`;
+    }
+  }
+  html+='</tbody></table>';
+
+  let summary='<div style="margin-bottom:10px;font-size:13px;"><b>'+categories.length+'</b> categorias, <b>'+totalItems+'</b> items, <b>'+totalAliases+'</b> aliases detectados</div>';
+  if(warnings.length>0){
+    summary+='<div style="margin-bottom:8px;font-size:12px;color:var(--warning);">Advertencias:<br>'+warnings.map(w=>'• '+esc(w)).join('<br>')+'</div>';
+  }
+  preview.innerHTML=summary+html;
+  importBtn.disabled=false;
+}
+
+async function executeImport(){
+  const mode = document.getElementById('importMode').value;
+  const raw = document.getElementById('importRaw').value.trim();
+  const resultEl = document.getElementById('importResult');
+  if(!raw||!bid()) return;
+
+  document.getElementById('importBtn').disabled=true;
+  resultEl.innerHTML='<span class="muted">Importando...</span>';
+
+  try {
+    const res = await fetch('/api/admin/menu/import', {
+      method:'POST', headers:hdrs(),
+      body: JSON.stringify({businessId:bid(), mode, rawInput:raw})
+    });
+    const data = await res.json();
+    if(!res.ok){
+      resultEl.innerHTML='<span class="danger">Error: '+esc(data.error||JSON.stringify(data))+'</span>';
+      document.getElementById('importBtn').disabled=false;
+      return;
+    }
+    let html='<div style="padding:12px;background:var(--success-bg);border-radius:var(--radius-sm);font-size:13px;">';
+    html+='<b style="color:var(--success);">Importacion completada</b><br>';
+    html+='Categorias creadas: <b>'+data.categoriesCreated+'</b><br>';
+    html+='Items creados: <b>'+data.itemsCreated+'</b><br>';
+    html+='Aliases creados: <b>'+data.aliasesCreated+'</b><br>';
+    if(data.skipped>0) html+='Duplicados omitidos: <b>'+data.skipped+'</b><br>';
+    if(data.warnings&&data.warnings.length>0){
+      html+='<div style="margin-top:6px;color:var(--warning);font-size:12px;">Advertencias:<br>'+data.warnings.map(w=>'• '+esc(w)).join('<br>')+'</div>';
+    }
+    html+='</div>';
+    resultEl.innerHTML=html;
+    await loadAll();
+  } catch(e){
+    resultEl.innerHTML='<span class="danger">Error: '+esc(e.message)+'</span>';
+    document.getElementById('importBtn').disabled=false;
+  }
+}
+
 // Init
 document.getElementById('adminKey').value = getKey();
 loadBusinesses();
 </script>
+
+<!-- Import Modal -->
+<div id="importModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:var(--radius-xl);padding:28px 32px;width:92vw;max-width:900px;max-height:90vh;overflow-y:auto;box-shadow:var(--shadow-md);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:18px;">Importar Menu</h3>
+      <button onclick="closeImportModal()" style="font-size:18px;background:none;border:none;color:var(--muted);cursor:pointer;box-shadow:none;">&times;</button>
+    </div>
+
+    <div class="helper" style="margin-bottom:14px;">
+      Pega texto estructurado o JSON para importar categorias, items, precios y aliases de una sola vez.<br>
+      <b>Tip:</b> Usa Claude o ChatGPT para convertir un PDF de menu a texto estructurado, luego pegalo aqui.
+    </div>
+
+    <div class="row" style="margin-bottom:10px;">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);">Formato:</label>
+      <select id="importMode" style="width:180px;" onchange="parseImportPreview()">
+        <option value="text">Texto Estructurado</option>
+        <option value="json">JSON</option>
+      </select>
+    </div>
+
+    <textarea id="importRaw" rows="12" style="width:100%;font-family:'SF Mono',Menlo,monospace;font-size:12px;resize:vertical;margin-bottom:10px;"
+      placeholder="Category: Entradas
+- Cremas | 6 | garbanzo, pimentón, berenjena | cremas, crema, hummus
+- Falafel | 5 | 6 unidades | falafel
+
+Category: Shawarmas
+- Shawarma 200 grs | 4.5 | carne, pollo o mixto | shawarma, shawarma 200"
+      oninput="parseImportPreview()"></textarea>
+
+    <div style="display:flex;gap:8px;margin-bottom:14px;">
+      <button onclick="parseImportPreview()" class="primary">Previsualizar</button>
+      <button id="importBtn" onclick="executeImport()" disabled style="background:var(--success);color:#fff;border-color:rgba(0,80,0,.14);">Confirmar Importacion</button>
+      <button onclick="closeImportModal()">Cancelar</button>
+    </div>
+
+    <div id="importPreview" style="margin-bottom:10px;"></div>
+    <div id="importResult"></div>
+  </div>
+</div>
 </body>
 </html>

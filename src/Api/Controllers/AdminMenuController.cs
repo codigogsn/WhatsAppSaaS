@@ -734,6 +734,313 @@ public sealed class AdminMenuController : ControllerBase
         public string Alias { get; set; } = "";
     }
 
+    // ── Bulk Import ──
+
+    public sealed class BulkImportRequest
+    {
+        public Guid BusinessId { get; set; }
+        public string Mode { get; set; } = "text"; // "text" or "json"
+        public string RawInput { get; set; } = "";
+    }
+
+    private sealed class ParsedCategory
+    {
+        public string Name { get; set; } = "";
+        public List<ParsedItem> Items { get; set; } = new();
+    }
+
+    private sealed class ParsedItem
+    {
+        public string Name { get; set; } = "";
+        public decimal Price { get; set; }
+        public string? Description { get; set; }
+        public List<string> Aliases { get; set; } = new();
+    }
+
+    // POST /api/admin/menu/import
+    [HttpPost("import")]
+    public async Task<IActionResult> BulkImport([FromBody] BulkImportRequest req, CancellationToken ct)
+    {
+        try
+        {
+            if (!await IsAuthorizedForBusinessAsync(req.BusinessId, ct)) return Unauthorized();
+            if (string.IsNullOrWhiteSpace(req.RawInput)) return BadRequest(new { error = "rawInput is empty" });
+
+            var categories = new List<ParsedCategory>();
+            var warnings = new List<string>();
+
+            if (req.Mode == "json")
+                ParseJsonInput(req.RawInput, categories, warnings);
+            else
+                ParseTextInput(req.RawInput, categories, warnings);
+
+            if (categories.Count == 0)
+                return BadRequest(new { error = "No categories detected", warnings });
+
+            // Execute import
+            var conn = await GetOpenConnectionAsync(ct);
+            int categoriesCreated = 0, itemsCreated = 0, aliasesCreated = 0, skipped = 0;
+
+            foreach (var cat in categories)
+            {
+                if (string.IsNullOrWhiteSpace(cat.Name))
+                {
+                    warnings.Add("Skipped category with empty name");
+                    continue;
+                }
+
+                // Check if category already exists for this business
+                Guid categoryId;
+                using (var findCat = conn.CreateCommand())
+                {
+                    findCat.CommandText = """
+                        SELECT "Id" FROM "MenuCategories"
+                        WHERE "BusinessId" = @bid AND LOWER("Name") = LOWER(@name)
+                        LIMIT 1
+                    """;
+                    MakeParam(findCat, "bid", req.BusinessId);
+                    MakeParam(findCat, "name", cat.Name.Trim());
+                    var existing = await findCat.ExecuteScalarAsync(ct);
+                    if (existing is not null and not DBNull)
+                    {
+                        categoryId = (Guid)existing;
+                    }
+                    else
+                    {
+                        categoryId = Guid.NewGuid();
+                        using var insCat = conn.CreateCommand();
+                        insCat.CommandText = """
+                            INSERT INTO "MenuCategories" ("Id", "BusinessId", "Name", "SortOrder", "IsActive", "CreatedAtUtc")
+                            VALUES (@id, @bid, @name, @sort, @active, @created)
+                        """;
+                        MakeParam(insCat, "id", categoryId);
+                        MakeParam(insCat, "bid", req.BusinessId);
+                        MakeParam(insCat, "name", cat.Name.Trim());
+                        MakeParam(insCat, "sort", categoriesCreated);
+                        MakeParam(insCat, "active", 1);
+                        MakeParam(insCat, "created", DateTime.UtcNow);
+                        await insCat.ExecuteNonQueryAsync(ct);
+                        categoriesCreated++;
+                    }
+                }
+
+                // Import items
+                foreach (var item in cat.Items)
+                {
+                    if (string.IsNullOrWhiteSpace(item.Name))
+                    {
+                        warnings.Add($"Skipped item with empty name in category '{cat.Name}'");
+                        continue;
+                    }
+
+                    // Check duplicate
+                    using var findItem = conn.CreateCommand();
+                    findItem.CommandText = """
+                        SELECT "Id" FROM "MenuItems"
+                        WHERE "CategoryId" = @cid AND LOWER("Name") = LOWER(@name)
+                        LIMIT 1
+                    """;
+                    MakeParam(findItem, "cid", categoryId);
+                    MakeParam(findItem, "name", item.Name.Trim());
+                    var existingItem = await findItem.ExecuteScalarAsync(ct);
+                    if (existingItem is not null and not DBNull)
+                    {
+                        skipped++;
+                        warnings.Add($"Duplicate skipped: '{item.Name}' in '{cat.Name}'");
+                        continue;
+                    }
+
+                    var itemId = Guid.NewGuid();
+                    using var insItem = conn.CreateCommand();
+                    insItem.CommandText = """
+                        INSERT INTO "MenuItems" ("Id", "CategoryId", "Name", "Price", "Description", "IsAvailable", "SortOrder", "CreatedAtUtc")
+                        VALUES (@id, @cid, @name, @price, @desc, @avail, @sort, @created)
+                    """;
+                    MakeParam(insItem, "id", itemId);
+                    MakeParam(insItem, "cid", categoryId);
+                    MakeParam(insItem, "name", item.Name.Trim());
+                    MakeParam(insItem, "price", item.Price);
+                    MakeParam(insItem, "desc", (object?)item.Description?.Trim() ?? DBNull.Value);
+                    MakeParam(insItem, "avail", 1);
+                    MakeParam(insItem, "sort", itemsCreated);
+                    MakeParam(insItem, "created", DateTime.UtcNow);
+                    await insItem.ExecuteNonQueryAsync(ct);
+                    itemsCreated++;
+
+                    // Import aliases
+                    foreach (var alias in item.Aliases.Where(a => !string.IsNullOrWhiteSpace(a)))
+                    {
+                        using var insAlias = conn.CreateCommand();
+                        insAlias.CommandText = """
+                            INSERT INTO "MenuItemAliases" ("Id", "MenuItemId", "Alias")
+                            VALUES (@aid, @mid, @alias)
+                        """;
+                        MakeParam(insAlias, "aid", Guid.NewGuid());
+                        MakeParam(insAlias, "mid", itemId);
+                        MakeParam(insAlias, "alias", alias.Trim().ToLowerInvariant());
+                        await insAlias.ExecuteNonQueryAsync(ct);
+                        aliasesCreated++;
+                    }
+                }
+            }
+
+            return Ok(new
+            {
+                categoriesCreated,
+                itemsCreated,
+                aliasesCreated,
+                skipped,
+                warnings
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"BulkImport failed: {ex.GetType().Name}: {ex.Message}" });
+        }
+    }
+
+    private static void ParseTextInput(string raw, List<ParsedCategory> categories, List<string> warnings)
+    {
+        ParsedCategory? current = null;
+        var lines = raw.Split('\n');
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i].Trim();
+            if (string.IsNullOrEmpty(line)) continue;
+
+            // Detect category line
+            if (line.StartsWith("Category:", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("Categoria:", StringComparison.OrdinalIgnoreCase) ||
+                line.StartsWith("Categoría:", StringComparison.OrdinalIgnoreCase))
+            {
+                var catName = line.Substring(line.IndexOf(':') + 1).Trim();
+                if (string.IsNullOrWhiteSpace(catName))
+                {
+                    warnings.Add($"Line {i + 1}: Category with empty name, skipped");
+                    current = null;
+                    continue;
+                }
+                current = new ParsedCategory { Name = catName };
+                categories.Add(current);
+                continue;
+            }
+
+            // Detect item line
+            if (line.StartsWith("-") && current != null)
+            {
+                var content = line.Substring(1).Trim();
+                var parts = content.Split('|');
+                if (parts.Length < 2)
+                {
+                    warnings.Add($"Line {i + 1}: Expected at least name|price, skipped: '{Truncate(content, 50)}'");
+                    continue;
+                }
+
+                var name = parts[0].Trim();
+                var priceStr = parts[1].Trim().Replace(',', '.');
+                if (!decimal.TryParse(priceStr, System.Globalization.NumberStyles.Any,
+                    System.Globalization.CultureInfo.InvariantCulture, out var price) || price < 0)
+                {
+                    warnings.Add($"Line {i + 1}: Invalid price '{parts[1].Trim()}' for '{name}', skipped");
+                    continue;
+                }
+
+                var desc = parts.Length > 2 ? parts[2].Trim() : null;
+                var aliases = new List<string>();
+                if (parts.Length > 3)
+                {
+                    aliases = parts[3].Split(',').Select(a => a.Trim()).Where(a => a.Length > 0).ToList();
+                }
+
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    warnings.Add($"Line {i + 1}: Empty item name, skipped");
+                    continue;
+                }
+
+                current.Items.Add(new ParsedItem { Name = name, Price = price, Description = desc, Aliases = aliases });
+                continue;
+            }
+
+            // Line doesn't match any pattern — warn if not blank
+            if (current == null && !line.StartsWith("-"))
+            {
+                warnings.Add($"Line {i + 1}: No category context, skipped: '{Truncate(line, 50)}'");
+            }
+        }
+    }
+
+    private static void ParseJsonInput(string raw, List<ParsedCategory> categories, List<string> warnings)
+    {
+        try
+        {
+            var arr = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(raw);
+            if (arr.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                warnings.Add("JSON root must be an array");
+                return;
+            }
+
+            foreach (var catEl in arr.EnumerateArray())
+            {
+                var catName = catEl.TryGetProperty("category", out var cn) ? cn.GetString() ?? "" : "";
+                if (string.IsNullOrWhiteSpace(catName))
+                {
+                    warnings.Add("JSON: category with empty name, skipped");
+                    continue;
+                }
+
+                var cat = new ParsedCategory { Name = catName };
+                if (catEl.TryGetProperty("items", out var itemsEl) && itemsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+                {
+                    foreach (var itemEl in itemsEl.EnumerateArray())
+                    {
+                        var name = itemEl.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
+                        if (string.IsNullOrWhiteSpace(name))
+                        {
+                            warnings.Add($"JSON: item with empty name in '{catName}', skipped");
+                            continue;
+                        }
+
+                        decimal price = 0;
+                        if (itemEl.TryGetProperty("price", out var p))
+                        {
+                            if (p.ValueKind == System.Text.Json.JsonValueKind.Number)
+                                price = p.GetDecimal();
+                            else if (p.ValueKind == System.Text.Json.JsonValueKind.String)
+                            {
+                                var ps = p.GetString()?.Replace(',', '.') ?? "0";
+                                decimal.TryParse(ps, System.Globalization.NumberStyles.Any,
+                                    System.Globalization.CultureInfo.InvariantCulture, out price);
+                            }
+                        }
+
+                        var desc = itemEl.TryGetProperty("description", out var d) ? d.GetString() : null;
+
+                        var aliases = new List<string>();
+                        if (itemEl.TryGetProperty("aliases", out var al) && al.ValueKind == System.Text.Json.JsonValueKind.Array)
+                        {
+                            foreach (var a in al.EnumerateArray())
+                            {
+                                var av = a.GetString();
+                                if (!string.IsNullOrWhiteSpace(av)) aliases.Add(av);
+                            }
+                        }
+
+                        cat.Items.Add(new ParsedItem { Name = name, Price = price, Description = desc, Aliases = aliases });
+                    }
+                }
+                categories.Add(cat);
+            }
+        }
+        catch (System.Text.Json.JsonException ex)
+        {
+            warnings.Add($"Invalid JSON: {ex.Message}");
+        }
+    }
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s.Substring(0, max) + "...";
+
     // ── Public menu (no auth) ──
 
     // GET /api/menu?businessId=xxx
