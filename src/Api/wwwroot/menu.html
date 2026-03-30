@@ -866,22 +866,22 @@ async function executeImport(){
       document.getElementById('importBtn').disabled=false;
       return;
     }
-    let html='<div style="padding:12px;background:var(--success-bg);border-radius:var(--radius-sm);font-size:13px;">';
-    html+='<b style="color:var(--success);">Importacion completada</b><br>';
-    html+='Categorias creadas: <b>'+data.categoriesCreated+'</b><br>';
-    html+='Items creados: <b>'+data.itemsCreated+'</b><br>';
-    html+='Aliases creados: <b>'+data.aliasesCreated+'</b><br>';
-    if(data.skipped>0) html+='Duplicados omitidos: <b>'+data.skipped+'</b><br>';
-    if(data.warnings&&data.warnings.length>0){
-      html+='<div style="margin-top:6px;color:var(--warning);font-size:12px;">Advertencias:<br>'+data.warnings.map(w=>'• '+esc(w)).join('<br>')+'</div>';
-    }
-    html+='</div>';
-    resultEl.innerHTML=html;
     await loadAll();
+    closeImportModal();
+    showToast('Menu importado — '+data.categoriesCreated+' categorias, '+data.itemsCreated+' items, '+data.aliasesCreated+' aliases creados'+(data.skipped?' ('+data.skipped+' duplicados omitidos)':''));
   } catch(e){
     resultEl.innerHTML='<span class="danger">Error: '+esc(e.message)+'</span>';
     document.getElementById('importBtn').disabled=false;
   }
+}
+
+function showToast(msg){
+  const t=document.createElement('div');
+  t.textContent=msg;
+  Object.assign(t.style,{position:'fixed',bottom:'24px',left:'50%',transform:'translateX(-50%)',background:'var(--success)',color:'#fff',padding:'10px 22px',borderRadius:'var(--radius-sm)',fontSize:'13px',fontWeight:'600',fontFamily:'var(--font)',zIndex:'2000',boxShadow:'0 4px 16px rgba(0,0,0,.2)',opacity:'0',transition:'opacity .3s ease'});
+  document.body.appendChild(t);
+  requestAnimationFrame(()=>t.style.opacity='1');
+  setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3500);
 }
 
 // Init
