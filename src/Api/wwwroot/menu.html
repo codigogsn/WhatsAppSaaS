@@ -866,9 +866,13 @@ async function executeImport(){
       document.getElementById('importBtn').disabled=false;
       return;
     }
-    await loadAll();
-    closeImportModal();
+    document.getElementById('importModal').style.display='none';
+    document.getElementById('importRaw').value='';
+    document.getElementById('importPreview').innerHTML='';
+    document.getElementById('importResult').innerHTML='';
+    document.getElementById('importBtn').disabled=true;
     showToast('Menu importado — '+data.categoriesCreated+' categorias, '+data.itemsCreated+' items, '+data.aliasesCreated+' aliases creados'+(data.skipped?' ('+data.skipped+' duplicados omitidos)':''));
+    loadAll();
   } catch(e){
     resultEl.innerHTML='<span class="danger">Error: '+esc(e.message)+'</span>';
     document.getElementById('importBtn').disabled=false;
