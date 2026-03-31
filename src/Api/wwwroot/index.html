@@ -2047,7 +2047,8 @@ function updateBizAdminButton(){
   var role = getAuthRole();
   if (bid && businessList.length > 0) {
     // Owner: all buttons. Manager/Operator: hide admin buttons.
-    var isAdmin = !role || role === 'Owner' || getAdminKey();
+    var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
+    var isAdmin = !role || role === 'Owner' || (getAdminKey() && !isStaff);
     btn.style.display = isAdmin ? '' : 'none';
     menuBtn.style.display = (isAdmin || role === 'Manager') ? '' : 'none';
     const biz = businessList.find(b => b.id === bid);
@@ -3259,7 +3260,9 @@ function updateLoginUI(){
 
 function applyRoleVisibility(){
   var role = getAuthRole();
-  if (!role || getAdminKey()) return; // founder/admin: no restrictions
+  var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
+  if (!role) return;
+  if (getAdminKey() && !isStaff) return; // founder/admin: no restrictions
   var newBiz = document.getElementById('btnNewBiz');
   var customers = document.getElementById('btnCustomers');
   // Manager: hide Usuarios (handled in updateUsersButton), hide Nuevo Negocio
@@ -3276,8 +3279,9 @@ function applyRoleVisibility(){
 function updateUsersButton(){
   var btn = document.getElementById('btnUsersAdmin');
   var role = getAuthRole();
-  // Only Owner or global admin can see Usuarios
-  if (role === 'Owner' || getAdminKey()) {
+  var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
+  // Only Owner or global admin (non-staff) can see Usuarios
+  if (role === 'Owner' || (getAdminKey() && !isStaff)) {
     btn.style.display = '';
   } else {
     btn.style.display = 'none';

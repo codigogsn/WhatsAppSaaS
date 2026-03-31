@@ -395,6 +395,11 @@ async function doLogin(mode) {
     localStorage.setItem('AUTH_USER', JSON.stringify(data.user));
     localStorage.setItem('LOGIN_MODE', mode);
 
+    // Staff login: clear founder admin key so role restrictions apply
+    if (mode === 'staff') {
+      localStorage.removeItem('ADMIN_KEY');
+    }
+
     window.location.href = '/';
   } catch (err) {
     errEl.textContent = 'Error de conexion: ' + (err.message || err);
