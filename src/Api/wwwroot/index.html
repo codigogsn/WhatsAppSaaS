@@ -743,7 +743,7 @@
     .brand-product-sub { font-size: 10px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
     .brand-right { display: flex; align-items: center; gap: 8px; }
     .brand-right .key-input {
-      background: var(--input-bg);
+      background: var(--input-bg); border: 1px solid var(--border);
       color: var(--text); padding: 7px 12px; border-radius: var(--radius-sm); font-size: 13px;
       width: 180px; outline: none; transition: all var(--transition);
       font-family: var(--font);
@@ -2097,22 +2097,26 @@ function updateBizAdminButton(){
   var menuBtn = document.getElementById('btnMenuMgr');
   var statusEl = document.getElementById('selectedBizStatus');
   var role = getAuthRole();
-  if (bid && businessList.length > 0) {
-    // Owner: all buttons. Manager/Operator: hide admin buttons.
-    var isAdmin = !role || isAdminUser();
-    btn.style.display = isAdmin ? '' : 'none';
-    menuBtn.style.display = (isAdmin || role === 'Manager') ? '' : 'none';
-    const biz = businessList.find(b => b.id === bid);
-    if (biz) {
-      statusEl.innerHTML = biz.isActive
-        ? '<span class="pill pill-active">Activo</span>'
-        : '<span class="pill pill-inactive">Inactivo</span>';
-    } else {
-      statusEl.innerHTML = '';
-    }
+  var admin = !role || isAdminUser();
+  var hasBiz = !!bid && businessList.length > 0;
+
+  // "Administrar Negocio" requires a specific business selected
+  btn.style.display = (hasBiz && admin) ? '' : 'none';
+
+  // "Menu Manager" is role-based — visible whenever user has permission, regardless of selection
+  if (businessList.length > 0) {
+    menuBtn.style.display = (admin || role === 'Manager') ? '' : 'none';
   } else {
-    btn.style.display = 'none';
     menuBtn.style.display = 'none';
+  }
+
+  // Status pill for the selected business
+  if (hasBiz) {
+    const biz = businessList.find(b => b.id === bid);
+    statusEl.innerHTML = biz
+      ? (biz.isActive ? '<span class="pill pill-active">Activo</span>' : '<span class="pill pill-inactive">Inactivo</span>')
+      : '';
+  } else {
     statusEl.innerHTML = '';
   }
 }
@@ -3369,9 +3373,7 @@ function updateLoginUI(){
 
 function applyRoleVisibility(){
   var role = getAuthRole();
-  var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
-  if (!role) return;
-  if (isAdminUser()) return; // founder/admin: no restrictions
+  var admin = isAdminUser();
 
   // Nav buttons
   var newBiz = document.getElementById('btnNewBiz');
@@ -3380,16 +3382,26 @@ function applyRoleVisibility(){
   var extAnalytics = document.getElementById('extAnalytics');
   var customersPanel = document.getElementById('customersPanel');
 
+  if (admin) {
+    // Founder/admin: ensure everything visible
+    if (newBiz) newBiz.style.display = '';
+    if (customers) customers.style.display = '';
+    if (extAnalytics) extAnalytics.style.display = '';
+    if (customersPanel) customersPanel.style.display = '';
+    return;
+  }
+
+  if (!role) return;
+
   if (role === 'Manager') {
-    // Hide: Nuevo Negocio, Usuarios (handled in updateUsersButton)
     if (newBiz) newBiz.style.display = 'none';
+    if (customers) customers.style.display = '';
+    if (extAnalytics) extAnalytics.style.display = '';
   }
 
   if (role === 'Operator') {
-    // Nav: hide Nuevo Negocio, Menu Manager, Customers
     if (newBiz) newBiz.style.display = 'none';
     if (customers) customers.style.display = 'none';
-    // Sections: hide analytics, customers panel
     if (extAnalytics) extAnalytics.style.display = 'none';
     if (customersPanel) customersPanel.style.display = 'none';
   }
@@ -3621,7 +3633,14 @@ if (isStaffMode()) {
   var keyMsg = document.getElementById('keyMsg');
   if (keyMsg) keyMsg.style.display = 'none';
 } else {
-  document.getElementById('adminKey').value = getAdminKey();
+  // Admin/founder mode: ensure admin key UI is visible and populated
+  var akInput = document.getElementById('adminKey');
+  akInput.value = getAdminKey();
+  akInput.style.display = '';
+  var akBtn = akInput.nextElementSibling;
+  if (akBtn && akBtn.tagName === 'BUTTON') akBtn.style.display = '';
+  var akMsg = document.getElementById('keyMsg');
+  if (akMsg) akMsg.style.display = '';
 }
 updateLoginUI();
 
