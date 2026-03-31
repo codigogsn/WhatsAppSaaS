@@ -256,6 +256,7 @@ try
     app.UseStaticFiles();
 
     app.UseAuthentication();
+    app.UseMiddleware<WhatsAppSaaS.Api.Middleware.JwtFallbackMiddleware>();
     app.UseAuthorization();
 
     app.MapControllers();

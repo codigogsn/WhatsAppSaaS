@@ -143,17 +143,10 @@ public class AdminBusinessesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
-        // Path 1: JWT auth
+        // Path 1: JWT auth (middleware + fallback middleware populate User)
         var jwtBizIds = AdminAuth.GetBusinessIds(User);
         var jwtRole = AdminAuth.GetRole(User);
-        var hasAuth = Request.Headers.ContainsKey("Authorization");
         var isJwtAuth = jwtRole is "Owner" or "Manager" or "Operator" && jwtBizIds.Count > 0;
-
-        if (hasAuth && !isJwtAuth)
-        {
-            // JWT was sent but didn't authenticate — log for debugging
-            Console.WriteLine($"[AUTH DEBUG] List: Authorization header present but JWT auth failed. Role={jwtRole ?? "null"}, BizIds={jwtBizIds.Count}, IsAuthenticated={User.Identity?.IsAuthenticated}");
-        }
 
         // Path 2: X-Admin-Key fallback
         string? key = null;
@@ -161,7 +154,7 @@ public class AdminBusinessesController : ControllerBase
         if (!isJwtAuth)
         {
             if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey))
-                return Unauthorized(new { error = "Missing authorization", debug = new { hasAuthHeader = hasAuth, jwtRole, jwtBizCount = jwtBizIds.Count, isAuthenticated = User.Identity?.IsAuthenticated } });
+                return Unauthorized(new { error = "Missing authorization" });
 
             key = headerKey.ToString().Trim();
             if (string.IsNullOrWhiteSpace(key))
