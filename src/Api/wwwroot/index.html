@@ -2235,8 +2235,7 @@ async function toggleBizActive(){
 
 function openCreateBiz(){
   if (!getAdminKey()) { alert('Ingresa tu Admin Key primero'); return; }
-  var overlay = document.getElementById('createBizModal');
-  // Clear form
+
   document.getElementById('createBizMsg').textContent = '';
   ['newBizName','newBizPhone','newBizToken','newBizGreeting','newBizAddress','newBizSchedule','newBizPmBank','newBizPmId','newBizPmPhone','newBizNotifPhone'].forEach(function(id){
     document.getElementById(id).value = '';
@@ -2244,10 +2243,10 @@ function openCreateBiz(){
   document.getElementById('newBizType').value = '';
   document.getElementById('newBizTypeDesc').textContent = '';
   document.getElementById('newBizMenuPdf').value = '';
-  // Open
+
+  var overlay = document.getElementById('createBizModal');
   overlay.classList.add('open');
   document.body.style.overflow = 'hidden';
-  void overlay.offsetHeight;
   overlay.scrollTop = 0;
 }
 // Template type descriptions + live preview
@@ -2276,6 +2275,7 @@ function closeCreateBiz(){
   var overlay = document.getElementById('createBizModal');
   overlay.classList.remove('open');
   document.body.style.overflow = '';
+  overlay.scrollTop = 0;
 }
 
 // ── Autofill Nuevo Negocio ──
@@ -3451,6 +3451,12 @@ updateLoginUI();
 // Set default date filter to today
 const today = new Date().toISOString().slice(0,10);
 document.getElementById('dateFrom').value = today;
+
+// Move createBizModal to body to escape dashboard layout containment
+var createBizModal = document.getElementById('createBizModal');
+if (createBizModal && createBizModal.parentElement !== document.body) {
+  document.body.appendChild(createBizModal);
+}
 
 // Init controls state
 updateSoundIcon();
