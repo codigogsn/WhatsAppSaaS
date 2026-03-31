@@ -42,15 +42,8 @@ public sealed class AuthController : ControllerBase
         if (conn.State != System.Data.ConnectionState.Open)
             await conn.OpenAsync(ct);
 
-        Guid userId = Guid.Empty;
-        Guid businessId = Guid.Empty;
-        string passwordHash = "";
-        string userName = "";
-        string userEmail = "";
-        string userRole = "";
-        bool userActive = false;
-        string businessName = "";
-        bool businessActive = false;
+        // Fetch ALL business assignments for this email (multi-sede support)
+        var assignments = new List<(Guid UserId, Guid BusinessId, string PasswordHash, string Name, string Email, string Role, bool UserActive, string BizName, bool BizActive)>();
 
         using (var cmd = conn.CreateCommand())
         {
@@ -60,7 +53,7 @@ public sealed class AuthController : ControllerBase
                 FROM "BusinessUsers" u
                 INNER JOIN "Businesses" b ON CAST(b."Id" AS TEXT) = CAST(u."BusinessId" AS TEXT)
                 WHERE u."Email" = @email
-                LIMIT 1
+                ORDER BY u."CreatedAtUtc" ASC
             """;
             var p = cmd.CreateParameter();
             p.ParameterName = "email";
@@ -68,68 +61,86 @@ public sealed class AuthController : ControllerBase
             cmd.Parameters.Add(p);
 
             using var r = await cmd.ExecuteReaderAsync(ct);
-            if (!await r.ReadAsync(ct))
+            while (await r.ReadAsync(ct))
             {
-                _logger.LogWarning("Login failed: no user found for {Email}", email);
-                return Unauthorized(new { error = "Invalid credentials" });
+                var rawActive = r["IsActive"];
+                var userActive = rawActive switch
+                {
+                    bool bv => bv, int iv => iv != 0, long lv => lv != 0,
+                    string sv => sv is "1" or "true" or "True", _ => true
+                };
+                var rawBizActive = r["BizActive"];
+                var bizActive = rawBizActive switch
+                {
+                    bool bv => bv, int iv => iv != 0, long lv => lv != 0,
+                    string sv => sv is "1" or "true" or "True", _ => true
+                };
+
+                assignments.Add((
+                    r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetString(3),
+                    r.GetString(4), r.GetString(5), userActive, r["BizName"]?.ToString() ?? "", bizActive
+                ));
             }
-
-            userId = r.GetGuid(0);
-            businessId = r.GetGuid(1);
-            passwordHash = r.GetString(2);
-            userName = r.GetString(3);
-            userEmail = r.GetString(4);
-            userRole = r.GetString(5);
-
-            var rawActive = r["IsActive"];
-            userActive = rawActive switch
-            {
-                bool bv => bv, int iv => iv != 0, long lv => lv != 0,
-                string sv => sv is "1" or "true" or "True", _ => true
-            };
-
-            businessName = r["BizName"]?.ToString() ?? "";
-            var rawBizActive = r["BizActive"];
-            businessActive = rawBizActive switch
-            {
-                bool bv => bv, int iv => iv != 0, long lv => lv != 0,
-                string sv => sv is "1" or "true" or "True", _ => true
-            };
         }
 
-        if (!userActive)
+        if (assignments.Count == 0)
+        {
+            _logger.LogWarning("Login failed: no user found for {Email}", email);
+            return Unauthorized(new { error = "Invalid credentials" });
+        }
+
+        // Use the first active assignment for password verification
+        var primary = assignments.FirstOrDefault(a => a.UserActive);
+        if (primary.UserId == Guid.Empty)
         {
             _logger.LogWarning("Login failed: user {Email} is inactive", email);
             return Unauthorized(new { error = "Invalid credentials" });
         }
 
-        if (!VerifyPassword(req.Password, passwordHash))
+        if (!VerifyPassword(req.Password, primary.PasswordHash))
         {
             _logger.LogWarning("Login failed: wrong password for {Email}", email);
             return Unauthorized(new { error = "Invalid credentials" });
         }
 
-        if (!businessActive)
+        // Filter to only active user assignments with active businesses
+        var activeBizIds = assignments
+            .Where(a => a.UserActive && a.BizActive)
+            .Select(a => a.BusinessId)
+            .Distinct()
+            .ToList();
+
+        if (activeBizIds.Count == 0)
         {
-            _logger.LogWarning("Login failed: business {BizId} is inactive for {Email}", businessId, email);
-            return Unauthorized(new { error = "Business is inactive" });
+            _logger.LogWarning("Login failed: no active businesses for {Email}", email);
+            return Unauthorized(new { error = "No active businesses assigned" });
         }
 
-        var token = _jwt.GenerateToken(userId, businessId, userRole, userEmail);
+        // Build business names list for UI
+        var bizNames = assignments
+            .Where(a => activeBizIds.Contains(a.BusinessId))
+            .Select(a => new { id = a.BusinessId, name = a.BizName })
+            .DistinctBy(x => x.id)
+            .ToList();
 
-        _logger.LogInformation("Login success: {Email} role={Role} bizId={BizId}", userEmail, userRole, businessId);
+        var token = _jwt.GenerateToken(primary.UserId, activeBizIds[0], primary.Role, primary.Email, activeBizIds);
+
+        _logger.LogInformation("Login success: {Email} role={Role} businesses={Count}",
+            primary.Email, primary.Role, activeBizIds.Count);
 
         return Ok(new
         {
             token,
             user = new
             {
-                id = userId,
-                businessId,
-                businessName,
-                name = userName,
-                email = userEmail,
-                role = userRole
+                id = primary.UserId,
+                businessId = activeBizIds[0],
+                businessIds = activeBizIds,
+                businessName = bizNames.FirstOrDefault()?.name ?? "",
+                businesses = bizNames,
+                name = primary.Name,
+                email = primary.Email,
+                role = primary.Role
             }
         });
     }

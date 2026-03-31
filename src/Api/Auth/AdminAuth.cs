@@ -19,6 +19,26 @@ public static class AdminAuth
         return Guid.TryParse(claim, out var id) ? id : null;
     }
 
+    /// <summary>
+    /// Returns all business IDs from the JWT "businessIds" claim (comma-separated).
+    /// Falls back to the single "businessId" claim if "businessIds" is absent.
+    /// </summary>
+    public static List<Guid> GetBusinessIds(ClaimsPrincipal user)
+    {
+        var multiClaim = user.FindFirstValue("businessIds");
+        if (!string.IsNullOrWhiteSpace(multiClaim))
+        {
+            return multiClaim.Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(s => Guid.TryParse(s.Trim(), out var g) ? g : Guid.Empty)
+                .Where(g => g != Guid.Empty)
+                .Distinct()
+                .ToList();
+        }
+
+        var single = GetBusinessId(user);
+        return single.HasValue ? [single.Value] : [];
+    }
+
     public static string? GetRole(ClaimsPrincipal user)
         => user.FindFirstValue(ClaimTypes.Role);
 
@@ -32,13 +52,13 @@ public static class AdminAuth
 
     /// <summary>
     /// Returns true if the JWT user has at least the given role and is scoped
-    /// to the requested business. Returns false if no JWT or wrong business.
+    /// to the requested business. Checks both single businessId and multi businessIds claims.
     /// </summary>
     public static bool IsJwtAuthorizedForBusiness(ClaimsPrincipal user, Guid businessId)
     {
         if (!IsOwnerOrManager(user)) return false;
-        var jwtBizId = GetBusinessId(user);
-        return jwtBizId.HasValue && jwtBizId.Value == businessId;
+        var bizIds = GetBusinessIds(user);
+        return bizIds.Contains(businessId);
     }
 
     /// <summary>

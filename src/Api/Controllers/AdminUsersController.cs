@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Api.Auth;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -209,6 +210,223 @@ public sealed class AdminUsersController : ControllerBase
             user.IsActive,
             user.CreatedAtUtc
         });
+    }
+
+    // ── Multi-business user management (global admin) ──
+
+    public sealed class CreateMultiUserRequest
+    {
+        public string Name { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string Role { get; set; } = "Operator";
+        public bool IsActive { get; set; } = true;
+        public List<Guid> BusinessIds { get; set; } = new();
+    }
+
+    // POST /api/admin/users/multi — Create user with multiple business assignments (global admin only)
+    [HttpPost("multi")]
+    [AllowAnonymous]
+    public async Task<IActionResult> CreateMulti([FromBody] CreateMultiUserRequest req, CancellationToken ct)
+    {
+        if (!IsGlobalAdmin() && !IsOwner())
+            return Unauthorized(new { error = "Admin key or Owner role required" });
+
+        if (string.IsNullOrWhiteSpace(req.Name))
+            return BadRequest(new { error = "Name is required" });
+        if (string.IsNullOrWhiteSpace(req.Email))
+            return BadRequest(new { error = "Email is required" });
+        if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 6)
+            return BadRequest(new { error = "Password must be at least 6 characters" });
+        if (req.BusinessIds.Count == 0)
+            return BadRequest(new { error = "At least one business must be selected" });
+
+        var validRoles = new[] { "Owner", "Manager", "Operator" };
+        if (!validRoles.Contains(req.Role))
+            return BadRequest(new { error = "Invalid role", allowed = validRoles });
+
+        var email = req.Email.Trim().ToLowerInvariant();
+        var passwordHash = AuthController.HashPassword(req.Password);
+
+        // Verify all business IDs exist
+        var existingBizIds = await _db.Businesses
+            .Where(b => req.BusinessIds.Contains(b.Id))
+            .Select(b => b.Id)
+            .ToListAsync(ct);
+
+        var missingIds = req.BusinessIds.Except(existingBizIds).ToList();
+        if (missingIds.Count > 0)
+            return BadRequest(new { error = "Business(es) not found", missingIds });
+
+        // Check for existing users with this email in any of the target businesses
+        var existingAssignments = await _db.BusinessUsers
+            .Where(u => u.Email == email && req.BusinessIds.Contains(u.BusinessId))
+            .Select(u => u.BusinessId)
+            .ToListAsync(ct);
+        if (existingAssignments.Count > 0)
+            return Conflict(new { error = "User already exists in one or more businesses", existingBusinessIds = existingAssignments });
+
+        // Create one BusinessUser row per assigned business
+        var created = new List<object>();
+        foreach (var bizId in req.BusinessIds)
+        {
+            var user = new BusinessUser
+            {
+                BusinessId = bizId,
+                Name = req.Name.Trim(),
+                Email = email,
+                PasswordHash = passwordHash,
+                Role = req.Role,
+                IsActive = req.IsActive
+            };
+            _db.BusinessUsers.Add(user);
+            created.Add(new { user.Id, businessId = bizId });
+        }
+
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            email,
+            name = req.Name.Trim(),
+            role = req.Role,
+            isActive = req.IsActive,
+            assignments = created,
+            businessCount = req.BusinessIds.Count
+        });
+    }
+
+    // GET /api/admin/users/all — List all users across all businesses (global admin only)
+    [HttpGet("all")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ListAll(CancellationToken ct)
+    {
+        if (!IsGlobalAdmin() && !IsOwner())
+            return Unauthorized(new { error = "Admin key or Owner role required" });
+
+        // Use raw SQL to avoid legacy DateTime column issues
+        var conn = _db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync(ct);
+
+        var users = new Dictionary<string, dynamic>();
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT u."Id", u."BusinessId", u."Name", u."Email", u."Role", u."IsActive",
+                   b."Name" AS "BizName"
+            FROM "BusinessUsers" u
+            LEFT JOIN "Businesses" b ON CAST(b."Id" AS TEXT) = CAST(u."BusinessId" AS TEXT)
+            ORDER BY u."Email", u."Name"
+        """;
+
+        using var r = await cmd.ExecuteReaderAsync(ct);
+        while (await r.ReadAsync(ct))
+        {
+            var emailVal = r.GetString(3);
+            var rawActive = r["IsActive"];
+            var active = rawActive switch
+            {
+                bool bv => bv, int iv => iv != 0, long lv => lv != 0,
+                string sv => sv is "1" or "true" or "True", _ => true
+            };
+
+            if (!users.ContainsKey(emailVal))
+            {
+                users[emailVal] = new
+                {
+                    id = r.GetGuid(0),
+                    name = r.GetString(2),
+                    email = emailVal,
+                    role = r.GetString(4),
+                    isActive = active,
+                    businesses = new List<object>()
+                };
+            }
+
+            ((List<object>)users[emailVal].businesses).Add(new
+            {
+                id = r.GetGuid(1),
+                name = r["BizName"]?.ToString() ?? ""
+            });
+        }
+
+        return Ok(users.Values.ToList());
+    }
+
+    // PATCH /api/admin/users/multi/{email} — Update user across all assigned businesses (global admin only)
+    [HttpPatch("multi/{email}")]
+    [AllowAnonymous]
+    public async Task<IActionResult> UpdateMulti(string email, [FromBody] UpdateMultiUserRequest req, CancellationToken ct)
+    {
+        if (!IsGlobalAdmin() && !IsOwner())
+            return Unauthorized(new { error = "Admin key or Owner role required" });
+
+        var normalizedEmail = email.Trim().ToLowerInvariant();
+        var userRows = await _db.BusinessUsers
+            .Where(u => u.Email == normalizedEmail)
+            .ToListAsync(ct);
+
+        if (userRows.Count == 0)
+            return NotFound(new { error = "User not found" });
+
+        foreach (var u in userRows)
+        {
+            if (!string.IsNullOrWhiteSpace(req.Name)) u.Name = req.Name.Trim();
+            if (!string.IsNullOrWhiteSpace(req.Role))
+            {
+                var validRoles = new[] { "Owner", "Manager", "Operator" };
+                if (!validRoles.Contains(req.Role))
+                    return BadRequest(new { error = "Invalid role" });
+                u.Role = req.Role;
+            }
+            if (req.IsActive.HasValue) u.IsActive = req.IsActive.Value;
+            if (!string.IsNullOrWhiteSpace(req.Password))
+            {
+                if (req.Password.Length < 6)
+                    return BadRequest(new { error = "Password must be at least 6 characters" });
+                u.PasswordHash = AuthController.HashPassword(req.Password);
+            }
+        }
+
+        // Handle business reassignment
+        if (req.BusinessIds is not null)
+        {
+            var currentBizIds = userRows.Select(u => u.BusinessId).ToList();
+            var newBizIds = req.BusinessIds;
+
+            // Remove assignments no longer in the list
+            var toRemove = userRows.Where(u => !newBizIds.Contains(u.BusinessId)).ToList();
+            _db.BusinessUsers.RemoveRange(toRemove);
+
+            // Add new assignments
+            var toAdd = newBizIds.Except(currentBizIds).ToList();
+            var template = userRows.First();
+            foreach (var bizId in toAdd)
+            {
+                _db.BusinessUsers.Add(new BusinessUser
+                {
+                    BusinessId = bizId,
+                    Name = template.Name,
+                    Email = template.Email,
+                    PasswordHash = template.PasswordHash,
+                    Role = template.Role,
+                    IsActive = template.IsActive
+                });
+            }
+        }
+
+        await _db.SaveChangesAsync(ct);
+        return Ok(new { updated = true, email = normalizedEmail });
+    }
+
+    public sealed class UpdateMultiUserRequest
+    {
+        public string? Name { get; set; }
+        public string? Role { get; set; }
+        public string? Password { get; set; }
+        public bool? IsActive { get; set; }
+        public List<Guid>? BusinessIds { get; set; }
     }
 
     // POST /api/admin/users/seed-owner — Bootstrap: create first Owner for a business (global admin only)

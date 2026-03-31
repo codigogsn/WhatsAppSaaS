@@ -1489,7 +1489,7 @@ Tipo: burger"></textarea>
   <!-- Users Management Panel -->
   <div id="usersPanel" class="biz-panel" style="display:none;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h3>Usuarios del Negocio</h3>
+      <h3>Usuarios</h3>
       <div class="row" style="gap:8px;">
         <button class="primary" onclick="openCreateUser()">+ Nuevo Usuario</button>
         <button onclick="toggleUsersPanel()" style="border:none; background:none; font-size:18px; cursor:pointer; color:#888;">&times;</button>
@@ -1501,8 +1501,8 @@ Tipo: burger"></textarea>
           <th>Nombre</th>
           <th>Email</th>
           <th>Rol</th>
+          <th>Negocios Asignados</th>
           <th>Estado</th>
-          <th>Creado</th>
           <th>Acciones</th>
         </tr>
       </thead>
@@ -1534,6 +1534,16 @@ Tipo: burger"></textarea>
             <option value="Manager">Gerente</option>
             <option value="Owner">Propietario</option>
           </select>
+        </div>
+        <div class="full">
+          <label>Negocios Asignados *</label>
+          <div id="newUserBizList" style="max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);padding:8px;"></div>
+          <small class="muted">Selecciona uno o mas negocios/sedes</small>
+        </div>
+        <div>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input id="newUserActive" type="checkbox" checked /> Activo
+          </label>
         </div>
       </div>
       <div class="biz-actions" style="margin-top:16px;">
@@ -3263,11 +3273,15 @@ function doLogout(){
 }
 
 function updateLoginUI(){
-  const user = getJwtUser();
-  const loginBar = document.getElementById('loginBar');
+  var user = getJwtUser();
+  var loginBar = document.getElementById('loginBar');
   loginBar.style.display = '';
   if (user) {
-    document.getElementById('loginUser').textContent = user.name + ' (' + user.role + ') - ' + (user.businessName || '');
+    var bizCount = (user.businessIds || []).length || 1;
+    var label = user.name + ' (' + user.role + ')';
+    if (bizCount > 1) label += ' - ' + bizCount + ' negocios';
+    else label += ' - ' + (user.businessName || '');
+    document.getElementById('loginUser').textContent = label;
     document.getElementById('btnLogout').style.display = '';
     document.getElementById('loginEmail').style.display = 'none';
     document.getElementById('loginPassword').style.display = 'none';
@@ -3284,10 +3298,10 @@ function updateLoginUI(){
 }
 
 function updateUsersButton(){
-  const user = getJwtUser();
-  const btn = document.getElementById('btnUsersAdmin');
-  // Show users button if JWT user is Owner or Manager, or if global admin key
-  if (user && (user.role === 'Owner' || user.role === 'Manager')) {
+  var user = getJwtUser();
+  var btn = document.getElementById('btnUsersAdmin');
+  // Show users button if JWT user is Owner or Manager, or if global admin key is set
+  if ((user && (user.role === 'Owner' || user.role === 'Manager')) || getAdminKey()) {
     btn.style.display = '';
   } else {
     btn.style.display = 'none';
@@ -3369,29 +3383,31 @@ async function loadUsers(){
   const tbody = document.getElementById('usersTbody');
   tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
   try {
-    const res = await fetch('/api/admin/users', { headers: jwtHeaders() });
+    // Use /all endpoint for global admin, /api/admin/users for JWT users
+    var url = getAdminKey() ? '/api/admin/users/all' : '/api/admin/users';
+    const res = await fetch(url, { headers: jwtHeaders() });
     if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" class="danger">Error cargando usuarios</td></tr>'; return; }
     const users = await res.json();
     if (users.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No hay usuarios</td></tr>'; return; }
     tbody.innerHTML = '';
     for (const u of users) {
+      var bizNames = (u.businesses || []).map(function(b){ return esc(b.name); }).join(', ') || '<span class="muted">-</span>';
       const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${esc(u.name)}</td>
-        <td>${esc(u.email)}</td>
-        <td><span class="pill pill-${u.role === 'Owner' ? 'Completed' : u.role === 'Manager' ? 'Preparing' : 'Pending'}">${esc(u.role)}</span></td>
-        <td>${u.isActive ? '<span class="pill pill-active">Activo</span>' : '<span class="pill pill-inactive">Inactivo</span>'}</td>
-        <td class="small muted">${fmtDate(u.createdAtUtc)}</td>
-        <td>
-          <select data-uid="${esc(u.id)}" class="user-role-sel">
-            <option value="Operator" ${u.role==='Operator'?'selected':''}>Operador</option>
-            <option value="Manager" ${u.role==='Manager'?'selected':''}>Gerente</option>
-            <option value="Owner" ${u.role==='Owner'?'selected':''}>Propietario</option>
-          </select>
-          <button onclick="updateUserRole(this)" class="small">Rol</button>
-          <button onclick="toggleUserActive('${esc(u.id)}', ${!u.isActive})" class="small ${u.isActive ? 'warn' : 'success'}">${u.isActive ? 'Desact.' : 'Activar'}</button>
-        </td>
-      `;
+      tr.innerHTML =
+        '<td>' + esc(u.name) + '</td>' +
+        '<td>' + esc(u.email) + '</td>' +
+        '<td><span class="pill pill-' + (u.role === 'Owner' ? 'Completed' : u.role === 'Manager' ? 'Preparing' : 'Pending') + '">' + esc(u.role) + '</span></td>' +
+        '<td class="small">' + bizNames + '</td>' +
+        '<td>' + (u.isActive ? '<span class="pill pill-active">Activo</span>' : '<span class="pill pill-inactive">Inactivo</span>') + '</td>' +
+        '<td>' +
+          '<select data-uemail="' + esc(u.email) + '" class="user-role-sel">' +
+            '<option value="Operator"' + (u.role==='Operator'?' selected':'') + '>Operador</option>' +
+            '<option value="Manager"' + (u.role==='Manager'?' selected':'') + '>Gerente</option>' +
+            '<option value="Owner"' + (u.role==='Owner'?' selected':'') + '>Propietario</option>' +
+          '</select>' +
+          '<button onclick="updateUserRoleMulti(this)" class="small">Rol</button>' +
+          '<button onclick="toggleUserActiveMulti(\'' + esc(u.email) + '\',' + !u.isActive + ')" class="small ' + (u.isActive ? 'warn' : 'success') + '">' + (u.isActive ? 'Desact.' : 'Activar') + '</button>' +
+        '</td>';
       tbody.appendChild(tr);
     }
   } catch(e) {
@@ -3399,24 +3415,24 @@ async function loadUsers(){
   }
 }
 
-async function updateUserRole(btn){
-  const sel = btn.parentElement.querySelector('.user-role-sel');
-  const uid = sel.getAttribute('data-uid');
-  const role = sel.value;
+async function updateUserRoleMulti(btn){
+  var sel = btn.parentElement.querySelector('.user-role-sel');
+  var email = sel.getAttribute('data-uemail');
+  var role = sel.value;
   try {
-    const res = await fetch('/api/admin/users/' + uid, {
+    var res = await fetch('/api/admin/users/multi/' + encodeURIComponent(email), {
       method: 'PATCH',
       headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ role })
+      body: JSON.stringify({ role: role })
     });
     if (!res.ok) { alert('Error actualizando rol'); return; }
     await loadUsers();
   } catch(e) { alert(e.message); }
 }
 
-async function toggleUserActive(uid, newActive){
+async function toggleUserActiveMulti(email, newActive){
   try {
-    const res = await fetch('/api/admin/users/' + uid, {
+    var res = await fetch('/api/admin/users/multi/' + encodeURIComponent(email), {
       method: 'PATCH',
       headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ isActive: newActive })
@@ -3429,32 +3445,55 @@ async function toggleUserActive(uid, newActive){
 function openCreateUser(){
   document.getElementById('createUserModal').classList.add('open');
   document.getElementById('createUserMsg').textContent = '';
-  ['newUserName','newUserEmail','newUserPassword'].forEach(id => document.getElementById(id).value = '');
+  ['newUserName','newUserEmail','newUserPassword'].forEach(function(id){ document.getElementById(id).value = ''; });
   document.getElementById('newUserRole').value = 'Operator';
+  document.getElementById('newUserActive').checked = true;
+  // Populate business checkboxes from loaded businessList
+  var container = document.getElementById('newUserBizList');
+  container.innerHTML = '';
+  var list = (typeof businessList !== 'undefined' && Array.isArray(businessList)) ? businessList.filter(function(b){ return b.isActive && !b.isJunk; }) : [];
+  if (list.length === 0) {
+    container.innerHTML = '<span class="muted">No hay negocios disponibles</span>';
+    return;
+  }
+  for (var i = 0; i < list.length; i++) {
+    var b = list[i];
+    var label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;font-size:13px;';
+    label.innerHTML = '<input type="checkbox" value="' + esc(b.id) + '" class="newUserBizCb" /> ' + esc(b.name);
+    container.appendChild(label);
+  }
 }
 function closeCreateUser(){ document.getElementById('createUserModal').classList.remove('open'); }
 
 async function submitCreateUser(){
-  const name = document.getElementById('newUserName').value.trim();
-  const email = document.getElementById('newUserEmail').value.trim();
-  const password = document.getElementById('newUserPassword').value;
-  const role = document.getElementById('newUserRole').value;
+  var name = document.getElementById('newUserName').value.trim();
+  var email = document.getElementById('newUserEmail').value.trim();
+  var password = document.getElementById('newUserPassword').value;
+  var role = document.getElementById('newUserRole').value;
+  var isActive = document.getElementById('newUserActive').checked;
+  var bizCheckboxes = document.querySelectorAll('.newUserBizCb:checked');
+  var businessIds = [];
+  bizCheckboxes.forEach(function(cb){ businessIds.push(cb.value); });
+
   if (!name || !email || !password) { document.getElementById('createUserMsg').innerHTML = '<span class="danger">Todos los campos son requeridos</span>'; return; }
   if (password.length < 6) { document.getElementById('createUserMsg').innerHTML = '<span class="danger">Password min 6 caracteres</span>'; return; }
+  if (businessIds.length === 0) { document.getElementById('createUserMsg').innerHTML = '<span class="danger">Selecciona al menos un negocio</span>'; return; }
+
   document.getElementById('createUserMsg').innerHTML = '<span class="muted">Creando...</span>';
   try {
-    const res = await fetch('/api/admin/users', {
+    var res = await fetch('/api/admin/users/multi', {
       method: 'POST',
       headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, email, password, role })
+      body: JSON.stringify({ name: name, email: email, password: password, role: role, isActive: isActive, businessIds: businessIds })
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
+      var err = await res.json().catch(function(){ return {}; });
       document.getElementById('createUserMsg').innerHTML = '<span class="danger">' + esc(err.error || 'Error') + '</span>';
       return;
     }
-    document.getElementById('createUserMsg').innerHTML = '<span class="ok">Usuario creado</span>';
-    setTimeout(() => { closeCreateUser(); loadUsers(); }, 1500);
+    document.getElementById('createUserMsg').innerHTML = '<span class="ok">Usuario creado en ' + businessIds.length + ' negocio(s)</span>';
+    setTimeout(function(){ closeCreateUser(); loadUsers(); }, 1500);
   } catch(e) {
     document.getElementById('createUserMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
   }

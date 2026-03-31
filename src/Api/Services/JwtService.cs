@@ -29,19 +29,27 @@ public sealed class JwtService
         Console.WriteLine($"[JwtService] secret source = {source}, length = {_secret.Length}");
     }
 
-    public string GenerateToken(Guid userId, Guid businessId, string role, string email)
+    public string GenerateToken(Guid userId, Guid businessId, string role, string email,
+        IEnumerable<Guid>? allBusinessIds = null)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
 
-        var claims = new[]
+        var claims = new List<Claim>
         {
-            new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
-            new Claim("businessId", businessId.ToString()),
-            new Claim(ClaimTypes.Role, role),
-            new Claim(JwtRegisteredClaimNames.Email, email),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new(JwtRegisteredClaimNames.Sub, userId.ToString()),
+            new("businessId", businessId.ToString()),
+            new(ClaimTypes.Role, role),
+            new(JwtRegisteredClaimNames.Email, email),
+            new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
         };
+
+        // Multi-business claim: comma-separated list of all assigned business IDs
+        if (allBusinessIds is not null)
+        {
+            var ids = string.Join(",", allBusinessIds.Distinct());
+            claims.Add(new Claim("businessIds", ids));
+        }
 
         var token = new JwtSecurityToken(
             issuer: _issuer,

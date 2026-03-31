@@ -143,9 +143,9 @@ public class AdminBusinessesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
-        // Path 1: JWT auth — Owner/Manager sees their own business
-        var jwtBizId = AdminAuth.GetBusinessId(User);
-        var isJwtAuth = AdminAuth.HasJwtAdminAccess(User) && jwtBizId.HasValue;
+        // Path 1: JWT auth — Owner/Manager sees their assigned businesses
+        var jwtBizIds = AdminAuth.GetBusinessIds(User);
+        var isJwtAuth = AdminAuth.HasJwtAdminAccess(User) && jwtBizIds.Count > 0;
 
         // Path 2: X-Admin-Key fallback
         string? key = null;
@@ -174,12 +174,18 @@ public class AdminBusinessesController : ControllerBase
             // SELECT * avoids "column does not exist" if legacy schema is missing columns
             if (isJwtAuth)
             {
-                // JWT users see only their own business
-                cmd.CommandText = """SELECT * FROM "Businesses" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@bid) LIMIT 1""";
-                var p = cmd.CreateParameter();
-                p.ParameterName = "bid";
-                p.Value = jwtBizId!.Value.ToString();
-                cmd.Parameters.Add(p);
+                // JWT users see all their assigned businesses
+                var placeholders = new List<string>();
+                for (var idx = 0; idx < jwtBizIds.Count; idx++)
+                {
+                    var pName = $"@bid{idx}";
+                    placeholders.Add(pName);
+                    var p = cmd.CreateParameter();
+                    p.ParameterName = $"bid{idx}";
+                    p.Value = jwtBizIds[idx].ToString();
+                    cmd.Parameters.Add(p);
+                }
+                cmd.CommandText = $"""SELECT * FROM "Businesses" WHERE LOWER(CAST("Id" AS TEXT)) IN ({string.Join(",", placeholders.Select(ph => $"LOWER({ph})"))}) ORDER BY "CreatedAtUtc" DESC""";
             }
             else if (isGlobal)
             {
