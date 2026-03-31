@@ -37,6 +37,12 @@ public class AdminExportsController : ControllerBase
 
     private bool IsAuthorized()
     {
+        // JWT auth: any valid staff role
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        if (role is "Owner" or "Manager" or "Operator")
+            return true;
+
+        // X-Admin-Key fallback
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk) || string.IsNullOrWhiteSpace(hk))
             return false;
         var key = hk.ToString().Trim();
@@ -85,7 +91,7 @@ public class AdminExportsController : ControllerBase
 
             // JWT auth for scoped business
             var role = User.FindFirstValue(ClaimTypes.Role);
-            var isJwtAuth = role is "Owner" or "Manager" && jwtBizId.HasValue && businessId == jwtBizId.Value;
+            var isJwtAuth = role is "Owner" or "Manager" or "Operator" && jwtBizId.HasValue && businessId == jwtBizId.Value;
 
             if (!isJwtAuth)
             {
@@ -160,7 +166,7 @@ public class AdminExportsController : ControllerBase
                 businessId = jwtBizId.Value;
 
             var role = User.FindFirstValue(ClaimTypes.Role);
-            var isJwtAuth = role is "Owner" or "Manager" && jwtBizId.HasValue && businessId == jwtBizId.Value;
+            var isJwtAuth = role is "Owner" or "Manager" or "Operator" && jwtBizId.HasValue && businessId == jwtBizId.Value;
 
             if (!isJwtAuth)
             {

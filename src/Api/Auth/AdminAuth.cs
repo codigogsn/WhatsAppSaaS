@@ -48,26 +48,30 @@ public static class AdminAuth
     public static bool IsOwnerOrManager(ClaimsPrincipal user)
         => GetRole(user) is "Owner" or "Manager";
 
+    /// <summary>
+    /// Returns true if the JWT user has any valid staff role (Owner, Manager, or Operator).
+    /// </summary>
+    public static bool HasValidJwtRole(ClaimsPrincipal user)
+        => GetRole(user) is "Owner" or "Manager" or "Operator";
+
     // ── JWT business-scoped checks ──
 
     /// <summary>
-    /// Returns true if the JWT user has at least the given role and is scoped
+    /// Returns true if the JWT user has any valid role and is scoped
     /// to the requested business. Checks both single businessId and multi businessIds claims.
     /// </summary>
     public static bool IsJwtAuthorizedForBusiness(ClaimsPrincipal user, Guid businessId)
     {
-        if (!IsOwnerOrManager(user)) return false;
+        if (!HasValidJwtRole(user)) return false;
         var bizIds = GetBusinessIds(user);
         return bizIds.Contains(businessId);
     }
 
     /// <summary>
-    /// Returns true if the JWT user has Owner/Manager role. Used for endpoints
-    /// where business scoping is applied separately (e.g., overriding businessId
-    /// from JWT claims).
+    /// Returns true if the JWT user has any valid staff role.
     /// </summary>
     public static bool HasJwtAdminAccess(ClaimsPrincipal user)
-        => IsOwnerOrManager(user);
+        => HasValidJwtRole(user);
 
     // ── X-Admin-Key fallback ──
 
@@ -119,13 +123,13 @@ public static class AdminAuth
     }
 
     /// <summary>
-    /// JWT-first auth (Owner/Manager) OR global X-Admin-Key fallback.
+    /// JWT-first auth (any valid staff role) OR global X-Admin-Key fallback.
     /// Use for global/unscoped admin endpoints.
     /// </summary>
     public static bool IsAuthorized(ClaimsPrincipal user, HttpRequest request, IConfiguration config)
     {
-        // Path 1: JWT admin access
-        if (HasJwtAdminAccess(user))
+        // Path 1: JWT with valid staff role
+        if (HasValidJwtRole(user))
             return true;
 
         // Path 2: Global admin key
