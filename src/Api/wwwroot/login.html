@@ -390,15 +390,17 @@ async function doLogin(mode) {
       return;
     }
 
-    // Store auth state and login mode
-    localStorage.setItem('AUTH_TOKEN', data.token);
-    localStorage.setItem('AUTH_USER', JSON.stringify(data.user));
-    localStorage.setItem('LOGIN_MODE', mode);
-
-    // Staff login: clear founder admin key so role restrictions apply
+    // Clear any stale auth state from previous sessions
+    localStorage.removeItem('JWT_TOKEN');
+    localStorage.removeItem('JWT_USER');
     if (mode === 'staff') {
       localStorage.removeItem('ADMIN_KEY');
     }
+
+    // Store fresh auth state
+    localStorage.setItem('AUTH_TOKEN', data.token);
+    localStorage.setItem('AUTH_USER', JSON.stringify(data.user));
+    localStorage.setItem('LOGIN_MODE', mode);
 
     window.location.href = '/';
   } catch (err) {

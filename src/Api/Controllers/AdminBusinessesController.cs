@@ -145,7 +145,8 @@ public class AdminBusinessesController : ControllerBase
     {
         // Path 1: JWT auth — Owner/Manager sees their assigned businesses
         var jwtBizIds = AdminAuth.GetBusinessIds(User);
-        var isJwtAuth = AdminAuth.HasJwtAdminAccess(User) && jwtBizIds.Count > 0;
+        var jwtRole = AdminAuth.GetRole(User);
+        var isJwtAuth = jwtRole is "Owner" or "Manager" or "Operator" && jwtBizIds.Count > 0;
 
         // Path 2: X-Admin-Key fallback
         string? key = null;

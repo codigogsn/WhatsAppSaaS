@@ -40,13 +40,23 @@ public class AdminAnalyticsController : ControllerBase
     // ── Auth helper: raw ADO.NET because Businesses.IsActive is integer ──
     private async Task<bool> IsAuthorizedAsync(Guid? businessId, CancellationToken ct)
     {
-        // JWT auth: Owner/Manager scoped to their own business
+        // JWT auth: any valid role scoped to their assigned business(es)
         var role = User.FindFirstValue(ClaimTypes.Role);
-        if (role is "Owner" or "Manager" && businessId.HasValue)
+        if (role is "Owner" or "Manager" or "Operator" && businessId.HasValue)
         {
+            // Check single businessId claim
             var jwtBizId = GetJwtBusinessId();
             if (jwtBizId.HasValue && jwtBizId.Value == businessId.Value)
                 return true;
+            // Check multi-business businessIds claim
+            var multiClaim = User.FindFirstValue("businessIds");
+            if (!string.IsNullOrWhiteSpace(multiClaim))
+            {
+                var ids = multiClaim.Split(',', StringSplitOptions.RemoveEmptyEntries);
+                foreach (var id in ids)
+                    if (Guid.TryParse(id.Trim(), out var g) && g == businessId.Value)
+                        return true;
+            }
         }
 
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk) || string.IsNullOrWhiteSpace(hk))

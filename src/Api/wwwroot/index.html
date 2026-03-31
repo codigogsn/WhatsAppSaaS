@@ -3283,8 +3283,8 @@ async function downloadCustomersCsv(){
 }
 
 // ── JWT Auth ──
-function getJwt(){ return localStorage.getItem('JWT_TOKEN') || localStorage.getItem('AUTH_TOKEN') || ''; }
-function getJwtUser(){ try { return JSON.parse(localStorage.getItem('JWT_USER') || localStorage.getItem('AUTH_USER') || 'null'); } catch { return null; } }
+function getJwt(){ return localStorage.getItem('AUTH_TOKEN') || localStorage.getItem('JWT_TOKEN') || ''; }
+function getJwtUser(){ try { return JSON.parse(localStorage.getItem('AUTH_USER') || localStorage.getItem('JWT_USER') || 'null'); } catch { return null; } }
 function getAuthRole(){ var u = getJwtUser(); return (u && u.role) ? u.role : null; }
 
 function jwtHeaders(){

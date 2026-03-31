@@ -830,9 +830,9 @@ public sealed class OrdersController : ControllerBase
 
     private bool IsAdmin()
     {
-        // Path 1: valid JWT with Owner/Manager role
+        // Path 1: valid JWT with any staff role
         var role = User.FindFirstValue(ClaimTypes.Role);
-        if (role is "Owner" or "Manager")
+        if (role is "Owner" or "Manager" or "Operator")
             return true;
 
         // Path 2: valid X-Admin-Key header
