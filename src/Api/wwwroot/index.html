@@ -2083,15 +2083,17 @@ async function loadBusinesses(){
   var statusEl = document.getElementById('selectedBizStatus');
   var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
 
-  if (!key && !jwt) { console.warn('loadBusinesses: no auth'); if(statusEl) statusEl.innerHTML='<span class="danger">Sin credenciales</span>'; return; }
+  if (!key && !jwt) { console.warn('[AUTH] loadBusinesses: no auth — key=' + !!key + ' jwt=' + (jwt ? jwt.substring(0,20) + '...' : 'EMPTY')); if(statusEl) statusEl.innerHTML='<span class="danger">Sin credenciales</span>'; return; }
 
   try {
     if(statusEl) statusEl.innerHTML='<span class="muted">Cargando negocios...</span>';
-    var res = await fetch('/api/admin/businesses', { headers: jwtHeaders() });
+    var hdrs = jwtHeaders();
+    console.log('[AUTH] loadBusinesses headers:', Object.keys(hdrs).join(', '), 'hasAuth=' + !!hdrs['Authorization']);
+    var res = await fetch('/api/admin/businesses', { headers: hdrs });
     if (!res.ok) {
       var detail = 'HTTP ' + res.status;
       try { var err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
-      console.warn('loadBusinesses:', detail);
+      console.warn('[AUTH] loadBusinesses FAILED:', detail);
       if(statusEl) statusEl.innerHTML='<span class="danger">' + esc(detail) + '</span>';
       return;
     }
@@ -3288,10 +3290,14 @@ function getJwtUser(){ try { return JSON.parse(localStorage.getItem('AUTH_USER')
 function getAuthRole(){ var u = getJwtUser(); return (u && u.role) ? u.role : null; }
 
 function jwtHeaders(){
-  const h = {};
-  const jwt = getJwt();
-  if (jwt) h['Authorization'] = 'Bearer ' + jwt;
-  const key = getAdminKey();
+  var h = {};
+  var jwt = getJwt();
+  if (jwt) {
+    h['Authorization'] = 'Bearer ' + jwt;
+  } else {
+    console.warn('[AUTH] No JWT token found in localStorage (AUTH_TOKEN=' + !!localStorage.getItem('AUTH_TOKEN') + ', JWT_TOKEN=' + !!localStorage.getItem('JWT_TOKEN') + ')');
+  }
+  var key = getAdminKey();
   if (key) h['X-Admin-Key'] = key;
   return h;
 }
