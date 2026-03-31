@@ -808,7 +808,7 @@
     /* ═══ Hero KPI Layout ═══ */
     .hero-kpi {
       display: grid; grid-template-columns: 1fr 2.2fr 0.8fr; gap: 14px;
-      margin-bottom: 28px;
+      margin-bottom: 24px;
     }
     .hero-panel {
       background: var(--card-kpi, var(--card)); border-radius: var(--radius);
@@ -860,7 +860,7 @@
 
     /* ═══ Order Status Strip ═══ */
     .status-strip {
-      display: flex; gap: 0; flex-wrap: wrap; margin-bottom: 28px;
+      display: flex; gap: 0; flex-wrap: wrap; margin-bottom: 24px;
       background: var(--card); border-radius: var(--radius);
       padding: 16px 8px;
     }
@@ -929,32 +929,34 @@
     .pill-active { background: var(--success-bg); color: var(--success); }
     .pill-inactive { background: var(--danger-bg); color: var(--danger); }
 
-    /* ═══ Buttons — rounded, clean ═══ */
+    /* ═══ Buttons — unified glass system ═══ */
     button {
-      padding: 8px 16px; cursor: pointer;
+      padding: 8px 16px; cursor: pointer; border: 1px solid var(--border);
       border-radius: var(--radius-sm); background: var(--surface); color: var(--text);
       font-size: 13px; font-weight: 500; font-family: var(--font);
-      transition: all var(--transition);
+      transition: all .2s cubic-bezier(.4,0,.2,1);
+      line-height: 1.4;
     }
-    button:hover { background: var(--surface-2); }
-    button.primary { background: var(--accent); color: #fff; }
+    button:hover { background: var(--surface-2); transform: translateY(-1px); }
+    button:active { transform: translateY(0) scale(.98); transition-duration: .1s; }
+    button.primary { background: var(--accent); color: #fff; border-color: rgba(0,80,200,.18); }
     button.primary:hover { background: var(--accent-hover); }
-    button.success { background: var(--success); color: #fff; }
+    button.success { background: var(--success); color: #fff; border-color: rgba(20,120,50,.18); }
     button.success:hover { opacity: .88; }
     button.nav-disabled { opacity: .4; pointer-events: none; cursor: not-allowed; }
-    button.warn { background: var(--warning); color: #fff; }
+    button.warn { background: var(--warning); color: #fff; border-color: rgba(180,120,0,.18); }
     button.warn:hover { opacity: .88; }
 
     /* ═══ Form inputs — recessed, Apple-style ═══ */
     select, input, textarea {
       padding: 8px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm);
       font-size: 13px; font-family: var(--font); background: var(--input-bg); color: var(--text);
-      transition: all var(--transition);
-      outline: none;
+      transition: border var(--transition), box-shadow var(--transition), background var(--transition);
+      outline: none; line-height: 1.4;
     }
     select:focus, input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
     .readonly-field, input:disabled, input[readonly], textarea:disabled, textarea[readonly], select:disabled {
-      background: #f0f0f2; color: #888; cursor: not-allowed; opacity: 1;
+      background: var(--surface-2); color: var(--muted); cursor: not-allowed; opacity: .7;
     }
 
     /* ═══ Table — Stripe-style ═══ */
@@ -1007,10 +1009,27 @@
     .human-tag { background: var(--danger-bg); color: var(--danger); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: .2px; animation: pulse 2s infinite; }
     @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.5;} }
 
+    /* ═══ Global mode banner ═══ */
+    .global-banner {
+      text-align: center; padding: 80px 24px 60px;
+      border-radius: var(--radius); background: var(--card);
+      margin-bottom: 24px;
+    }
+    .global-banner-icon {
+      font-size: 36px; margin-bottom: 16px; opacity: .25;
+    }
+    .global-banner-text {
+      font-size: 16px; font-weight: 600; color: var(--text-secondary);
+      margin-bottom: 8px;
+    }
+    .global-banner-hint {
+      font-size: 13px; color: var(--muted);
+    }
+
     /* ═══ Filters — subtle, integrated ═══ */
     .filters {
       background: var(--surface);
-      border-radius: var(--radius); padding: 16px 20px; margin-bottom: 16px;
+      border-radius: var(--radius); padding: 16px 20px; margin-bottom: 24px;
       transition: background var(--transition);
     }
     .filters label { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .3px; }
@@ -1018,7 +1037,7 @@
     /* ═══ Panels ═══ */
     .biz-panel {
       background: var(--surface); border-radius: var(--radius);
-      padding: 24px; margin-bottom: 20px;
+      padding: 24px; margin-bottom: 24px;
       transition: background var(--transition);
     }
     .biz-panel h3 { margin: 0 0 14px 0; font-size: 17px; font-weight: 700; color: var(--text); letter-spacing: -.01em; }
@@ -1033,14 +1052,15 @@
     .biz-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-light); }
 
     /* ═══ Modals — frosted glass ═══ */
-    .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.4); backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); z-index:100; justify-content:center; align-items:flex-start; padding:60px 16px; }
+    .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.45); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); z-index:100; justify-content:center; align-items:flex-start; padding:60px 16px; }
     .modal-overlay.open { display:flex; }
-    .modal { background:var(--surface); border-radius:var(--radius-xl); padding:28px; width:100%; max-width:560px; max-height:calc(100vh - 80px); overflow-y:auto; }
-    .modal h3 { margin: 0 0 20px 0; font-size: 18px; font-weight: 700; color: var(--text); letter-spacing: -.01em; }
-    .modal .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
-    .modal .form-grid label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 4px; font-weight: 500; text-transform: uppercase; letter-spacing: .3px; }
+    .modal { background:var(--surface); border-radius:var(--radius-xl); padding:32px; width:100%; max-width:560px; max-height:calc(100vh - 80px); overflow-y:auto; box-shadow: var(--shadow-lg); }
+    .modal h3 { margin: 0 0 24px 0; font-size: 18px; font-weight: 700; color: var(--text); letter-spacing: -.01em; padding-bottom: 16px; border-bottom: 1px solid var(--border-light); }
+    .modal .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 20px; }
+    .modal .form-grid label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 5px; font-weight: 500; text-transform: uppercase; letter-spacing: .3px; }
     .modal .form-grid input, .modal .form-grid textarea, .modal .form-grid select { width: 100%; }
     .modal .form-grid .full { grid-column: 1 / -1; }
+    .modal .biz-actions, .modal .form-actions { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-light); }
 
     /* ── Isolated override: Nuevo Negocio modal ── */
     #createBizModal {
@@ -1607,9 +1627,10 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Global mode placeholder -->
-  <div id="globalModeBanner" style="display:none;text-align:center;padding:60px 20px;color:var(--muted);">
-    <div style="font-size:32px;margin-bottom:12px;opacity:.4;">&#9776;</div>
-    <div style="font-size:15px;font-weight:500;">Select a business to view metrics, customers, and orders</div>
+  <div id="globalModeBanner" class="global-banner" style="display:none;">
+    <div class="global-banner-icon">&#9776;</div>
+    <div class="global-banner-text">Select a business to view metrics, customers, and orders</div>
+    <div class="global-banner-hint">Use the business selector above to get started</div>
   </div>
 
   <!-- Hero KPI Area -->
