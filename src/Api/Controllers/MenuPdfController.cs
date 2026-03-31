@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Api.Auth;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -89,7 +90,14 @@ public sealed class MenuPdfController : ControllerBase
         var menuPdfUrl = $"{baseUrl}/api/menu-pdf/{businessId}";
         biz.MenuPdfUrl = menuPdfUrl;
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = "PDF SAVE FAILED: " + (ex.InnerException?.Message ?? ex.Message) });
+        }
 
         return Ok(new
         {
@@ -132,21 +140,29 @@ public sealed class MenuPdfController : ControllerBase
 
     private async Task<Business?> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
     {
+        // Path 1: JWT authorization
+        if (AdminAuth.IsJwtAuthorizedForBusiness(User, businessId))
+            return await _db.Businesses.FirstOrDefaultAsync(b => b.Id == businessId, ct);
+
+        // Path 2: X-Admin-Key
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey))
             return null;
 
-        var key = headerKey.ToString();
+        var key = headerKey.ToString().Trim();
         if (string.IsNullOrWhiteSpace(key))
             return null;
 
-        // Accept global admin key
-        var globalKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
+        // Accept global admin key (all known config sources)
+        var globalKey = (_config["ADMIN_KEY"]
+            ?? Environment.GetEnvironmentVariable("ADMIN_KEY")
+            ?? Environment.GetEnvironmentVariable("WHATSAPP_ADMIN_KEY")
+            ?? _config["WhatsApp:AdminKey"])?.Trim();
         if (!string.IsNullOrWhiteSpace(globalKey) && SafeEquals(key, globalKey))
             return await _db.Businesses.FirstOrDefaultAsync(b => b.Id == businessId, ct);
 
         // Accept per-business admin key
         var biz = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == businessId, ct);
-        if (biz is not null && !string.IsNullOrWhiteSpace(biz.AdminKey) && SafeEquals(key, biz.AdminKey))
+        if (biz is not null && !string.IsNullOrWhiteSpace(biz.AdminKey) && SafeEquals(key, biz.AdminKey.Trim()))
             return biz;
 
         return null;
