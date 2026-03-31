@@ -289,8 +289,14 @@
         <div class="error-msg" id="errorMsg"></div>
       </form>
 
-      <div class="admin-fallback">
-        <span class="muted" style="font-size:0.85rem;">Usa tus credenciales de fundador para iniciar sesion.</span>
+      <div style="text-align:center;margin-top:20px;position:relative;z-index:2;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:8px;">&#191;Eres parte del equipo?</div>
+        <button type="button" onclick="handleStaffLogin()" id="staffBtn"
+          style="background:none;border:1px solid var(--border);color:var(--text-secondary);
+          padding:8px 20px;border-radius:var(--radius-sm);font-size:13px;font-weight:500;
+          font-family:var(--font);cursor:pointer;transition:all .2s ease;">
+          Entrar como Staff
+        </button>
       </div>
     </div>
   </div>
@@ -333,16 +339,32 @@ if (localStorage.getItem('AUTH_TOKEN')) {
   window.location.href = '/';
 }
 
+function handleStaffLogin() {
+  var email = document.getElementById('email').value.trim();
+  var password = document.getElementById('password').value;
+  if (!email || !password) {
+    document.getElementById('errorMsg').textContent = 'Completa email y password';
+    return;
+  }
+  doLogin('staff');
+}
+
 async function handleLogin(e) {
   e.preventDefault();
-  const btn = document.getElementById('loginBtn');
-  const errEl = document.getElementById('errorMsg');
+  doLogin('admin');
+}
+
+async function doLogin(mode) {
+  var btn = document.getElementById('loginBtn');
+  var staffBtn = document.getElementById('staffBtn');
+  var errEl = document.getElementById('errorMsg');
   errEl.textContent = '';
   btn.disabled = true;
+  if (staffBtn) staffBtn.disabled = true;
   btn.textContent = 'Verificando...';
 
   try {
-    const res = await fetch('/api/auth/login', {
+    var res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -351,30 +373,33 @@ async function handleLogin(e) {
       })
     });
 
-    let data;
-    const contentType = res.headers.get('content-type') || '';
+    var data;
+    var contentType = res.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       data = await res.json();
     } else {
-      const text = await res.text();
+      var text = await res.text();
       data = { error: text || ('Error del servidor (HTTP ' + res.status + ')') };
     }
 
     if (!res.ok) {
       errEl.textContent = data.error || ('Error (HTTP ' + res.status + ')');
       btn.disabled = false;
+      if (staffBtn) staffBtn.disabled = false;
       btn.textContent = 'Iniciar Sesion';
       return;
     }
 
-    // Store auth state
+    // Store auth state and login mode
     localStorage.setItem('AUTH_TOKEN', data.token);
     localStorage.setItem('AUTH_USER', JSON.stringify(data.user));
+    localStorage.setItem('LOGIN_MODE', mode);
 
     window.location.href = '/';
   } catch (err) {
     errEl.textContent = 'Error de conexion: ' + (err.message || err);
     btn.disabled = false;
+    if (staffBtn) staffBtn.disabled = false;
     btn.textContent = 'Iniciar Sesion';
   }
 }
