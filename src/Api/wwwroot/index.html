@@ -1606,8 +1606,14 @@ Tipo: burger"></textarea>
     </div>
   </div>
 
+  <!-- Global mode placeholder -->
+  <div id="globalModeBanner" style="display:none;text-align:center;padding:60px 20px;color:var(--muted);">
+    <div style="font-size:32px;margin-bottom:12px;opacity:.4;">&#9776;</div>
+    <div style="font-size:15px;font-weight:500;">Select a business to view metrics, customers, and orders</div>
+  </div>
+
   <!-- Hero KPI Area -->
-  <div class="hero-kpi">
+  <div id="heroKpi" class="hero-kpi">
     <!-- LEFT: Revenue focus -->
     <div class="hero-panel hero-revenue">
       <div class="hero-panel-title">Revenue</div>
@@ -1671,7 +1677,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Order Status Strip -->
-  <div class="status-strip">
+  <div id="statusStrip" class="status-strip">
     <div class="status-chip"><div class="status-chip-label">Cargados</div><div class="status-chip-value" id="kpiTotal">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pending</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparing</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
@@ -1752,7 +1758,7 @@ Tipo: burger"></textarea>
   </details>
 
   <!-- Filters -->
-  <div class="filters">
+  <div id="ordersFilters" class="filters">
     <div class="row">
       <label>Estado:</label>
       <select id="status">
@@ -1790,7 +1796,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Orders Table -->
-  <table>
+  <table id="ordersTable">
     <thead>
       <tr>
         <th style="width:30px;"></th>
@@ -2895,38 +2901,32 @@ function stopAutoRefresh() {
   syncAutoToggleUI();
 }
 
-// ── Orders area enable/disable based on business context ──
-function setOrdersEnabled(enabled) {
-  var ids = ['status','dateFrom','dateTo','phone','searchId','take'];
+// ── Global mode: hide all business-scoped sections ──
+function applyGlobalModeUI() {
+  var global = !getBusinessId();
+  var show = global ? 'none' : '';
+  // Business-scoped dashboard sections
+  var ids = ['heroKpi','statusStrip','extAnalytics','handoffInbox','ordersFilters','ordersTable','customersPanel'];
   for (var i = 0; i < ids.length; i++) {
     var el = document.getElementById(ids[i]);
-    if (el) el.disabled = !enabled;
+    if (el) el.style.display = show;
   }
-  // Cargar button — find inside .filters
-  var btns = document.querySelectorAll('.filters button');
-  for (var j = 0; j < btns.length; j++) {
-    if (enabled) { btns[j].classList.remove('nav-disabled'); }
-    else { btns[j].classList.add('nav-disabled'); }
-  }
-  var msg = document.getElementById('msg');
-  if (!enabled) {
+  // Banner
+  var banner = document.getElementById('globalModeBanner');
+  if (banner) banner.style.display = global ? '' : 'none';
+  // Clear stale data when entering global mode
+  if (global) {
     document.getElementById('tbody').innerHTML = '';
-    if (msg) msg.textContent = 'Select a business to view orders';
-  } else {
-    if (msg && msg.textContent === 'Select a business to view orders') msg.textContent = '';
+    var msg = document.getElementById('msg');
+    if (msg) msg.textContent = '';
   }
 }
 
 // ── Load ──
 async function load() {
-  // Global mode guard: no orders fetch without a business
-  if (!getBusinessId()) {
-    setOrdersEnabled(false);
-    // Still load global analytics (summary, extended) — they support cross-business aggregation
-    await Promise.all([loadSummary(), loadHandoffs(), loadExchangeRate(), loadExtended()]);
-    return;
-  }
-  setOrdersEnabled(true);
+  applyGlobalModeUI();
+  // Global mode: no business-scoped fetches
+  if (!getBusinessId()) { return; }
 
   if (_loadInProgress) {
     console.log('[AUTOREFRESH] load() called but already in progress — skipping');
