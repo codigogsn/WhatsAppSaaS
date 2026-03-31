@@ -754,6 +754,7 @@
       border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
       display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
     }
+    .role-badge.founder { border-color: rgba(120,80,255,.4); color: #8b5cf6; }
     .role-badge.owner { border-color: rgba(0,200,120,.4); color: #22c55e; }
     .role-badge.operator { border-color: rgba(255,180,0,.4); color: #f59e0b; }
 
@@ -2085,15 +2086,19 @@ function checkNewOrders(data) {
 function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 
 function getAdminKey(){ return localStorage.getItem('ADMIN_KEY') || ''; }
-function isAdminUser(){ return !isStaffMode() && (!!getAdminKey() || getAuthRole() === 'Owner'); }
+function isAdminUser(){ var r = getAuthRole(); return !isStaffMode() && (!!getAdminKey() || r === 'Owner' || r === 'Founder'); }
 
 // ── Role badge in header ──
 function applyRoleBadge() {
   var badge = document.getElementById('roleBadge');
   if (!badge) return;
+  var role = getAuthRole();
   if (isStaffMode()) {
     badge.className = 'role-badge operator';
     badge.textContent = 'Operador \u00b7 Acceso restringido';
+  } else if (role === 'Founder') {
+    badge.className = 'role-badge founder';
+    badge.textContent = 'Founder \u00b7 Acceso total';
   } else {
     badge.className = 'role-badge owner';
     badge.textContent = 'Propietario \u00b7 Acceso completo';
@@ -3578,13 +3583,13 @@ async function loadCrm(){
   }
 }
 
-var roleLabels = {Owner:'Propietario',Manager:'Gerente',Operator:'Operador'};
+var roleLabels = {Founder:'Founder',Owner:'Propietario',Manager:'Gerente',Operator:'Operador'};
 async function loadUsers(){
   var tbody = document.getElementById('usersTbody');
   tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
   try {
-    // Only global admin (has admin key) gets cross-business view; regular owners see their business only
-    var url = getAdminKey() ? '/api/admin/users/all' : '/api/admin/users';
+    // Global admin (admin key) or Founder role gets cross-business view; regular owners see their business only
+    var url = (getAdminKey() || getAuthRole() === 'Founder') ? '/api/admin/users/all' : '/api/admin/users';
     var res = await fetch(url, { headers: jwtHeaders() });
     if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" class="danger">Error cargando usuarios</td></tr>'; return; }
     var users = await res.json();
@@ -3593,7 +3598,7 @@ async function loadUsers(){
     for (var i = 0; i < users.length; i++) {
       var u = users[i];
       var bizNames = (u.businesses || []).map(function(b){ return esc(b.name); }).join(', ') || '<span class="muted">—</span>';
-      var rolePill = u.role === 'Owner' ? 'Completed' : u.role === 'Manager' ? 'Preparing' : 'Pending';
+      var rolePill = u.role === 'Founder' ? 'Completed' : u.role === 'Owner' ? 'Completed' : u.role === 'Manager' ? 'Preparing' : 'Pending';
       var roleLabel = roleLabels[u.role] || u.role;
       var tr = document.createElement('tr');
       tr.innerHTML =

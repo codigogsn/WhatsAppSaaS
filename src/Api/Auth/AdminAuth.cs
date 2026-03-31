@@ -43,16 +43,19 @@ public static class AdminAuth
         => user.FindFirstValue(ClaimTypes.Role);
 
     public static bool IsOwner(ClaimsPrincipal user)
-        => GetRole(user) == "Owner";
+        => GetRole(user) is "Owner" or "Founder";
+
+    public static bool IsFounder(ClaimsPrincipal user)
+        => GetRole(user) == "Founder";
 
     public static bool IsOwnerOrManager(ClaimsPrincipal user)
-        => GetRole(user) is "Owner" or "Manager";
+        => GetRole(user) is "Owner" or "Founder" or "Manager";
 
     /// <summary>
-    /// Returns true if the JWT user has any valid staff role (Owner, Manager, or Operator).
+    /// Returns true if the JWT user has any valid staff role (Founder, Owner, Manager, or Operator).
     /// </summary>
     public static bool HasValidJwtRole(ClaimsPrincipal user)
-        => GetRole(user) is "Owner" or "Manager" or "Operator";
+        => GetRole(user) is "Founder" or "Owner" or "Manager" or "Operator";
 
     // ── JWT business-scoped checks ──
 

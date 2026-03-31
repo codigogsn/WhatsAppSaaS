@@ -38,7 +38,7 @@ public class AdminHandoffsController : ControllerBase
     {
         // JWT auth: any staff role
         var role = User.FindFirstValue(ClaimTypes.Role);
-        if (role is "Owner" or "Manager" or "Operator")
+        if (role is "Founder" or "Owner" or "Manager" or "Operator")
             return true;
 
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey) || string.IsNullOrWhiteSpace(headerKey))

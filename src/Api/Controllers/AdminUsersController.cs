@@ -33,10 +33,11 @@ public sealed class AdminUsersController : ControllerBase
     private bool IsOwnerOrManager()
     {
         var role = GetRoleFromToken();
-        return role is "Owner" or "Manager";
+        return role is "Founder" or "Owner" or "Manager";
     }
 
-    private bool IsOwner() => GetRoleFromToken() == "Owner";
+    private bool IsOwner() => GetRoleFromToken() is "Founder" or "Owner";
+    private bool IsFounderRole() => GetRoleFromToken() == "Founder";
 
     private bool IsGlobalAdmin()
     {
@@ -229,8 +230,8 @@ public sealed class AdminUsersController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> CreateMulti([FromBody] CreateMultiUserRequest req, CancellationToken ct)
     {
-        if (!IsGlobalAdmin())
-            return Unauthorized(new { error = "Global admin key required" });
+        if (!IsGlobalAdmin() && !IsFounderRole())
+            return Unauthorized(new { error = "Global admin or Founder role required" });
 
         if (string.IsNullOrWhiteSpace(req.Name))
             return BadRequest(new { error = "Name is required" });
@@ -301,8 +302,8 @@ public sealed class AdminUsersController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> ListAll(CancellationToken ct)
     {
-        if (!IsGlobalAdmin())
-            return Unauthorized(new { error = "Global admin key required" });
+        if (!IsGlobalAdmin() && !IsFounderRole())
+            return Unauthorized(new { error = "Global admin or Founder role required" });
 
         // Use raw SQL to avoid legacy DateTime column issues
         var conn = _db.Database.GetDbConnection();
@@ -359,8 +360,8 @@ public sealed class AdminUsersController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> UpdateMulti(string email, [FromBody] UpdateMultiUserRequest req, CancellationToken ct)
     {
-        if (!IsGlobalAdmin())
-            return Unauthorized(new { error = "Global admin key required" });
+        if (!IsGlobalAdmin() && !IsFounderRole())
+            return Unauthorized(new { error = "Global admin or Founder role required" });
 
         var normalizedEmail = email.Trim().ToLowerInvariant();
         var userRows = await _db.BusinessUsers
@@ -442,8 +443,8 @@ public sealed class AdminUsersController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> SeedOwner([FromBody] SeedOwnerRequest req, CancellationToken ct)
     {
-        if (!IsGlobalAdmin())
-            return Unauthorized(new { error = "Global admin key required" });
+        if (!IsGlobalAdmin() && !IsFounderRole())
+            return Unauthorized(new { error = "Global admin or Founder role required" });
 
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password) || string.IsNullOrWhiteSpace(req.Name))
             return BadRequest(new { error = "Name, email, and password are required" });

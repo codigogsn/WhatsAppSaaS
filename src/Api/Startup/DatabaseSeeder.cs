@@ -288,7 +288,7 @@ public static class DatabaseSeeder
                 using var updCmd = conn.CreateCommand();
                 updCmd.CommandText = """
                     UPDATE "BusinessUsers"
-                    SET "PasswordHash" = @hash, "Role" = 'Owner', "IsActive" = true, "BusinessId" = @bizId, "Name" = @name
+                    SET "PasswordHash" = @hash, "Role" = 'Founder', "IsActive" = true, "BusinessId" = @bizId, "Name" = @name
                     WHERE "Id" = @uid
                 """;
                 var p1 = updCmd.CreateParameter(); p1.ParameterName = "hash"; p1.Value = passwordHash; updCmd.Parameters.Add(p1);
@@ -305,7 +305,7 @@ public static class DatabaseSeeder
                 using var insCmd = conn.CreateCommand();
                 insCmd.CommandText = """
                     INSERT INTO "BusinessUsers" ("Id", "BusinessId", "Name", "Email", "PasswordHash", "Role", "IsActive", "CreatedAtUtc")
-                    VALUES (@id, @bizId, @name, @email, @hash, 'Owner', true, @created)
+                    VALUES (@id, @bizId, @name, @email, @hash, 'Founder', true, @created)
                 """;
                 var p1 = insCmd.CreateParameter(); p1.ParameterName = "id"; p1.Value = userId; insCmd.Parameters.Add(p1);
                 var p2 = insCmd.CreateParameter(); p2.ParameterName = "bizId"; p2.Value = businessGuid; insCmd.Parameters.Add(p2);

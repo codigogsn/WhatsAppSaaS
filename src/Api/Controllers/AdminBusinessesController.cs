@@ -146,7 +146,7 @@ public class AdminBusinessesController : ControllerBase
         // Path 1: JWT auth (middleware + fallback middleware populate User)
         var jwtBizIds = AdminAuth.GetBusinessIds(User);
         var jwtRole = AdminAuth.GetRole(User);
-        var isJwtAuth = jwtRole is "Owner" or "Manager" or "Operator" && jwtBizIds.Count > 0;
+        var isJwtAuth = jwtRole is "Founder" or "Owner" or "Manager" or "Operator" && jwtBizIds.Count > 0;
 
         // Path 2: X-Admin-Key fallback
         string? key = null;

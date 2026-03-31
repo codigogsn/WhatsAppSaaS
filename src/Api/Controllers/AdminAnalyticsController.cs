@@ -42,7 +42,7 @@ public class AdminAnalyticsController : ControllerBase
     {
         // JWT auth: any valid role scoped to their assigned business(es)
         var role = User.FindFirstValue(ClaimTypes.Role);
-        if (role is "Owner" or "Manager" or "Operator" && businessId.HasValue)
+        if (role is "Founder" or "Owner" or "Manager" or "Operator" && businessId.HasValue)
         {
             // Check single businessId claim
             var jwtBizId = GetJwtBusinessId();

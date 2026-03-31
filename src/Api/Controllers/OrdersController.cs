@@ -832,7 +832,7 @@ public sealed class OrdersController : ControllerBase
     {
         // Path 1: valid JWT with any staff role
         var role = User.FindFirstValue(ClaimTypes.Role);
-        if (role is "Owner" or "Manager" or "Operator")
+        if (role is "Founder" or "Owner" or "Manager" or "Operator")
             return true;
 
         // Path 2: valid X-Admin-Key header
