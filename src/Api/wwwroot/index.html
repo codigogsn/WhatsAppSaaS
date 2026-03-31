@@ -1091,18 +1091,6 @@
       transform: none !important;
     }
 
-    /* ── Login Staff bar: compact utility style ── */
-    #loginBar {
-      padding: 10px 16px !important;
-      margin-bottom: 8px !important;
-      border-radius: var(--radius) !important;
-      font-size: 13px;
-    }
-    #loginBar input {
-      padding: 5px 10px !important;
-      font-size: 12px !important;
-    }
-
     /* ═══ Proof modal ═══ */
     .proof-modal { max-width:720px; }
     .proof-modal img { max-width:100%; max-height:70vh; border-radius:var(--radius); display:block; margin:0 auto; }
@@ -1506,19 +1494,6 @@ Tipo: burger"></textarea>
         <button onclick="closeAutofillBiz()">Cancelar</button>
         <span id="autofillBizMsg" class="small"></span>
       </div>
-    </div>
-  </div>
-
-  <!-- JWT Login Bar -->
-  <div id="loginBar" class="filters" style="display:none; border-left:3px solid var(--accent);">
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-      <span style="font-weight:600;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px;">Staff</span>
-      <input id="loginEmail" placeholder="Email" style="width:160px;" />
-      <input id="loginPassword" type="password" placeholder="Password" style="width:120px;" />
-      <button class="primary" onclick="doLogin()" style="padding:5px 14px;font-size:12px;">Entrar</button>
-      <span id="loginUser" class="small ok" style="font-weight:600;"></span>
-      <button id="btnLogout" onclick="doLogout()" style="display:none;padding:4px 10px;font-size:11px;">Salir</button>
-      <span id="loginMsg" class="small danger"></span>
     </div>
   </div>
 
@@ -3273,65 +3248,7 @@ function jwtHeaders(){
   return h;
 }
 
-async function doLogin(){
-  const email = document.getElementById('loginEmail').value.trim();
-  const password = document.getElementById('loginPassword').value;
-  if (!email || !password) { document.getElementById('loginMsg').textContent = 'Completa email y password'; return; }
-  document.getElementById('loginMsg').textContent = '';
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      document.getElementById('loginMsg').textContent = err.error || 'Error de login';
-      return;
-    }
-    const data = await res.json();
-    localStorage.setItem('JWT_TOKEN', data.token);
-    localStorage.setItem('JWT_USER', JSON.stringify(data.user));
-    // Auto-select business
-    if (data.user.businessId) {
-      localStorage.setItem('BUSINESS_ID', data.user.businessId);
-    }
-    updateLoginUI();
-    await loadBusinesses();
-    load();
-  } catch(e) {
-    document.getElementById('loginMsg').textContent = e.message;
-  }
-}
-
-function doLogout(){
-  localStorage.removeItem('JWT_TOKEN');
-  localStorage.removeItem('JWT_USER');
-  updateLoginUI();
-}
-
 function updateLoginUI(){
-  var user = getJwtUser();
-  var loginBar = document.getElementById('loginBar');
-  loginBar.style.display = '';
-  if (user) {
-    var bizCount = (user.businessIds || []).length || 1;
-    var label = user.name + ' (' + user.role + ')';
-    if (bizCount > 1) label += ' - ' + bizCount + ' negocios';
-    else label += ' - ' + (user.businessName || '');
-    document.getElementById('loginUser').textContent = label;
-    document.getElementById('btnLogout').style.display = '';
-    document.getElementById('loginEmail').style.display = 'none';
-    document.getElementById('loginPassword').style.display = 'none';
-    document.querySelector('#loginBar .primary').style.display = 'none';
-    document.getElementById('loginMsg').textContent = '';
-  } else {
-    document.getElementById('loginUser').textContent = '';
-    document.getElementById('btnLogout').style.display = 'none';
-    document.getElementById('loginEmail').style.display = '';
-    document.getElementById('loginPassword').style.display = '';
-    document.querySelector('#loginBar .primary').style.display = '';
-  }
   updateUsersButton();
 }
 
