@@ -534,6 +534,8 @@ function toggleTheme(){
 
 function esc(s){ return (s??'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 function getKey(){ return localStorage.getItem('ADMIN_KEY') || ''; }
+function getJwt(){ return localStorage.getItem('AUTH_TOKEN') || ''; }
+function isStaffMode(){ return localStorage.getItem('LOGIN_MODE') === 'staff'; }
 function saveKey(){
   const v = document.getElementById('adminKey').value.trim();
   if(!v){ localStorage.removeItem('ADMIN_KEY'); document.getElementById('keyMsg').innerHTML='<span style="color:var(--danger);">Borrada</span>'; return; }
@@ -541,7 +543,14 @@ function saveKey(){
   document.getElementById('keyMsg').innerHTML='<span style="color:var(--success);">OK</span>';
   loadBusinesses();
 }
-function hdrs(){ const k=getKey(); return k?{'X-Admin-Key':k,'Content-Type':'application/json'}:{'Content-Type':'application/json'}; }
+function authHeaders(){
+  var h = {'Content-Type':'application/json'};
+  var jwt = getJwt();
+  if (jwt) h['Authorization'] = 'Bearer ' + jwt;
+  if (!isStaffMode()) { var k = getKey(); if (k) h['X-Admin-Key'] = k; }
+  return h;
+}
+function hdrs(){ return authHeaders(); }
 function bid(){ return document.getElementById('businessSelect').value || ''; }
 
 function onBizSelect(){
@@ -550,32 +559,61 @@ function onBizSelect(){
 }
 
 async function loadBusinesses(){
-  const key = getKey();
-  const sel = document.getElementById('businessSelect');
-  const statusEl = document.getElementById('bizStatus');
-  if (!key) { if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">Sin admin key</span>'; return; }
+  var key = isStaffMode() ? '' : getKey();
+  var jwt = getJwt();
+  var sel = document.getElementById('businessSelect');
+  var statusEl = document.getElementById('bizStatus');
+  if (!key && !jwt) { if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">Sin credenciales</span>'; return; }
   try {
     if(statusEl) statusEl.innerHTML='<span class="muted">Cargando...</span>';
-    const res = await fetch('/api/admin/businesses', { headers: {'X-Admin-Key': key} });
+    var res = await fetch('/api/admin/businesses', { headers: authHeaders() });
     if (!res.ok) {
-      let detail = 'HTTP ' + res.status;
-      try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
+      var detail = 'HTTP ' + res.status;
+      try { var err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
       if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">' + esc(detail) + '</span>';
       return;
     }
-    const list = await res.json();
+    var list = await res.json();
     if (!Array.isArray(list)) { if(statusEl) statusEl.innerHTML='<span style="color:var(--danger);">Respuesta inesperada</span>'; return; }
-    const saved = localStorage.getItem('BUSINESS_ID') || '';
-    sel.innerHTML = '<option value="">(Seleccionar negocio)</option>';
-    const visible = list.filter(b => b.isActive && !b.isJunk);
-    for (const b of visible) {
-      const opt = document.createElement('option');
-      opt.value = b.id;
-      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')';
-      if (b.id === saved) opt.selected = true;
-      sel.appendChild(opt);
+    var saved = localStorage.getItem('BUSINESS_ID') || '';
+    var visible = list.filter(function(b){ return b.isActive && !b.isJunk; });
+
+    // Staff: filter to assigned businesses only
+    if (isStaffMode()) {
+      try {
+        var authUser = JSON.parse(localStorage.getItem('AUTH_USER') || '{}');
+        var assignedIds = authUser.businessIds || [];
+        if (assignedIds.length > 0) {
+          visible = visible.filter(function(b){ return assignedIds.indexOf(b.id) !== -1; });
+        }
+      } catch(_){}
+      sel.innerHTML = '';
+      if (visible.length === 1) {
+        var o = document.createElement('option');
+        o.value = visible[0].id; o.textContent = visible[0].name; o.selected = true;
+        sel.appendChild(o);
+        localStorage.setItem('BUSINESS_ID', visible[0].id);
+      } else {
+        for (var i = 0; i < visible.length; i++) {
+          var opt = document.createElement('option');
+          opt.value = visible[i].id;
+          opt.textContent = visible[i].name + ' (' + (visible[i].phoneNumberId||'').slice(-6) + ')';
+          if (visible[i].id === saved) opt.selected = true;
+          sel.appendChild(opt);
+        }
+        if (!sel.value && visible.length > 0) { sel.value = visible[0].id; localStorage.setItem('BUSINESS_ID', visible[0].id); }
+      }
+    } else {
+      sel.innerHTML = '<option value="">(Seleccionar negocio)</option>';
+      for (var j = 0; j < visible.length; j++) {
+        var opt2 = document.createElement('option');
+        opt2.value = visible[j].id;
+        opt2.textContent = visible[j].name + ' (' + (visible[j].phoneNumberId||'').slice(-6) + ')';
+        if (visible[j].id === saved) opt2.selected = true;
+        sel.appendChild(opt2);
+      }
     }
-    const selected = visible.find(b => b.id === sel.value);
+    var selected = visible.find(function(b){ return b.id === sel.value; });
     if (selected && statusEl) {
       statusEl.innerHTML = '<span style="color:var(--success); font-weight:600;">Activo</span>';
     } else if (statusEl) {
@@ -889,7 +927,17 @@ function showToast(msg){
 }
 
 // Init
-document.getElementById('adminKey').value = getKey();
+if (isStaffMode()) {
+  localStorage.removeItem('ADMIN_KEY');
+  document.getElementById('adminKey').value = '';
+  document.getElementById('adminKey').style.display = 'none';
+  var guardarBtn = document.getElementById('adminKey').nextElementSibling;
+  if (guardarBtn && guardarBtn.tagName === 'BUTTON') guardarBtn.style.display = 'none';
+  var keyMsg = document.getElementById('keyMsg');
+  if (keyMsg) keyMsg.style.display = 'none';
+} else {
+  document.getElementById('adminKey').value = getKey();
+}
 loadBusinesses();
 </script>
 
