@@ -47,8 +47,8 @@ public sealed class MenuPdfController : ControllerBase
     [RequestSizeLimit(MaxFileSize)]
     public async Task<IActionResult> Upload(Guid businessId, IFormFile file, CancellationToken ct)
     {
-        var biz = await AuthorizeBusinessAsync(businessId, ct);
-        if (biz is null) return Unauthorized();
+        if (!await AuthorizeBusinessAsync(businessId, ct))
+            return Unauthorized();
 
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file provided" });
@@ -85,10 +85,11 @@ public sealed class MenuPdfController : ControllerBase
             });
         }
 
-        // Build the public serve URL and store on Business
+        // Build the public serve URL and update via raw SQL to avoid legacy column issues
         var baseUrl = ResolveBaseUrl();
         var menuPdfUrl = $"{baseUrl}/api/menu-pdf/{businessId}";
-        biz.MenuPdfUrl = menuPdfUrl;
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"""UPDATE "Businesses" SET "MenuPdfUrl" = {menuPdfUrl} WHERE "Id" = {businessId}""", ct);
 
         try
         {
@@ -115,8 +116,8 @@ public sealed class MenuPdfController : ControllerBase
     [EnableRateLimiting("admin")]
     public async Task<IActionResult> Delete(Guid businessId, CancellationToken ct)
     {
-        var biz = await AuthorizeBusinessAsync(businessId, ct);
-        if (biz is null) return Unauthorized();
+        if (!await AuthorizeBusinessAsync(businessId, ct))
+            return Unauthorized();
 
         var existing = await _db.MenuPdfs
             .FirstOrDefaultAsync(p => p.BusinessId == businessId, ct);
@@ -124,7 +125,10 @@ public sealed class MenuPdfController : ControllerBase
         if (existing is not null)
             _db.MenuPdfs.Remove(existing);
 
-        biz.MenuPdfUrl = null;
+        // Update via raw SQL to avoid legacy column issues
+        await _db.Database.ExecuteSqlInterpolatedAsync(
+            $"""UPDATE "Businesses" SET "MenuPdfUrl" = NULL WHERE "Id" = {businessId}""", ct);
+
         await _db.SaveChangesAsync(ct);
 
         return Ok(new { message = "Menu PDF deleted. Business will use default menu." });
@@ -138,19 +142,21 @@ public sealed class MenuPdfController : ControllerBase
             ?? Request.Scheme + "://" + Request.Host;
     }
 
-    private async Task<Business?> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
+    private async Task<bool> AuthorizeBusinessAsync(Guid businessId, CancellationToken ct)
     {
         // Path 1: JWT authorization
         if (AdminAuth.IsJwtAuthorizedForBusiness(User, businessId))
-            return await _db.Businesses.FirstOrDefaultAsync(b => b.Id == businessId, ct);
+        {
+            return await _db.Businesses.AnyAsync(b => b.Id == businessId, ct);
+        }
 
         // Path 2: X-Admin-Key
         if (!Request.Headers.TryGetValue("X-Admin-Key", out var headerKey))
-            return null;
+            return false;
 
         var key = headerKey.ToString().Trim();
         if (string.IsNullOrWhiteSpace(key))
-            return null;
+            return false;
 
         // Accept global admin key (all known config sources)
         var globalKey = (_config["ADMIN_KEY"]
@@ -158,14 +164,17 @@ public sealed class MenuPdfController : ControllerBase
             ?? Environment.GetEnvironmentVariable("WHATSAPP_ADMIN_KEY")
             ?? _config["WhatsApp:AdminKey"])?.Trim();
         if (!string.IsNullOrWhiteSpace(globalKey) && SafeEquals(key, globalKey))
-            return await _db.Businesses.FirstOrDefaultAsync(b => b.Id == businessId, ct);
+            return await _db.Businesses.AnyAsync(b => b.Id == businessId, ct);
 
-        // Accept per-business admin key
-        var biz = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == businessId, ct);
-        if (biz is not null && !string.IsNullOrWhiteSpace(biz.AdminKey) && SafeEquals(key, biz.AdminKey.Trim()))
-            return biz;
+        // Accept per-business admin key — project only AdminKey to avoid legacy columns
+        var bizKey = await _db.Businesses
+            .Where(b => b.Id == businessId)
+            .Select(b => b.AdminKey)
+            .FirstOrDefaultAsync(ct);
+        if (bizKey is not null && !string.IsNullOrWhiteSpace(bizKey) && SafeEquals(key, bizKey.Trim()))
+            return true;
 
-        return null;
+        return false;
     }
 
     private static bool SafeEquals(string a, string b)
