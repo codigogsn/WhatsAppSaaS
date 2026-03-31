@@ -1290,11 +1290,11 @@
       </select>
       <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:16px;padding:4px 8px;">&#x21bb;</button>
     </div>
-    <button class="primary" onclick="openCreateBiz()">+ Nuevo Negocio</button>
+    <button class="primary" onclick="openCreateBiz()" id="btnNewBiz">+ Nuevo Negocio</button>
     <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
     <button onclick="window.location.href='/menu'" id="btnMenuMgr" style="display:none;">Menu Manager</button>
     <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
-    <button onclick="toggleCustomersPanel()">Customers</button>
+    <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
     <span id="selectedBizStatus" class="small"></span>
     <span style="flex:1;"></span>
     <span class="muted small">API: <code id="baseUrl"></code></span>
@@ -2040,13 +2040,16 @@ function onBusinessSelect(){
 }
 
 function updateBizAdminButton(){
-  const bid = getBusinessId();
-  const btn = document.getElementById('btnBizAdmin');
-  const menuBtn = document.getElementById('btnMenuMgr');
-  const statusEl = document.getElementById('selectedBizStatus');
+  var bid = getBusinessId();
+  var btn = document.getElementById('btnBizAdmin');
+  var menuBtn = document.getElementById('btnMenuMgr');
+  var statusEl = document.getElementById('selectedBizStatus');
+  var role = getAuthRole();
   if (bid && businessList.length > 0) {
-    btn.style.display = '';
-    menuBtn.style.display = '';
+    // Owner: all buttons. Manager/Operator: hide admin buttons.
+    var isAdmin = !role || role === 'Owner' || getAdminKey();
+    btn.style.display = isAdmin ? '' : 'none';
+    menuBtn.style.display = (isAdmin || role === 'Manager') ? '' : 'none';
     const biz = businessList.find(b => b.id === bid);
     if (biz) {
       statusEl.innerHTML = biz.isActive
@@ -3236,8 +3239,9 @@ async function downloadCustomersCsv(){
 }
 
 // ── JWT Auth ──
-function getJwt(){ return localStorage.getItem('JWT_TOKEN') || ''; }
-function getJwtUser(){ try { return JSON.parse(localStorage.getItem('JWT_USER') || 'null'); } catch { return null; } }
+function getJwt(){ return localStorage.getItem('JWT_TOKEN') || localStorage.getItem('AUTH_TOKEN') || ''; }
+function getJwtUser(){ try { return JSON.parse(localStorage.getItem('JWT_USER') || localStorage.getItem('AUTH_USER') || 'null'); } catch { return null; } }
+function getAuthRole(){ var u = getJwtUser(); return (u && u.role) ? u.role : null; }
 
 function jwtHeaders(){
   const h = {};
@@ -3250,13 +3254,30 @@ function jwtHeaders(){
 
 function updateLoginUI(){
   updateUsersButton();
+  applyRoleVisibility();
+}
+
+function applyRoleVisibility(){
+  var role = getAuthRole();
+  if (!role || getAdminKey()) return; // founder/admin: no restrictions
+  var newBiz = document.getElementById('btnNewBiz');
+  var customers = document.getElementById('btnCustomers');
+  // Manager: hide Usuarios (handled in updateUsersButton), hide Nuevo Negocio
+  if (role === 'Manager') {
+    if (newBiz) newBiz.style.display = 'none';
+  }
+  // Operator: hide Usuarios, Nuevo Negocio, Menu Manager, Customers
+  if (role === 'Operator') {
+    if (newBiz) newBiz.style.display = 'none';
+    if (customers) customers.style.display = 'none';
+  }
 }
 
 function updateUsersButton(){
-  var user = getJwtUser();
   var btn = document.getElementById('btnUsersAdmin');
-  // Show users button if JWT user is Owner or Manager, or if global admin key is set
-  if ((user && (user.role === 'Owner' || user.role === 'Manager')) || getAdminKey()) {
+  var role = getAuthRole();
+  // Only Owner or global admin can see Usuarios
+  if (role === 'Owner' || getAdminKey()) {
     btn.style.display = '';
   } else {
     btn.style.display = 'none';
