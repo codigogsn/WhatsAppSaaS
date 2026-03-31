@@ -941,6 +941,7 @@
     button.primary:hover { background: var(--accent-hover); }
     button.success { background: var(--success); color: #fff; }
     button.success:hover { opacity: .88; }
+    button.nav-disabled { opacity: .4; pointer-events: none; cursor: not-allowed; }
     button.warn { background: var(--warning); color: #fff; }
     button.warn:hover { opacity: .88; }
 
@@ -1330,7 +1331,7 @@
     </div>
     <button class="primary" onclick="openCreateBiz()" id="btnNewBiz">+ Nuevo Negocio</button>
     <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
-    <button onclick="window.location.href='/menu'" id="btnMenuMgr" style="display:none;">Menu Manager</button>
+    <button onclick="openMenuManager()" id="btnMenuMgr" style="display:none;">Menu Manager</button>
     <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
     <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
     <span id="selectedBizStatus" class="small"></span>
@@ -2086,8 +2087,13 @@ function onBusinessSelect(){
   const bid = document.getElementById('businessSelect').value;
   if (bid) localStorage.setItem('BUSINESS_ID', bid); else localStorage.removeItem('BUSINESS_ID');
   updateBizAdminButton();
-  // Close admin panel when switching
+  // Close all module panels when switching business
   document.getElementById('bizPanel').style.display = 'none';
+  if (!bid) {
+    // "All businesses" selected — close business-scoped panels
+    document.getElementById('usersPanel').style.display = 'none';
+    document.getElementById('customersPanel').style.display = 'none';
+  }
   load();
 }
 
@@ -2095,19 +2101,36 @@ function updateBizAdminButton(){
   var bid = getBusinessId();
   var btn = document.getElementById('btnBizAdmin');
   var menuBtn = document.getElementById('btnMenuMgr');
+  var usersBtn = document.getElementById('btnUsersAdmin');
+  var customersBtn = document.getElementById('btnCustomers');
   var statusEl = document.getElementById('selectedBizStatus');
   var role = getAuthRole();
   var admin = !role || isAdminUser();
   var hasBiz = !!bid && businessList.length > 0;
 
-  // "Administrar Negocio" requires a specific business selected
+  // "Administrar Negocio" — only when a specific business is selected
   btn.style.display = (hasBiz && admin) ? '' : 'none';
 
-  // "Menu Manager" is role-based — visible whenever user has permission, regardless of selection
+  // Business-scoped module buttons: visible by role, but disabled without a business
   if (businessList.length > 0) {
     menuBtn.style.display = (admin || role === 'Manager') ? '' : 'none';
+    if (usersBtn.style.display !== 'none') {
+      // usersBtn visibility is set by updateUsersButton — only toggle disabled state here
+    }
   } else {
     menuBtn.style.display = 'none';
+  }
+
+  // Apply disabled state to business-scoped buttons when no business selected
+  var bizBtns = [menuBtn, usersBtn, customersBtn];
+  for (var i = 0; i < bizBtns.length; i++) {
+    if (bizBtns[i]) {
+      if (hasBiz) {
+        bizBtns[i].classList.remove('nav-disabled');
+      } else {
+        bizBtns[i].classList.add('nav-disabled');
+      }
+    }
   }
 
   // Status pill for the selected business
@@ -2225,6 +2248,11 @@ async function loadBusinesses(){
   }
 }
 function adminHeaders(){ const key = getAdminKey(); return key ? { 'X-Admin-Key': key } : {}; }
+
+function openMenuManager(){
+  if (!getBusinessId()) { showToast('Select a business to open Menu Manager', 'warn'); return; }
+  window.location.href = '/menu';
+}
 
 // ── Business Admin Panel ──
 
@@ -3422,6 +3450,7 @@ function updateUsersButton(){
 
 // ── Users Panel ──
 async function toggleUsersPanel(){
+  if (!getBusinessId()) { showToast('Select a business to manage users', 'warn'); return; }
   const panel = document.getElementById('usersPanel');
   if (panel.style.display === 'none') {
     panel.style.display = '';
@@ -3433,6 +3462,7 @@ async function toggleUsersPanel(){
 
 // ── Customers CRM ──
 function toggleCustomersPanel(){
+  if (!getBusinessId()) { showToast('Select a business to view customers', 'warn'); return; }
   const panel = document.getElementById('customersPanel');
   if (panel.style.display === 'none') {
     panel.style.display = '';
