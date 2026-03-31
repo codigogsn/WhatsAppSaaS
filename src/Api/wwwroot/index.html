@@ -3263,16 +3263,26 @@ function applyRoleVisibility(){
   var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
   if (!role) return;
   if (getAdminKey() && !isStaff) return; // founder/admin: no restrictions
+
+  // Nav buttons
   var newBiz = document.getElementById('btnNewBiz');
   var customers = document.getElementById('btnCustomers');
-  // Manager: hide Usuarios (handled in updateUsersButton), hide Nuevo Negocio
+  // Sections
+  var extAnalytics = document.getElementById('extAnalytics');
+  var customersPanel = document.getElementById('customersPanel');
+
   if (role === 'Manager') {
+    // Hide: Nuevo Negocio, Usuarios (handled in updateUsersButton)
     if (newBiz) newBiz.style.display = 'none';
   }
-  // Operator: hide Usuarios, Nuevo Negocio, Menu Manager, Customers
+
   if (role === 'Operator') {
+    // Nav: hide Nuevo Negocio, Menu Manager, Customers
     if (newBiz) newBiz.style.display = 'none';
     if (customers) customers.style.display = 'none';
+    // Sections: hide analytics, customers panel
+    if (extAnalytics) extAnalytics.style.display = 'none';
+    if (customersPanel) customersPanel.style.display = 'none';
   }
 }
 
