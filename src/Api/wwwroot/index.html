@@ -2092,6 +2092,25 @@ function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&am
 function getAdminKey(){ return localStorage.getItem('ADMIN_KEY') || ''; }
 function isAdminUser(){ return !isStaffMode() && (!!getAdminKey() || getAuthRole() === 'Owner'); }
 
+// ── Single source of truth for admin key header visibility ──
+function applyHeaderAdminState() {
+  var akInput = document.getElementById('adminKey');
+  var akBtn = akInput ? akInput.nextElementSibling : null;
+  var akMsg = document.getElementById('keyMsg');
+  if (!akInput) return;
+  if (isStaffMode()) {
+    akInput.style.display = 'none';
+    akInput.value = '';
+    if (akBtn && akBtn.tagName === 'BUTTON') akBtn.style.display = 'none';
+    if (akMsg) akMsg.style.display = 'none';
+  } else {
+    akInput.style.display = '';
+    akInput.value = getAdminKey();
+    if (akBtn && akBtn.tagName === 'BUTTON') akBtn.style.display = '';
+    if (akMsg) akMsg.style.display = '';
+  }
+}
+
 function saveKey(){
   const v = document.getElementById('adminKey').value.trim();
   if (!v) { localStorage.removeItem('ADMIN_KEY'); document.getElementById('keyMsg').innerHTML = '<span class="danger">Borrada</span>'; return; }
@@ -2103,6 +2122,7 @@ function saveKey(){
 function logout(){
   localStorage.removeItem('AUTH_TOKEN');
   localStorage.removeItem('AUTH_USER');
+  localStorage.removeItem('LOGIN_MODE');
   window.location.href = '/login.html';
 }
 
@@ -3451,6 +3471,7 @@ function jwtHeaders(){
 }
 
 function updateLoginUI(){
+  applyHeaderAdminState();
   updateUsersButton();
   applyRoleVisibility();
 }
@@ -3709,25 +3730,8 @@ async function submitCreateUser(){
 
 // Init
 document.getElementById('baseUrl').textContent = location.origin;
-if (isStaffMode()) {
-  // Staff mode: hide admin key UI and ensure no admin key leakage
-  localStorage.removeItem('ADMIN_KEY');
-  document.getElementById('adminKey').value = '';
-  document.getElementById('adminKey').style.display = 'none';
-  var guardarBtn = document.getElementById('adminKey').nextElementSibling;
-  if (guardarBtn && guardarBtn.tagName === 'BUTTON') guardarBtn.style.display = 'none';
-  var keyMsg = document.getElementById('keyMsg');
-  if (keyMsg) keyMsg.style.display = 'none';
-} else {
-  // Admin/founder mode: ensure admin key UI is visible and populated
-  var akInput = document.getElementById('adminKey');
-  akInput.value = getAdminKey();
-  akInput.style.display = '';
-  var akBtn = akInput.nextElementSibling;
-  if (akBtn && akBtn.tagName === 'BUTTON') akBtn.style.display = '';
-  var akMsg = document.getElementById('keyMsg');
-  if (akMsg) akMsg.style.display = '';
-}
+if (isStaffMode()) { localStorage.removeItem('ADMIN_KEY'); }
+applyHeaderAdminState();
 updateLoginUI();
 
 // Set default date filter to today
