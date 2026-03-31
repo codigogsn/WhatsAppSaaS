@@ -2080,7 +2080,11 @@ function logout(){
 }
 
 function getBusinessId(){
-  return document.getElementById('businessSelect').value || localStorage.getItem('BUSINESS_ID') || '';
+  // The select element is the source of truth. Its value is '' when "All businesses"
+  // is selected. Do NOT fall back to localStorage — that would leak the previous
+  // business into global mode fetches.
+  var sel = document.getElementById('businessSelect');
+  return sel ? sel.value : '';
 }
 
 function onBusinessSelect(){
