@@ -1050,6 +1050,23 @@
       left: auto !important;
     }
 
+    /* ── Autofill submodal inside Nuevo Negocio ── */
+    #autofillBizModal {
+      position: fixed !important;
+      inset: 0 !important;
+      z-index: 10000 !important;
+      display: none;
+      background: rgba(0,0,0,.35) !important;
+    }
+    #autofillBizModal.open {
+      display: flex !important;
+      justify-content: center;
+      align-items: center;
+    }
+    #autofillBizModal .modal {
+      max-width: 600px;
+    }
+
     /* ═══ Proof modal ═══ */
     .proof-modal { max-width:720px; }
     .proof-modal img { max-width:100%; max-height:70vh; border-radius:var(--radius); display:block; margin:0 auto; }
@@ -2353,7 +2370,7 @@ function applyAutofillBiz(){
   document.getElementById('autofillBizModal').classList.remove('open');
   const t=document.createElement('div');
   t.textContent=filled+' campo'+(filled>1?'s':'')+' autollenado'+(filled>1?'s':'');
-  Object.assign(t.style,{position:'fixed',bottom:'24px',left:'50%',transform:'translateX(-50%)',background:'var(--success)',color:'#fff',padding:'10px 22px',borderRadius:'10px',fontSize:'13px',fontWeight:'600',zIndex:'2000',boxShadow:'0 4px 16px rgba(0,0,0,.2)',opacity:'0',transition:'opacity .3s ease'});
+  Object.assign(t.style,{position:'fixed',bottom:'24px',left:'50%',transform:'translateX(-50%)',background:'var(--success)',color:'#fff',padding:'10px 22px',borderRadius:'10px',fontSize:'13px',fontWeight:'600',zIndex:'10001',boxShadow:'0 4px 16px rgba(0,0,0,.2)',opacity:'0',transition:'opacity .3s ease'});
   document.body.appendChild(t);
   requestAnimationFrame(()=>t.style.opacity='1');
   setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3000);
@@ -3456,6 +3473,11 @@ document.getElementById('dateFrom').value = today;
 var createBizModal = document.getElementById('createBizModal');
 if (createBizModal && createBizModal.parentElement !== document.body) {
   document.body.appendChild(createBizModal);
+}
+// Move autofillBizModal into createBizModal so it layers as a child submodal
+var autofillBizModal = document.getElementById('autofillBizModal');
+if (autofillBizModal && createBizModal) {
+  createBizModal.appendChild(autofillBizModal);
 }
 
 // Init controls state
