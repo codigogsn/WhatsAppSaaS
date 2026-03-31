@@ -2077,13 +2077,12 @@ async function loadExchangeRate(){
 }
 
 async function loadBusinesses(){
-  var key = getAdminKey();
+  var key = isStaffMode() ? '' : getAdminKey(); // Staff: ignore admin key entirely
   var jwt = getJwt();
   var sel = document.getElementById('businessSelect');
   var statusEl = document.getElementById('selectedBizStatus');
-  var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
 
-  if (!key && !jwt) { console.warn('[AUTH] loadBusinesses: no auth — key=' + !!key + ' jwt=' + (jwt ? jwt.substring(0,20) + '...' : 'EMPTY')); if(statusEl) statusEl.innerHTML='<span class="danger">Sin credenciales</span>'; return; }
+  if (!key && !jwt) { console.warn('[AUTH] loadBusinesses: no auth'); if(statusEl) statusEl.innerHTML='<span class="danger">Sin credenciales</span>'; return; }
 
   try {
     if(statusEl) statusEl.innerHTML='<span class="muted">Cargando negocios...</span>';
@@ -2107,8 +2106,13 @@ async function loadBusinesses(){
     var saved = localStorage.getItem('BUSINESS_ID') || '';
     var visibleList = list.filter(function(b){ return b.isActive && !b.isJunk; });
 
-    // Staff users: no global "(Todos)" option — always business-scoped
-    if (isStaff) {
+    // Staff users: enforce tenant isolation — only show assigned businesses
+    if (isStaffMode()) {
+      var authUser = getJwtUser();
+      var assignedIds = (authUser && authUser.businessIds) ? authUser.businessIds : [];
+      if (assignedIds.length > 0) {
+        visibleList = visibleList.filter(function(b){ return assignedIds.indexOf(b.id) !== -1; });
+      }
       sel.innerHTML = '';
       if (visibleList.length === 1) {
         // Single business: auto-select, no other options
@@ -3289,16 +3293,21 @@ function getJwt(){ return localStorage.getItem('AUTH_TOKEN') || localStorage.get
 function getJwtUser(){ try { return JSON.parse(localStorage.getItem('AUTH_USER') || localStorage.getItem('JWT_USER') || 'null'); } catch { return null; } }
 function getAuthRole(){ var u = getJwtUser(); return (u && u.role) ? u.role : null; }
 
+function isStaffMode(){ return localStorage.getItem('LOGIN_MODE') === 'staff'; }
+
 function jwtHeaders(){
   var h = {};
   var jwt = getJwt();
   if (jwt) {
     h['Authorization'] = 'Bearer ' + jwt;
   } else {
-    console.warn('[AUTH] No JWT token found in localStorage (AUTH_TOKEN=' + !!localStorage.getItem('AUTH_TOKEN') + ', JWT_TOKEN=' + !!localStorage.getItem('JWT_TOKEN') + ')');
+    console.warn('[AUTH] No JWT token found in localStorage (AUTH_TOKEN=' + !!localStorage.getItem('AUTH_TOKEN') + ')');
   }
-  var key = getAdminKey();
-  if (key) h['X-Admin-Key'] = key;
+  // Staff mode: NEVER send admin key — JWT only, prevents global access leakage
+  if (!isStaffMode()) {
+    var key = getAdminKey();
+    if (key) h['X-Admin-Key'] = key;
+  }
   return h;
 }
 
@@ -3551,7 +3560,18 @@ async function submitCreateUser(){
 
 // Init
 document.getElementById('baseUrl').textContent = location.origin;
-document.getElementById('adminKey').value = getAdminKey();
+if (isStaffMode()) {
+  // Staff mode: hide admin key UI and ensure no admin key leakage
+  localStorage.removeItem('ADMIN_KEY');
+  document.getElementById('adminKey').value = '';
+  document.getElementById('adminKey').style.display = 'none';
+  var guardarBtn = document.getElementById('adminKey').nextElementSibling;
+  if (guardarBtn && guardarBtn.tagName === 'BUTTON') guardarBtn.style.display = 'none';
+  var keyMsg = document.getElementById('keyMsg');
+  if (keyMsg) keyMsg.style.display = 'none';
+} else {
+  document.getElementById('adminKey').value = getAdminKey();
+}
 updateLoginUI();
 
 // Set default date filter to today
