@@ -2077,40 +2077,83 @@ async function loadExchangeRate(){
 }
 
 async function loadBusinesses(){
-  const key = getAdminKey();
-  const sel = document.getElementById('businessSelect');
-  const statusEl = document.getElementById('selectedBizStatus');
-  if (!key) { console.warn('loadBusinesses: no admin key'); if(statusEl) statusEl.innerHTML='<span class="danger">Sin admin key</span>'; return; }
+  var key = getAdminKey();
+  var jwt = getJwt();
+  var sel = document.getElementById('businessSelect');
+  var statusEl = document.getElementById('selectedBizStatus');
+  var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
+
+  if (!key && !jwt) { console.warn('loadBusinesses: no auth'); if(statusEl) statusEl.innerHTML='<span class="danger">Sin credenciales</span>'; return; }
+
   try {
     if(statusEl) statusEl.innerHTML='<span class="muted">Cargando negocios...</span>';
-    const res = await fetch('/api/admin/businesses', { headers: jwtHeaders() });
+    var res = await fetch('/api/admin/businesses', { headers: jwtHeaders() });
     if (!res.ok) {
-      let detail = 'HTTP ' + res.status;
-      try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
+      var detail = 'HTTP ' + res.status;
+      try { var err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
       console.warn('loadBusinesses:', detail);
       if(statusEl) statusEl.innerHTML='<span class="danger">' + esc(detail) + '</span>';
       return;
     }
-    const list = await res.json();
+    var list = await res.json();
     if (!Array.isArray(list)) {
       console.warn('loadBusinesses: response is not array', list);
       if(statusEl) statusEl.innerHTML='<span class="danger">Respuesta inesperada (no es array)</span>';
       return;
     }
     businessList = list;
-    const saved = localStorage.getItem('BUSINESS_ID') || '';
-    sel.innerHTML = '<option value="">(Todos los negocios)</option>';
-    // Show only active non-junk businesses in dropdown
-    const visibleList = list.filter(b => b.isActive && !b.isJunk);
-    for (const b of visibleList) {
-      const opt = document.createElement('option');
-      opt.value = b.id;
-      opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')';
-      if (b.id === saved) opt.selected = true;
-      sel.appendChild(opt);
+    var saved = localStorage.getItem('BUSINESS_ID') || '';
+    var visibleList = list.filter(function(b){ return b.isActive && !b.isJunk; });
+
+    // Staff users: no global "(Todos)" option — always business-scoped
+    if (isStaff) {
+      sel.innerHTML = '';
+      if (visibleList.length === 1) {
+        // Single business: auto-select, no other options
+        var only = visibleList[0];
+        var o = document.createElement('option');
+        o.value = only.id;
+        o.textContent = only.name;
+        o.selected = true;
+        sel.appendChild(o);
+        localStorage.setItem('BUSINESS_ID', only.id);
+      } else {
+        // Multiple: first option is prompt, then assigned businesses
+        var prompt = document.createElement('option');
+        prompt.value = '';
+        prompt.textContent = '(Selecciona negocio)';
+        prompt.disabled = true;
+        sel.appendChild(prompt);
+        var foundSaved = false;
+        for (var i = 0; i < visibleList.length; i++) {
+          var b = visibleList[i];
+          var opt = document.createElement('option');
+          opt.value = b.id;
+          opt.textContent = b.name + ' (' + (b.phoneNumberId||'').slice(-6) + ')';
+          if (b.id === saved) { opt.selected = true; foundSaved = true; }
+          sel.appendChild(opt);
+        }
+        // If no saved selection, auto-select first business
+        if (!foundSaved && visibleList.length > 0) {
+          sel.value = visibleList[0].id;
+          localStorage.setItem('BUSINESS_ID', visibleList[0].id);
+        }
+      }
+    } else {
+      // Founder/admin: keep global option
+      sel.innerHTML = '<option value="">(Todos los negocios)</option>';
+      for (var j = 0; j < visibleList.length; j++) {
+        var biz = visibleList[j];
+        var opt2 = document.createElement('option');
+        opt2.value = biz.id;
+        opt2.textContent = biz.name + ' (' + (biz.phoneNumberId||'').slice(-6) + ')';
+        if (biz.id === saved) opt2.selected = true;
+        sel.appendChild(opt2);
+      }
     }
-    const junkCount = list.filter(b => b.isJunk).length;
-    const statusMsg = visibleList.length
+
+    var junkCount = list.filter(function(b){ return b.isJunk; }).length;
+    var statusMsg = visibleList.length
       ? visibleList.length + ' negocio(s)' + (junkCount > 0 ? ' <span class="muted">(' + junkCount + ' ocultos)</span>' : '')
       : '0 negocios visibles';
     if(statusEl) statusEl.innerHTML = '<span class="ok">' + statusMsg + '</span>';
@@ -2515,18 +2558,18 @@ function fmtDate(d){
 
 // ── KPIs ──
 async function loadSummary(){
-  const jwt = getJwt();
-  const key = getAdminKey();
-  const ids = ['kpiOrdersTotal','kpiUniqueCustomers','kpiTotalRevenue','kpiAvgTicket','kpiOrdersToday','kpiRevenueToday','kpiOrdersWeek','kpiReturning','kpiTopItem','kpiPaymentsPending'];
-  if (!jwt && !key) { ids.forEach(id => document.getElementById(id).textContent = '-'); return; }
+  var jwt = getJwt();
+  var key = getAdminKey();
+  var ids = ['kpiOrdersTotal','kpiUniqueCustomers','kpiTotalRevenue','kpiAvgTicket','kpiOrdersToday','kpiRevenueToday','kpiOrdersWeek','kpiReturning','kpiTopItem','kpiPaymentsPending'];
+  if (!jwt && !key) { ids.forEach(function(id){ document.getElementById(id).textContent = '-'; }); return; }
 
-  const bid = getBusinessId();
-  const qs = new URLSearchParams({ts: Date.now()});
+  var bid = getBusinessId();
+  var qs = new URLSearchParams({ts: Date.now()});
   if (bid) qs.set('businessId', bid);
   try {
-    const res = await fetch('/api/admin/analytics/summary?' + qs.toString(), { headers: jwtHeaders(), cache: 'no-store' });
-    if (!res.ok) { ids.forEach(id => document.getElementById(id).textContent = 'err'); return; }
-    const s = await res.json();
+    var res = await fetch('/api/admin/analytics/summary?' + qs.toString(), { headers: jwtHeaders(), cache: 'no-store' });
+    if (!res.ok) { ids.forEach(function(id){ document.getElementById(id).textContent = '-'; }); return; }
+    var s = await res.json();
     document.getElementById('kpiOrdersTotal').textContent = s.totalOrders ?? 0;
     document.getElementById('kpiUniqueCustomers').textContent = s.uniqueCustomers ?? 0;
     document.getElementById('kpiTotalRevenue').textContent = fmtMoney(s.totalRevenue);
@@ -2537,7 +2580,7 @@ async function loadSummary(){
     document.getElementById('kpiReturning').textContent = (s.returningCustomersPct ?? 0) + '%';
     document.getElementById('kpiTopItem').textContent = s.topSellingItem || '-';
     document.getElementById('kpiPaymentsPending').textContent = s.paymentsPendingVerification ?? 0;
-  } catch { ids.forEach(id => document.getElementById(id).textContent = 'err'); }
+  } catch(e) { console.warn('loadSummary error:', e); ids.forEach(function(id){ document.getElementById(id).textContent = '-'; }); }
 }
 
 async function loadExtended(){
