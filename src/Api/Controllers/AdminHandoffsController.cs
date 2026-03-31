@@ -58,6 +58,25 @@ public class AdminHandoffsController : ControllerBase
     }
 
     /// <summary>
+    /// Checks if the JWT user has access to the conversation's business.
+    /// Global admin key holders bypass this check.
+    /// </summary>
+    private bool IsAuthorizedForConversation(ConversationState entity)
+    {
+        // Global admin key: unrestricted
+        var globalKey = _config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY");
+        if (!string.IsNullOrWhiteSpace(globalKey)
+            && Request.Headers.TryGetValue("X-Admin-Key", out var hk)
+            && ConstantTimeEquals(hk.ToString(), globalKey))
+            return true;
+
+        // JWT user: must match conversation's business
+        var jwtBizId = GetJwtBusinessId();
+        if (!jwtBizId.HasValue) return false;
+        return entity.BusinessId.HasValue && entity.BusinessId.Value == jwtBizId.Value;
+    }
+
+    /// <summary>
     /// GET /api/admin/handoffs?businessId=xxx
     /// Returns conversations currently in human-handoff state.
     /// </summary>
@@ -134,6 +153,8 @@ public class AdminHandoffsController : ControllerBase
         var entity = await _db.ConversationStates.FindAsync(new object[] { conversationId }, ct);
         if (entity is null)
             return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
 
         try
         {
@@ -179,6 +200,8 @@ public class AdminHandoffsController : ControllerBase
         var entity = await _db.ConversationStates.FindAsync(new object[] { conversationId }, ct);
         if (entity is null)
             return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
 
         // Parse conversationId → "from:phoneNumberId"
         var parts = conversationId.Split(':');
@@ -236,6 +259,8 @@ public class AdminHandoffsController : ControllerBase
         var entity = await _db.ConversationStates.FindAsync(new object[] { conversationId }, ct);
         if (entity is null)
             return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
 
         try
         {

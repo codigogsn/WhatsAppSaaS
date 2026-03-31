@@ -186,7 +186,8 @@ public class AdminCustomersController : ControllerBase
     [HttpPost("backfill-names")]
     public async Task<IActionResult> BackfillNames(CancellationToken ct)
     {
-        if (!AdminAuth.IsAuthorized(User, Request, _config)) return Unauthorized();
+        // Cross-business mutation: restrict to global admin key only
+        if (!IsAdmin()) return Unauthorized(new { error = "Global admin key required" });
 
         try
         {
