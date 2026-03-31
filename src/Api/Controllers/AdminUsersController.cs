@@ -229,8 +229,8 @@ public sealed class AdminUsersController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> CreateMulti([FromBody] CreateMultiUserRequest req, CancellationToken ct)
     {
-        if (!IsGlobalAdmin() && !IsOwner())
-            return Unauthorized(new { error = "Admin key or Owner role required" });
+        if (!IsGlobalAdmin())
+            return Unauthorized(new { error = "Global admin key required" });
 
         if (string.IsNullOrWhiteSpace(req.Name))
             return BadRequest(new { error = "Name is required" });
@@ -301,8 +301,8 @@ public sealed class AdminUsersController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> ListAll(CancellationToken ct)
     {
-        if (!IsGlobalAdmin() && !IsOwner())
-            return Unauthorized(new { error = "Admin key or Owner role required" });
+        if (!IsGlobalAdmin())
+            return Unauthorized(new { error = "Global admin key required" });
 
         // Use raw SQL to avoid legacy DateTime column issues
         var conn = _db.Database.GetDbConnection();
@@ -359,8 +359,8 @@ public sealed class AdminUsersController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> UpdateMulti(string email, [FromBody] UpdateMultiUserRequest req, CancellationToken ct)
     {
-        if (!IsGlobalAdmin() && !IsOwner())
-            return Unauthorized(new { error = "Admin key or Owner role required" });
+        if (!IsGlobalAdmin())
+            return Unauthorized(new { error = "Global admin key required" });
 
         var normalizedEmail = email.Trim().ToLowerInvariant();
         var userRows = await _db.BusinessUsers

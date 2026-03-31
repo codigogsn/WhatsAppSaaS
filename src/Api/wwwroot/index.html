@@ -3583,7 +3583,8 @@ async function loadUsers(){
   var tbody = document.getElementById('usersTbody');
   tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
   try {
-    var url = isAdminUser() ? '/api/admin/users/all' : '/api/admin/users';
+    // Only global admin (has admin key) gets cross-business view; regular owners see their business only
+    var url = getAdminKey() ? '/api/admin/users/all' : '/api/admin/users';
     var res = await fetch(url, { headers: jwtHeaders() });
     if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" class="danger">Error cargando usuarios</td></tr>'; return; }
     var users = await res.json();
