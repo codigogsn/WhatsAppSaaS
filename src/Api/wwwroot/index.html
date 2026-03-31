@@ -272,6 +272,13 @@
         inset 0 2px 4px rgba(0,0,0,.14);
     }
 
+    [data-theme="dark"] input:disabled,
+    [data-theme="dark"] input[readonly],
+    [data-theme="dark"] .readonly-field {
+      background: rgba(28,28,32,.72);
+      color: rgba(255,255,255,.7);
+    }
+
     /* ─── Glass pills — edge-tinted capsules ─── */
     [data-theme="dark"] .pill {
       box-shadow:
@@ -938,6 +945,7 @@
       outline: none;
     }
     select:focus, input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+    .readonly-field, input:disabled, input[readonly] { background: #f5f5f5; color: #666; }
 
     /* ═══ Table — Stripe-style ═══ */
     table {
@@ -1325,7 +1333,7 @@
       </div>
       <div>
         <label>Phone Number ID</label>
-        <input id="bizPhone" disabled style="background:#f5f5f5;" />
+        <input id="bizPhone" disabled class="readonly-field" />
       </div>
       <div class="full">
         <label>Saludo personalizado</label>
@@ -2011,6 +2019,7 @@ function checkNewOrders(data) {
 function esc(s){ return (s ?? '').toString().replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
 
 function getAdminKey(){ return localStorage.getItem('ADMIN_KEY') || ''; }
+function isAdminUser(){ return !isStaffMode() && (!!getAdminKey() || getAuthRole() === 'Owner'); }
 
 function saveKey(){
   const v = document.getElementById('adminKey').value.trim();
@@ -2047,8 +2056,7 @@ function updateBizAdminButton(){
   var role = getAuthRole();
   if (bid && businessList.length > 0) {
     // Owner: all buttons. Manager/Operator: hide admin buttons.
-    var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
-    var isAdmin = !role || role === 'Owner' || (getAdminKey() && !isStaff);
+    var isAdmin = !role || isAdminUser();
     btn.style.display = isAdmin ? '' : 'none';
     menuBtn.style.display = (isAdmin || role === 'Manager') ? '' : 'none';
     const biz = businessList.find(b => b.id === bid);
@@ -2327,7 +2335,7 @@ async function toggleBizActive(){
 // ── Create Business Modal ──
 
 function openCreateBiz(){
-  if (!getAdminKey()) { alert('Ingresa tu Admin Key primero'); return; }
+  if (!isAdminUser()) { alert('Ingresa tu Admin Key primero'); return; }
 
   document.getElementById('createBizMsg').textContent = '';
   ['newBizName','newBizPhone','newBizToken','newBizGreeting','newBizAddress','newBizSchedule','newBizPmBank','newBizPmId','newBizPmPhone','newBizNotifPhone'].forEach(function(id){
@@ -3320,7 +3328,7 @@ function applyRoleVisibility(){
   var role = getAuthRole();
   var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
   if (!role) return;
-  if (getAdminKey() && !isStaff) return; // founder/admin: no restrictions
+  if (isAdminUser()) return; // founder/admin: no restrictions
 
   // Nav buttons
   var newBiz = document.getElementById('btnNewBiz');
@@ -3349,7 +3357,7 @@ function updateUsersButton(){
   var role = getAuthRole();
   var isStaff = localStorage.getItem('LOGIN_MODE') === 'staff';
   // Only Owner or global admin (non-staff) can see Usuarios
-  if (role === 'Owner' || (getAdminKey() && !isStaff)) {
+  if (isAdminUser()) {
     btn.style.display = '';
   } else {
     btn.style.display = 'none';
@@ -3432,7 +3440,7 @@ async function loadUsers(){
   var tbody = document.getElementById('usersTbody');
   tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
   try {
-    var url = getAdminKey() ? '/api/admin/users/all' : '/api/admin/users';
+    var url = isAdminUser() ? '/api/admin/users/all' : '/api/admin/users';
     var res = await fetch(url, { headers: jwtHeaders() });
     if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" class="danger">Error cargando usuarios</td></tr>'; return; }
     var users = await res.json();
