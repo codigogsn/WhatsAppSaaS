@@ -261,6 +261,7 @@
         inset 0 2px 4px rgba(0,0,0,.22),
         inset 0 -1px 2px rgba(255,255,255,.03);
       background: rgba(28,28,32,.62);
+      color: var(--text);
     }
     [data-theme="dark"] select:focus,
     [data-theme="dark"] input:focus,
@@ -274,9 +275,15 @@
 
     [data-theme="dark"] input:disabled,
     [data-theme="dark"] input[readonly],
+    [data-theme="dark"] textarea:disabled,
+    [data-theme="dark"] textarea[readonly],
+    [data-theme="dark"] select:disabled,
     [data-theme="dark"] .readonly-field {
       background: rgba(28,28,32,.72);
-      color: rgba(255,255,255,.7);
+      color: rgba(255,255,255,.55);
+      border-color: rgba(255,255,255,.06);
+      cursor: not-allowed;
+      opacity: 1;
     }
 
     /* ─── Glass pills — edge-tinted capsules ─── */
@@ -945,7 +952,9 @@
       outline: none;
     }
     select:focus, input:focus, textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
-    .readonly-field, input:disabled, input[readonly] { background: #f5f5f5; color: #666; }
+    .readonly-field, input:disabled, input[readonly], textarea:disabled, textarea[readonly], select:disabled {
+      background: #f0f0f2; color: #888; cursor: not-allowed; opacity: 1;
+    }
 
     /* ═══ Table — Stripe-style ═══ */
     table {
@@ -1150,6 +1159,27 @@
     }
     .order-toast:hover .order-toast-progress { animation-play-state: paused; }
     @keyframes toastCountdown { from { width: 100%; } to { width: 0%; } }
+
+    /* ═══ System Toast (replaces browser alerts) ═══ */
+    .sys-toast {
+      position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-20px);
+      z-index: 10001; padding: 14px 24px; border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 500; font-family: var(--font);
+      color: #fff; opacity: 0; pointer-events: none;
+      transition: opacity .25s ease, transform .3s cubic-bezier(.22,1,.36,1);
+      max-width: 440px; width: max-content; text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.12);
+      -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    }
+    .sys-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+    .sys-toast.toast-error { background: rgba(220,38,38,.92); border: 1px solid rgba(255,100,90,.3); }
+    .sys-toast.toast-success { background: rgba(22,163,74,.90); border: 1px solid rgba(80,220,120,.3); }
+    .sys-toast.toast-warn { background: rgba(180,120,0,.92); border: 1px solid rgba(255,200,60,.3); }
+    .sys-toast.toast-info { background: rgba(10,110,230,.90); border: 1px solid rgba(80,160,255,.3); }
+    [data-theme="dark"] .sys-toast.toast-error { background: rgba(180,30,30,.88); }
+    [data-theme="dark"] .sys-toast.toast-success { background: rgba(20,130,60,.88); }
+    [data-theme="dark"] .sys-toast.toast-warn { background: rgba(160,100,0,.88); }
+    [data-theme="dark"] .sys-toast.toast-info { background: rgba(10,90,200,.88); }
 
     /* ═══ iOS-style toggle ═══ */
     .toggle-switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
@@ -1808,6 +1838,19 @@ function toggleTheme(){
   applyTheme(next);
 }
 
+// ═══ System Toast (replaces browser alerts) ═══
+function showToast(msg, type) {
+  type = type || 'error';
+  var el = document.getElementById('sysToast');
+  if (!el) { el = document.createElement('div'); el.id = 'sysToast'; el.className = 'sys-toast'; document.body.appendChild(el); }
+  el.textContent = msg;
+  el.className = 'sys-toast toast-' + type;
+  void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(el._tid);
+  el._tid = setTimeout(function(){ el.classList.remove('show'); }, type === 'error' ? 4000 : 3000);
+}
+
 let timer = null;
 let handoffPhones = {};
 let businessList = []; // cached for admin panel
@@ -2185,7 +2228,7 @@ function toggleBizPanel(){
   const panel = document.getElementById('bizPanel');
   if (panel.style.display === 'none') {
     const bid = getBusinessId();
-    if (!bid) { alert('Selecciona un negocio primero'); return; }
+    if (!bid) { showToast('Select a business first', 'warn'); return; }
     loadBizProfile(bid);
     panel.style.display = '';
   } else {
@@ -2233,7 +2276,7 @@ async function loadBizProfile(bizId){
       toggleBtn.className = 'success';
     }
   } catch(e) {
-    alert('Error: ' + e.message);
+    showToast(e.message, 'error');
   }
 }
 
@@ -2323,19 +2366,19 @@ async function toggleBizActive(){
       method: 'PATCH',
       headers: jwtHeaders()
     });
-    if (!res.ok) { alert('Error cambiando estado'); return; }
+    if (!res.ok) { showToast('Failed to update status', 'error'); return; }
     const result = await res.json();
     await loadBusinesses();
     loadBizProfile(bid);
   } catch(e) {
-    alert('Error: ' + e.message);
+    showToast(e.message, 'error');
   }
 }
 
 // ── Create Business Modal ──
 
 function openCreateBiz(){
-  if (!isAdminUser()) { alert('Ingresa tu Admin Key primero'); return; }
+  if (!isAdminUser()) { showToast('Admin key required to perform this action', 'warn'); return; }
 
   document.getElementById('createBizMsg').textContent = '';
   ['newBizName','newBizPhone','newBizToken','newBizGreeting','newBizAddress','newBizSchedule','newBizPmBank','newBizPmId','newBizPmPhone','newBizNotifPhone'].forEach(function(id){
@@ -2769,12 +2812,12 @@ async function sendHandoffReply(conversationId){
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
-      alert('Error enviando: ' + (err.error || res.status));
+      showToast('Failed to send: ' + (err.error || res.status), 'error');
       return;
     }
     input.value = '';
     await loadHandoffs();
-  } catch(e) { alert('Error de red: ' + e.message); }
+  } catch(e) { showToast('Network error: ' + e.message, 'error'); }
   finally { input.disabled = false; input.focus(); }
 }
 
@@ -2784,9 +2827,9 @@ async function returnToBot(conversationId){
     const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/return-to-bot', {
       method: 'POST', headers: jwtHeaders()
     });
-    if (!res.ok) { alert('Error devolviendo al bot'); return; }
+    if (!res.ok) { showToast('Failed to return to bot', 'error'); return; }
     await load();
-  } catch(e) { alert('Error: ' + e.message); }
+  } catch(e) { showToast(e.message, 'error'); }
 }
 
 async function resolveHandoff(conversationId){
@@ -2794,7 +2837,7 @@ async function resolveHandoff(conversationId){
   const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/resolve', {
     method: 'POST', headers: jwtHeaders()
   });
-  if (!res.ok) { alert('Error resolviendo handoff'); return; }
+  if (!res.ok) { showToast('Failed to resolve handoff', 'error'); return; }
   await load();
 }
 
@@ -3142,7 +3185,7 @@ async function updateStatus(btn) {
       headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
-    if (!res.ok) { const t = await res.text(); alert('Error: ' + t); return; }
+    if (!res.ok) { const t = await res.text(); showToast(t || 'Request failed', 'error'); return; }
   } finally { btn.disabled = false; }
   await load();
 }
@@ -3152,7 +3195,7 @@ async function verifyPayment(orderId){
   const res = await fetch('/api/orders/' + orderId + '/verify-payment', {
     method: 'PATCH', headers: jwtHeaders()
   });
-  if (!res.ok) { alert('Error verificando pago'); return; }
+  if (!res.ok) { showToast('Failed to verify payment', 'error'); return; }
   await load();
 }
 
@@ -3161,7 +3204,7 @@ async function rejectPayment(orderId){
   const res = await fetch('/api/orders/' + orderId + '/reject-payment', {
     method: 'PATCH', headers: jwtHeaders()
   });
-  if (!res.ok) { alert('Error rechazando pago'); return; }
+  if (!res.ok) { showToast('Failed to reject payment', 'error'); return; }
   await load();
 }
 
@@ -3259,13 +3302,13 @@ async function openProofNewTab(orderId){
     if (!res.ok) {
       let msg = 'Error obteniendo comprobante (HTTP ' + res.status + ')';
       try { const j = await res.json(); if (j.error) msg = j.error; } catch(_){}
-      alert(msg);
+      showToast(msg, 'error');
       return;
     }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     window.open(url, '_blank');
-  } catch(e) { alert('Error de red al obtener el comprobante.'); }
+  } catch(e) { showToast('Network error loading payment proof', 'error'); }
 }
 
 async function downloadOrdersCsv(){
@@ -3484,9 +3527,9 @@ async function updateUserRoleMulti(btn){
       headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: role })
     });
-    if (!res.ok) { alert('Error actualizando rol'); return; }
+    if (!res.ok) { showToast('Failed to update role', 'error'); return; }
     await loadUsers();
-  } catch(e) { alert(e.message); }
+  } catch(e) { showToast(e.message, 'error'); }
 }
 
 async function toggleUserActiveMulti(email, newActive){
@@ -3496,9 +3539,9 @@ async function toggleUserActiveMulti(email, newActive){
       headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ isActive: newActive })
     });
-    if (!res.ok) { alert('Error cambiando estado'); return; }
+    if (!res.ok) { showToast('Failed to update status', 'error'); return; }
     await loadUsers();
-  } catch(e) { alert(e.message); }
+  } catch(e) { showToast(e.message, 'error'); }
 }
 
 function openCreateUser(){
@@ -3676,7 +3719,7 @@ async function updatePromoCount(){
 }
 async function sendPromotion(){
   const message = document.getElementById('promoMessage').value.trim();
-  if (!message) { alert('Please write a message.'); return; }
+  if (!message) { showToast('Please write a message', 'warn'); return; }
   const filter = document.getElementById('promoFilter').value;
   const btn = document.getElementById('promoSendBtn');
   const resultEl = document.getElementById('promoResult');

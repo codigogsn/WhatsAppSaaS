@@ -385,6 +385,7 @@
         inset 0 0 0 1px rgba(0,0,0,.15),
         inset 0 2px 4px rgba(0,0,0,.22),
         inset 0 -1px 2px rgba(255,255,255,.03);
+      color: var(--text);
     }
     [data-theme="dark"] select:focus,
     [data-theme="dark"] input:focus,
@@ -394,6 +395,17 @@
         0 0 0 3px var(--accent-glow),
         inset 0 0 0 1px rgba(0,0,0,.10),
         inset 0 2px 4px rgba(0,0,0,.14);
+    }
+    [data-theme="dark"] input:disabled,
+    [data-theme="dark"] input[readonly],
+    [data-theme="dark"] select:disabled {
+      background: rgba(28,28,32,.72);
+      color: rgba(255,255,255,.55);
+      border-color: rgba(255,255,255,.06);
+      cursor: not-allowed; opacity: 1;
+    }
+    input:disabled, input[readonly], select:disabled {
+      background: #f0f0f2; color: #888; cursor: not-allowed; opacity: 1;
     }
     [data-theme="dark"] table {
       border: 1px solid rgba(255,255,255,.11);
@@ -422,6 +434,27 @@
       border: 1px solid rgba(255,255,255,.09);
       box-shadow: inset 0 0 0 1px rgba(0,0,0,.12), inset 0 2px 3px rgba(0,0,0,.15);
     }
+
+    /* ═══ System Toast ═══ */
+    .sys-toast {
+      position: fixed; top: 24px; left: 50%; transform: translateX(-50%) translateY(-20px);
+      z-index: 10001; padding: 14px 24px; border-radius: var(--radius-sm);
+      font-size: 13px; font-weight: 500; font-family: var(--font);
+      color: #fff; opacity: 0; pointer-events: none;
+      transition: opacity .25s ease, transform .3s cubic-bezier(.22,1,.36,1);
+      max-width: 440px; width: max-content; text-align: center;
+      box-shadow: 0 8px 32px rgba(0,0,0,.22), 0 2px 8px rgba(0,0,0,.12);
+      -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+    }
+    .sys-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+    .sys-toast.toast-error { background: rgba(220,38,38,.92); border: 1px solid rgba(255,100,90,.3); }
+    .sys-toast.toast-success { background: rgba(22,163,74,.90); border: 1px solid rgba(80,220,120,.3); }
+    .sys-toast.toast-warn { background: rgba(180,120,0,.92); border: 1px solid rgba(255,200,60,.3); }
+    .sys-toast.toast-info { background: rgba(10,110,230,.90); border: 1px solid rgba(80,160,255,.3); }
+    [data-theme="dark"] .sys-toast.toast-error { background: rgba(180,30,30,.88); }
+    [data-theme="dark"] .sys-toast.toast-success { background: rgba(20,130,60,.88); }
+    [data-theme="dark"] .sys-toast.toast-warn { background: rgba(160,100,0,.88); }
+    [data-theme="dark"] .sys-toast.toast-info { background: rgba(10,90,200,.88); }
 
     @media (max-width: 768px) {
       .brand-header { padding: 16px; }
@@ -530,6 +563,19 @@ function toggleTheme(){
   const next = current === 'dark' ? 'light' : 'dark';
   localStorage.setItem('THEME', next);
   applyTheme(next);
+}
+
+// ═══ System Toast ═══
+function showToast(msg, type) {
+  type = type || 'error';
+  var el = document.getElementById('sysToast');
+  if (!el) { el = document.createElement('div'); el.id = 'sysToast'; el.className = 'sys-toast'; document.body.appendChild(el); }
+  el.textContent = msg;
+  el.className = 'sys-toast toast-' + type;
+  void el.offsetWidth;
+  el.classList.add('show');
+  clearTimeout(el._tid);
+  el._tid = setTimeout(function(){ el.classList.remove('show'); }, type === 'error' ? 4000 : 3000);
 }
 
 function esc(s){ return (s??'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
@@ -697,8 +743,8 @@ async function loadItems(){
 async function createCategory(){
   const name = document.getElementById('newCatName').value.trim();
   const order = parseInt(document.getElementById('newCatOrder').value)||0;
-  if(!name) return alert('Nombre requerido');
-  if(!bid()) return alert('Selecciona un negocio');
+  if(!name) return showToast('Name is required', 'warn');
+  if(!bid()) return showToast('Select a business first', 'warn');
   try {
     const res = await fetch('/api/admin/menu/categories', { method:'POST', headers:hdrs(), body: JSON.stringify({businessId:bid(), name, sortOrder:order, isActive:true}) });
     if(!res.ok){
@@ -732,8 +778,8 @@ async function createItem(){
   const desc = document.getElementById('newItemDesc').value.trim()||null;
   const aliasStr = document.getElementById('newItemAliases').value.trim();
   const aliases = aliasStr ? aliasStr.split(',').map(a=>a.trim()).filter(Boolean) : [];
-  if(!name) return alert('Nombre requerido');
-  if(!catId) return alert('Selecciona una categoria');
+  if(!name) return showToast('Name is required', 'warn');
+  if(!catId) return showToast('Select a category first', 'warn');
   try {
     const res = await fetch('/api/admin/menu/items', { method:'POST', headers:hdrs(), body: JSON.stringify({categoryId:catId, name, price, description:desc, isAvailable:true, sortOrder:0, aliases}) });
     if(!res.ok){
@@ -777,7 +823,7 @@ async function deleteAlias(id){
 // ── Bulk Import Modal ──
 
 function openImportModal(){
-  if(!bid()) return alert('Selecciona un negocio primero');
+  if(!bid()) return showToast('Select a business first', 'warn');
   document.getElementById('importModal').style.display='flex';
   document.getElementById('importRaw').value='';
   document.getElementById('importPreview').innerHTML='';
