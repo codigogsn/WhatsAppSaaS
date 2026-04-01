@@ -4,6 +4,7 @@ using System.Text;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -717,54 +718,112 @@ public class AdminAnalyticsController : ControllerBase
             var conn = _db.Database.GetDbConnection();
             if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(ct);
 
-            // ── System totals ──
-            int totalBiz = 0, activeBiz = 0, totalUsers = 0, totalOrders = 0, ordersToday = 0, totalCustomers = 0;
-            int pendingPayments = 0, handoffCount = 0, bizWithOrdersToday = 0;
-            decimal totalRevenue = 0m, revenueToday = 0m;
-
+            // ── Step 1: Load all businesses and classify (same logic as business selector) ──
+            var allBiz = new List<(Guid Id, string Name, string PhoneNumberId, string? AccessToken, bool IsActive)>();
             using (var cmd = conn.CreateCommand())
             {
                 cmd.CommandText = """
-                    SELECT COUNT(*), SUM(CASE WHEN "IsActive"::boolean THEN 1 ELSE 0 END)
+                    SELECT "Id", "Name", "PhoneNumberId", "AccessToken", "IsActive"::boolean
                     FROM "Businesses"
                 """;
                 using var r = await cmd.ExecuteReaderAsync(ct);
-                if (await r.ReadAsync(ct)) { totalBiz = r.GetInt32(0); activeBiz = r.IsDBNull(1) ? 0 : Convert.ToInt32(r[1]); }
+                while (await r.ReadAsync(ct))
+                {
+                    allBiz.Add((
+                        r.GetGuid(0),
+                        r[1]?.ToString() ?? "",
+                        r[2]?.ToString() ?? "",
+                        r.IsDBNull(3) ? null : r[3]?.ToString(),
+                        r.GetBoolean(4)
+                    ));
+                }
             }
 
-            using (var cmd = conn.CreateCommand())
+            // Apply same junk classification as AdminBusinessesController.ClassifyBusiness
+            string[] placeholders = ["Default Business", "Demo Restaurant", "Test", "Test Business"];
+            bool IsJunk(string name, string pid, string? token)
             {
-                cmd.CommandText = """SELECT COUNT(*) FROM "BusinessUsers" WHERE "IsActive"::boolean = true""";
-                totalUsers = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+                var n = (name ?? "").Trim();
+                var ph = (pid ?? "").Trim();
+                bool placeholderName = string.IsNullOrWhiteSpace(n)
+                    || placeholders.Any(p => n.Equals(p, StringComparison.OrdinalIgnoreCase))
+                    || n.StartsWith("Test ", StringComparison.OrdinalIgnoreCase)
+                    || n.StartsWith("Verify", StringComparison.OrdinalIgnoreCase);
+                bool invalidPhone = string.IsNullOrWhiteSpace(ph) || !ph.All(char.IsDigit) || ph.Length < 5;
+                bool noToken = string.IsNullOrWhiteSpace(token);
+                return (placeholderName && invalidPhone) || (invalidPhone && noToken);
             }
 
-            using (var cmd = conn.CreateCommand())
+            var realBizIds = new HashSet<Guid>();
+            foreach (var b in allBiz)
             {
-                cmd.CommandText = """SELECT COUNT(DISTINCT "Id") FROM "Customers" """;
-                totalCustomers = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+                if (b.IsActive && !IsJunk(b.Name, b.PhoneNumberId, b.AccessToken))
+                    realBizIds.Add(b.Id);
             }
 
-            using (var cmd = conn.CreateCommand())
+            var totalBiz = realBizIds.Count;
+            var activeBiz = totalBiz; // all real businesses are already active-filtered
+            Log.Information("FOUNDER OVERVIEW: {Total} total DB rows, {Real} real businesses: {Names}",
+                allBiz.Count, totalBiz,
+                string.Join(", ", allBiz.Where(b => realBizIds.Contains(b.Id)).Select(b => b.Name)));
+
+            // ── Step 2: Scoped metrics (only for real businesses) ──
+            int totalUsers = 0, totalOrders = 0, ordersToday = 0, totalCustomers = 0;
+            int pendingPayments = 0, handoffCount = 0, bizWithOrdersToday = 0;
+            decimal totalRevenue = 0m, revenueToday = 0m;
+
+            if (totalBiz > 0)
             {
-                cmd.CommandText = """
+                var bizIdParams = new List<string>();
+                using var metricsCmd = conn.CreateCommand();
+                for (int i = 0; i < realBizIds.Count; i++)
+                {
+                    bizIdParams.Add($"@bid{i}");
+                    AddParam(metricsCmd, $"bid{i}", realBizIds.ElementAt(i));
+                }
+                var inClause = string.Join(",", bizIdParams);
+
+                metricsCmd.CommandText = $"""
+                    SELECT COUNT(*) FROM "BusinessUsers"
+                    WHERE "IsActive"::boolean = true AND "BusinessId" IN ({inClause})
+                """;
+                totalUsers = Convert.ToInt32(await metricsCmd.ExecuteScalarAsync(ct));
+
+                using var custCmd = conn.CreateCommand();
+                for (int i = 0; i < realBizIds.Count; i++) AddParam(custCmd, $"bid{i}", realBizIds.ElementAt(i));
+                custCmd.CommandText = $"""SELECT COUNT(DISTINCT "Id") FROM "Customers" WHERE "BusinessId" IN ({inClause})""";
+                totalCustomers = Convert.ToInt32(await custCmd.ExecuteScalarAsync(ct));
+
+                using var ordCmd = conn.CreateCommand();
+                AddParam(ordCmd, "today", DateTime.UtcNow.Date);
+                for (int i = 0; i < realBizIds.Count; i++) AddParam(ordCmd, $"bid{i}", realBizIds.ElementAt(i));
+                ordCmd.CommandText = $"""
                     SELECT
                         COUNT(*),
                         COALESCE(SUM(CASE WHEN "CheckoutCompleted"::boolean AND "CreatedAtUtc" >= @today THEN 1 ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN "CheckoutCompleted"::boolean THEN COALESCE("TotalAmount",0) ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN "CheckoutCompleted"::boolean AND "CreatedAtUtc" >= @today THEN COALESCE("TotalAmount",0) ELSE 0 END), 0),
                         COALESCE(SUM(CASE WHEN "PaymentProofMediaId" IS NOT NULL AND "PaymentProofMediaId" != '' AND "PaymentVerifiedAtUtc" IS NULL THEN 1 ELSE 0 END), 0)
-                    FROM "Orders"
+                    FROM "Orders" WHERE "BusinessId" IN ({inClause})
                 """;
-                AddParam(cmd, "today", DateTime.UtcNow.Date);
-                using var r = await cmd.ExecuteReaderAsync(ct);
-                if (await r.ReadAsync(ct))
+                using var ordR = await ordCmd.ExecuteReaderAsync(ct);
+                if (await ordR.ReadAsync(ct))
                 {
-                    totalOrders = r.GetInt32(0);
-                    ordersToday = Convert.ToInt32(r[1]);
-                    totalRevenue = Convert.ToDecimal(r[2]);
-                    revenueToday = Convert.ToDecimal(r[3]);
-                    pendingPayments = Convert.ToInt32(r[4]);
+                    totalOrders = ordR.GetInt32(0);
+                    ordersToday = Convert.ToInt32(ordR[1]);
+                    totalRevenue = Convert.ToDecimal(ordR[2]);
+                    revenueToday = Convert.ToDecimal(ordR[3]);
+                    pendingPayments = Convert.ToInt32(ordR[4]);
                 }
+
+                using var todayCmd = conn.CreateCommand();
+                AddParam(todayCmd, "today", DateTime.UtcNow.Date);
+                for (int i = 0; i < realBizIds.Count; i++) AddParam(todayCmd, $"bid{i}", realBizIds.ElementAt(i));
+                todayCmd.CommandText = $"""
+                    SELECT COUNT(DISTINCT "BusinessId") FROM "Orders"
+                    WHERE "CreatedAtUtc" >= @today AND "BusinessId" IN ({inClause})
+                """;
+                bizWithOrdersToday = Convert.ToInt32(await todayCmd.ExecuteScalarAsync(ct));
             }
 
             using (var cmd = conn.CreateCommand())
@@ -777,21 +836,20 @@ public class AdminAnalyticsController : ControllerBase
                 handoffCount = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
             }
 
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.CommandText = """
-                    SELECT COUNT(DISTINCT "BusinessId") FROM "Orders"
-                    WHERE "CreatedAtUtc" >= @today
-                """;
-                AddParam(cmd, "today", DateTime.UtcNow.Date);
-                bizWithOrdersToday = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
-            }
-
-            // ── Per-business breakdown ──
+            // ── Step 3: Per-business breakdown (real businesses only) ──
             var businesses = new List<object>();
-            using (var cmd = conn.CreateCommand())
+            if (totalBiz > 0)
             {
-                cmd.CommandText = """
+                using var bizCmd = conn.CreateCommand();
+                AddParam(bizCmd, "today", DateTime.UtcNow.Date);
+                var bizParams = new List<string>();
+                for (int i = 0; i < realBizIds.Count; i++)
+                {
+                    bizParams.Add($"@rbid{i}");
+                    AddParam(bizCmd, $"rbid{i}", realBizIds.ElementAt(i));
+                }
+                var bizInClause = string.Join(",", bizParams);
+                bizCmd.CommandText = $"""
                     SELECT
                         b."Id", b."Name", b."IsActive"::boolean,
                         COALESCE(stats.order_count, 0) AS orders_total,
@@ -812,11 +870,10 @@ public class AdminAnalyticsController : ControllerBase
                         FROM "BusinessUsers" WHERE "IsActive"::boolean = true
                         GROUP BY "BusinessId"
                     ) ucnt ON ucnt."BusinessId" = b."Id"
-                    WHERE b."IsActive"::boolean = true
+                    WHERE b."Id" IN ({bizInClause})
                     ORDER BY COALESCE(stats.revenue, 0) DESC
                 """;
-                AddParam(cmd, "today", DateTime.UtcNow.Date);
-                using var r = await cmd.ExecuteReaderAsync(ct);
+                using var r = await bizCmd.ExecuteReaderAsync(ct);
                 while (await r.ReadAsync(ct))
                 {
                     businesses.Add(new
@@ -833,15 +890,24 @@ public class AdminAnalyticsController : ControllerBase
                 }
             }
 
-            // ── Top product (global) ──
+            // ── Top product (scoped to real businesses) ──
             string? topProduct = null;
-            using (var cmd = conn.CreateCommand())
+            if (totalBiz > 0)
             {
-                cmd.CommandText = """
-                    SELECT "Name" FROM "OrderItems"
-                    GROUP BY "Name" ORDER BY SUM("Quantity") DESC LIMIT 1
+                using var tpCmd = conn.CreateCommand();
+                var tpParams = new List<string>();
+                for (int i = 0; i < realBizIds.Count; i++)
+                {
+                    tpParams.Add($"@tp{i}");
+                    AddParam(tpCmd, $"tp{i}", realBizIds.ElementAt(i));
+                }
+                tpCmd.CommandText = $"""
+                    SELECT oi."Name" FROM "OrderItems" oi
+                    INNER JOIN "Orders" o ON o."Id" = oi."OrderId"
+                    WHERE o."BusinessId" IN ({string.Join(",", tpParams)})
+                    GROUP BY oi."Name" ORDER BY SUM(oi."Quantity") DESC LIMIT 1
                 """;
-                var result = await cmd.ExecuteScalarAsync(ct);
+                var result = await tpCmd.ExecuteScalarAsync(ct);
                 topProduct = result?.ToString();
             }
 
