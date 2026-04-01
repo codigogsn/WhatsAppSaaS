@@ -48,7 +48,7 @@ public class AdminAnalyticsController : ControllerBase
         if (role == "Founder")
             return true;
 
-        if (role is "Owner" or "Manager" or "Operator" && businessId.HasValue)
+        if ((role is "Owner" or "Manager" or "Operator") && businessId.HasValue)
         {
             // Check single businessId claim
             var jwtBizId = GetJwtBusinessId();
