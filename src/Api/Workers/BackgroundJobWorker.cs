@@ -180,6 +180,26 @@ public sealed class BackgroundJobWorker : BackgroundService
             await db.SaveChangesAsync(ct);
             _logger.LogInformation("Cleaned up {Count} old completed/failed jobs", old.Count);
         }
+
+        // Clean processed WebhookQueue rows older than 7 days
+        try
+        {
+            var conn = db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(ct);
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                DELETE FROM "WebhookQueue"
+                WHERE "ProcessedAtUtc" IS NOT NULL
+                  AND "ProcessedAtUtc" < now() - interval '7 days'
+            """;
+            var deleted = await cmd.ExecuteNonQueryAsync(ct);
+            if (deleted > 0)
+                _logger.LogInformation("QUEUE CLEANUP: deleted {Count} processed WebhookQueue rows older than 7 days", deleted);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "QUEUE CLEANUP: failed to clean WebhookQueue (non-fatal)");
+        }
     }
 
     private async Task ExecuteCleanupAbandonedOrdersAsync(IServiceProvider sp, CancellationToken ct)
