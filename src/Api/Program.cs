@@ -7,6 +7,7 @@ using System.Threading.RateLimiting;
 using FluentValidation;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -150,6 +151,33 @@ try
             .AddJwtBearer();
     }
     builder.Services.AddAuthorization();
+
+    // ────────────────────────────────────────
+    // Data Protection (key persistence)
+    // ────────────────────────────────────────
+    var dpKeysEnv = Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH");
+    var dpUsingFallback = string.IsNullOrWhiteSpace(dpKeysEnv);
+    var dpKeysPath = dpUsingFallback ? "/var/data/dataprotection-keys" : dpKeysEnv!;
+
+    try
+    {
+        Directory.CreateDirectory(dpKeysPath);
+        Log.Information("DATA PROTECTION: keys directory ensured");
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "DATA PROTECTION: could not create keys directory at {Path}, falling back to default", dpKeysPath);
+        dpKeysPath = Path.Combine(builder.Environment.ContentRootPath, "dataprotection-keys");
+        Directory.CreateDirectory(dpKeysPath);
+    }
+
+    builder.Services.AddDataProtection()
+        .SetApplicationName("CODIGO-WhatsAppSaaS")
+        .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath));
+
+    Log.Information("DATA PROTECTION: path={Path} (fallback={IsFallback})", dpKeysPath, dpUsingFallback);
+    Log.Information("DATA PROTECTION: application name=CODIGO-WhatsAppSaaS");
+    Log.Warning("DATA PROTECTION WARNING: keys are persisted but not encrypted at rest in current environment");
 
     // ────────────────────────────────────────
     // Rate limiting
