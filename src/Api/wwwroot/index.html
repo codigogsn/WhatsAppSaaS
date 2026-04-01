@@ -1027,61 +1027,84 @@
 
     /* ═══ Founder HQ Dashboard ═══ */
     .fd-header {
-      padding: 28px 32px 20px; margin-bottom: 20px;
+      padding: 36px 36px 28px; margin-bottom: 28px;
       border-radius: var(--radius); background: var(--card);
-      border-left: 3px solid #8b5cf6;
+      border-left: 4px solid #8b5cf6;
+      display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px;
     }
     .fd-header-title {
-      font-size: 20px; font-weight: 800; letter-spacing: -.02em; color: var(--text);
-      display: flex; align-items: center; gap: 10px;
+      font-size: 24px; font-weight: 800; letter-spacing: -.03em; color: var(--text);
+      display: flex; align-items: center; gap: 12px; line-height: 1.2;
     }
-    .fd-header-title .fd-icon { color: #8b5cf6; font-size: 22px; }
+    .fd-header-title .fd-icon { color: #8b5cf6; font-size: 26px; }
     .fd-header-sub {
-      font-size: 12px; color: var(--muted); margin-top: 4px;
-      text-transform: uppercase; letter-spacing: .8px; font-weight: 500;
+      font-size: 11px; color: var(--muted); margin-top: 6px;
+      text-transform: uppercase; letter-spacing: 1.2px; font-weight: 500;
     }
-    .fd-grid { display: grid; gap: 16px; margin-bottom: 20px; }
+    .fd-header-live {
+      font-size: 11px; color: var(--muted); font-weight: 500;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .fd-header-live::before {
+      content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--success);
+      display: inline-block; animation: fdPulse 2s ease-in-out infinite;
+    }
+    @keyframes fdPulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+    .fd-section-label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 1px; color: var(--muted); margin-bottom: 14px;
+    }
+    .fd-grid { display: grid; gap: 18px; margin-bottom: 28px; }
     .fd-grid-4 { grid-template-columns: repeat(4, 1fr); }
+    .fd-grid-3 { grid-template-columns: repeat(3, 1fr); }
     .fd-grid-2 { grid-template-columns: 1fr 1fr; }
-    @media (max-width: 900px) { .fd-grid-4 { grid-template-columns: 1fr 1fr; } }
-    @media (max-width: 600px) { .fd-grid-4, .fd-grid-2 { grid-template-columns: 1fr; } }
+    @media (max-width: 1000px) { .fd-grid-4 { grid-template-columns: 1fr 1fr; } .fd-grid-3 { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 600px) { .fd-grid-4, .fd-grid-3, .fd-grid-2 { grid-template-columns: 1fr; } }
     .fd-card {
       background: var(--card); border-radius: var(--radius);
-      padding: 22px 24px; display: flex; flex-direction: column; gap: 16px;
+      padding: 24px 26px; display: flex; flex-direction: column; gap: 18px;
       border: 1px solid var(--border-light);
     }
     .fd-card-title {
-      font-size: 10px; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 1px; color: #8b5cf6; padding-bottom: 10px;
-      border-bottom: 1px solid var(--border-light);
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1.2px; color: #8b5cf6; padding-bottom: 12px;
+      border-bottom: 1px solid var(--border-light); margin-bottom: 2px;
     }
-    .fd-metric { display: flex; flex-direction: column; gap: 3px; }
+    .fd-metric { display: flex; flex-direction: column; gap: 4px; }
     .fd-metric .label {
-      font-size: 10.5px; color: var(--text-secondary); text-transform: uppercase;
-      letter-spacing: .5px; font-weight: 500; opacity: .8;
+      font-size: 10px; color: var(--text-secondary); text-transform: uppercase;
+      letter-spacing: .6px; font-weight: 600; opacity: .75;
     }
     .fd-metric .value {
-      font-size: 28px; font-weight: 700; color: var(--text);
-      letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.15;
+      font-size: 30px; font-weight: 700; color: var(--text);
+      letter-spacing: -.03em; font-variant-numeric: tabular-nums; line-height: 1.1;
     }
+    .fd-metric-md .value { font-size: 22px; }
     .fd-metric-sm .value { font-size: 14px; font-weight: 600; color: var(--text-secondary); letter-spacing: 0; }
-    .fd-metric-sm { margin-top: auto; padding-top: 10px; border-top: 1px solid var(--border-light); }
-    .fd-alert-warn { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--warning-bg); border: 1px solid rgba(255,159,10,.12); }
+    .fd-metric-sm { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--border-light); }
+    .fd-alert-warn { padding: 14px 16px; border-radius: var(--radius-sm); background: var(--warning-bg); border: 1px solid rgba(255,159,10,.14); }
     .fd-alert-warn .label { color: var(--warning) !important; opacity: 1 !important; }
     .fd-alert-warn .value { color: var(--warning) !important; }
-    .fd-alert-danger { padding: 12px 14px; border-radius: var(--radius-sm); background: var(--danger-bg); border: 1px solid rgba(255,59,48,.1); }
+    .fd-alert-danger { padding: 14px 16px; border-radius: var(--radius-sm); background: var(--danger-bg); border: 1px solid rgba(255,59,48,.12); }
     .fd-alert-danger .label { color: var(--danger) !important; opacity: 1 !important; }
     .fd-alert-danger .value { color: var(--danger) !important; }
     .fd-table-wrap {
       background: var(--card); border-radius: var(--radius);
-      padding: 0; overflow: hidden; border: 1px solid var(--border-light); margin-bottom: 24px;
+      padding: 0; overflow: hidden; border: 1px solid var(--border-light); margin-bottom: 28px;
     }
     .fd-table-header {
-      padding: 16px 24px; font-size: 11px; font-weight: 600; text-transform: uppercase;
-      letter-spacing: .8px; color: #8b5cf6; border-bottom: 1px solid var(--border-light);
+      padding: 18px 26px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 1px; color: #8b5cf6; border-bottom: 1px solid var(--border-light);
+      display: flex; justify-content: space-between; align-items: center;
     }
+    .fd-table-header .fd-table-count { font-weight: 500; color: var(--muted); font-size: 11px; letter-spacing: 0; text-transform: none; }
     .fd-table-wrap table { margin-top: 0; border: none; box-shadow: none; }
-    .fd-table-wrap th { font-size: 10px; letter-spacing: .6px; }
+    .fd-table-wrap th { font-size: 10px; letter-spacing: .6px; padding: 12px 16px; }
+    .fd-table-wrap td { padding: 14px 16px; font-size: 13px; }
+    .fd-table-wrap tr:last-child td { border-bottom: none; }
+    .fd-table-biz-name { font-weight: 600; color: var(--text); }
+    .fd-table-num { font-variant-numeric: tabular-nums; font-weight: 500; }
+    .fd-table-revenue { font-weight: 600; color: var(--text); }
     [data-theme="dark"] .fd-card { border-color: rgba(255,255,255,.06); }
     [data-theme="dark"] .fd-header { border-left-color: #a78bfa; }
     [data-theme="dark"] .fd-card-title { color: #a78bfa; border-bottom-color: rgba(255,255,255,.06); }
@@ -1695,56 +1718,73 @@ Tipo: burger"></textarea>
 
   <!-- Founder Global Dashboard -->
   <div id="founderDashboard" style="display:none;">
+
     <!-- HQ Header -->
     <div class="fd-header">
-      <div class="fd-header-title"><span class="fd-icon">&#9881;</span> Founder HQ</div>
-      <div class="fd-header-sub">Global System Overview</div>
+      <div>
+        <div class="fd-header-title"><span class="fd-icon">&#9881;</span> Founder HQ</div>
+        <div class="fd-header-sub">CODIGO &middot; Global System Overview</div>
+      </div>
+      <div class="fd-header-live" id="fdLiveStatus">System live</div>
     </div>
 
-    <!-- Row 1: Core system metrics -->
+    <!-- Section: Platform Metrics -->
+    <div class="fd-section-label">Platform Metrics</div>
     <div class="fd-grid fd-grid-4">
-      <div class="fd-card"><div class="fd-card-title">System</div>
-        <div class="fd-metric"><div class="label">Businesses</div><div class="value" id="fdBiz">-</div></div>
-        <div class="fd-metric"><div class="label">Active</div><div class="value" id="fdBizActive">-</div></div>
-        <div class="fd-metric fd-metric-sm"><div class="label">Users</div><div class="value" id="fdUsers">-</div></div>
+      <div class="fd-card"><div class="fd-card-title">Portfolio</div>
+        <div class="fd-metric"><div class="label">Total Businesses</div><div class="value" id="fdBiz">-</div></div>
+        <div class="fd-metric fd-metric-md"><div class="label">Active</div><div class="value" id="fdBizActive">-</div></div>
+        <div class="fd-metric fd-metric-sm"><div class="label">Platform Users</div><div class="value" id="fdUsers">-</div></div>
       </div>
       <div class="fd-card"><div class="fd-card-title">Revenue</div>
-        <div class="fd-metric"><div class="label">Total Revenue</div><div class="value" id="fdRevenue">-</div></div>
-        <div class="fd-metric"><div class="label">Revenue Today</div><div class="value" id="fdRevenueToday">-</div></div>
-        <div class="fd-metric fd-metric-sm"><div class="label">Avg / Business</div><div class="value" id="fdAvgRevBiz">-</div></div>
+        <div class="fd-metric"><div class="label">Lifetime Revenue</div><div class="value" id="fdRevenue">-</div></div>
+        <div class="fd-metric fd-metric-md"><div class="label">Today</div><div class="value" id="fdRevenueToday">-</div></div>
+        <div class="fd-metric fd-metric-sm"><div class="label">Avg per Business</div><div class="value" id="fdAvgRevBiz">-</div></div>
       </div>
       <div class="fd-card"><div class="fd-card-title">Orders</div>
-        <div class="fd-metric"><div class="label">Total Orders</div><div class="value" id="fdOrders">-</div></div>
-        <div class="fd-metric"><div class="label">Orders Today</div><div class="value" id="fdOrdersToday">-</div></div>
-        <div class="fd-metric fd-metric-sm"><div class="label">Avg / Business</div><div class="value" id="fdAvgOrdBiz">-</div></div>
+        <div class="fd-metric"><div class="label">Lifetime Orders</div><div class="value" id="fdOrders">-</div></div>
+        <div class="fd-metric fd-metric-md"><div class="label">Today</div><div class="value" id="fdOrdersToday">-</div></div>
+        <div class="fd-metric fd-metric-sm"><div class="label">Avg per Business</div><div class="value" id="fdAvgOrdBiz">-</div></div>
       </div>
-      <div class="fd-card"><div class="fd-card-title">Alerts</div>
+      <div class="fd-card"><div class="fd-card-title">Operational Alerts</div>
         <div class="fd-metric fd-alert-warn"><div class="label">Pending Payments</div><div class="value" id="fdPending">0</div></div>
         <div class="fd-metric fd-alert-danger"><div class="label">Human Handoffs</div><div class="value" id="fdHandoffs">0</div></div>
         <div class="fd-metric fd-metric-sm"><div class="label">Businesses Active Today</div><div class="value" id="fdBizToday">0</div></div>
       </div>
     </div>
 
-    <!-- Row 2: Insights -->
-    <div class="fd-grid fd-grid-2">
-      <div class="fd-card"><div class="fd-card-title">Top Insights</div>
+    <!-- Section: Intelligence -->
+    <div class="fd-section-label">Intelligence</div>
+    <div class="fd-grid fd-grid-3">
+      <div class="fd-card"><div class="fd-card-title">Customer Base</div>
         <div class="fd-metric"><div class="label">Global Customers</div><div class="value" id="fdCustomers">-</div></div>
+      </div>
+      <div class="fd-card"><div class="fd-card-title">Top Performers</div>
         <div class="fd-metric"><div class="label">Top Product</div><div class="value" id="fdTopProduct">-</div></div>
-        <div class="fd-metric"><div class="label">Top Business</div><div class="value" id="fdTopBiz">-</div></div>
+        <div class="fd-metric fd-metric-sm"><div class="label">Top Business by Revenue</div><div class="value" id="fdTopBiz">-</div></div>
       </div>
       <div class="fd-card"><div class="fd-card-title">Latest Onboarded</div>
-        <div class="fd-metric"><div class="label">Business Name</div><div class="value" id="fdNewestBiz">-</div></div>
-        <div class="fd-metric fd-metric-sm"><div class="label">Created</div><div class="value" id="fdNewestDate">-</div></div>
+        <div class="fd-metric"><div class="label">Business</div><div class="value" id="fdNewestBiz">-</div></div>
+        <div class="fd-metric fd-metric-sm"><div class="label">Onboarded</div><div class="value" id="fdNewestDate">-</div></div>
       </div>
     </div>
 
-    <!-- Row 3: Business performance table -->
+    <!-- Section: Business Performance -->
+    <div class="fd-section-label">Business Performance</div>
     <div class="fd-table-wrap">
-      <div class="fd-table-header">Business Performance</div>
+      <div class="fd-table-header">
+        <span>Active Businesses</span>
+        <span class="fd-table-count" id="fdTableCount"></span>
+      </div>
       <table><thead><tr>
-        <th>Business</th><th>Orders</th><th>Today</th><th>Revenue</th><th>Users</th>
+        <th style="text-align:left;">Business</th>
+        <th style="text-align:right;">Orders</th>
+        <th style="text-align:right;">Today</th>
+        <th style="text-align:right;">Revenue</th>
+        <th style="text-align:right;">Users</th>
       </tr></thead><tbody id="fdBizTable"></tbody></table>
     </div>
+
   </div>
 
   <!-- Hero KPI Area -->
@@ -3107,14 +3147,16 @@ async function loadFounderDashboard() {
     var tbody = document.getElementById('fdBizTable');
     tbody.innerHTML = '';
     var biz = d.businesses || [];
+    var countEl = document.getElementById('fdTableCount');
+    if (countEl) countEl.textContent = biz.length + ' business' + (biz.length !== 1 ? 'es' : '');
     for (var i = 0; i < biz.length; i++) {
       var b = biz[i];
       var tr = document.createElement('tr');
-      tr.innerHTML = '<td style="font-weight:500;">' + esc(b.name) + '</td>'
-        + '<td>' + b.ordersTotal + '</td>'
-        + '<td>' + b.ordersToday + '</td>'
-        + '<td>$' + fmtMoney(b.revenue) + '</td>'
-        + '<td>' + b.users + '</td>';
+      tr.innerHTML = '<td class="fd-table-biz-name">' + esc(b.name) + '</td>'
+        + '<td class="fd-table-num" style="text-align:right;">' + b.ordersTotal + '</td>'
+        + '<td class="fd-table-num" style="text-align:right;">' + b.ordersToday + '</td>'
+        + '<td class="fd-table-revenue" style="text-align:right;">$' + fmtMoney(b.revenue) + '</td>'
+        + '<td class="fd-table-num" style="text-align:right;">' + b.users + '</td>';
       tbody.appendChild(tr);
     }
   } catch(e) { console.warn('Founder dashboard error:', e); }
