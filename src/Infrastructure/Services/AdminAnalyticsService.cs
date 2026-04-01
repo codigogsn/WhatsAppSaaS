@@ -218,6 +218,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .AsNoTracking()
             .Where(oi => oi.Order != null && oi.Order.BusinessId == businessId)
             .Select(oi => new { oi.Name, oi.Quantity, oi.UnitPrice, oi.OrderId })
+            .Take(50_000)
             .ToListAsync(ct);
 
         var totalOrders = rows.Select(r => r.OrderId).Distinct().Count();
