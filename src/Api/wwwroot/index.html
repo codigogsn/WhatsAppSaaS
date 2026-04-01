@@ -3495,6 +3495,7 @@ async function updateStatus(btn) {
       headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
+    if (res.status === 409) { showToast('Este pedido fue actualizado por otro usuario. Recargando...', 'error'); await load(); return; }
     if (!res.ok) { const t = await res.text(); showToast(t || 'Request failed', 'error'); return; }
   } finally { btn.disabled = false; }
   await load();

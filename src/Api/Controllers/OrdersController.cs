@@ -335,15 +335,25 @@ public sealed class OrdersController : ControllerBase
                 });
             }
 
-            // Step 2: Update status with raw SQL
+            // Step 2: Update status with optimistic concurrency guard
             using (var updCmd = conn.CreateCommand())
             {
                 updCmd.CommandText = """
-                    UPDATE "Orders" SET "Status" = @status WHERE "Id" = @oid
+                    UPDATE "Orders" SET "Status" = @status
+                    WHERE "Id" = @oid AND "Status" = @expected
                 """;
                 AddP(updCmd, "oid", id);
                 AddP(updCmd, "status", newStatus);
-                await updCmd.ExecuteNonQueryAsync();
+                AddP(updCmd, "expected", currentStatus!);
+                var rows = await updCmd.ExecuteNonQueryAsync();
+
+                if (rows == 0)
+                {
+                    _logger.LogWarning(
+                        "ORDER CONFLICT: order {OrderId} status was changed by another user (expected={Expected}, requested={Requested})",
+                        id, currentStatus, newStatus);
+                    return Conflict(new { error = "Order was updated by another user. Please refresh and try again.", orderId = id });
+                }
             }
 
             // Step 3: WhatsApp notification (best-effort)
