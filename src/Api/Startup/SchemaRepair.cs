@@ -193,6 +193,10 @@ public static class SchemaRepair
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "ExchangeRates" ("Id" uuid NOT NULL PRIMARY KEY, "RateDate" timestamp NOT NULL, "UsdRate" numeric(12,2) NOT NULL, "EurRate" numeric(12,2) NOT NULL, "Source" varchar(50) NOT NULL DEFAULT 'bcv', "FetchedAtUtc" timestamp NOT NULL DEFAULT now())""");
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_ExchangeRates_RateDate" ON "ExchangeRates" ("RateDate")""");
 
+        // ── PasswordResetTokens table ──
+        ExecSql(conn, """CREATE TABLE IF NOT EXISTS "PasswordResetTokens" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "TokenHash" varchar(128) NOT NULL, "ExpiresAtUtc" timestamp NOT NULL, "UsedAtUtc" timestamp, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
+        ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_PasswordResetTokens_TokenHash" ON "PasswordResetTokens" ("TokenHash")""");
+
         // ── CurrencyReference column on Businesses ──
         ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "CurrencyReference" varchar(20)""");
         ExecSql(conn, """UPDATE "Businesses" SET "CurrencyReference" = 'BCV_USD' WHERE "CurrencyReference" IS NULL""");
