@@ -86,9 +86,10 @@ public class AdminHandoffsController : ControllerBase
         if (!IsAuthorized())
             return Unauthorized();
 
-        // JWT users are scoped to their own business
+        // Founder can view any business; other JWT users are scoped to their own
         var jwtBizId = GetJwtBusinessId();
-        if (jwtBizId.HasValue)
+        var jwtRole = User.FindFirstValue(ClaimTypes.Role);
+        if (jwtBizId.HasValue && jwtRole != "Founder")
             businessId = jwtBizId.Value;
 
         var q = _db.ConversationStates.AsNoTracking().AsQueryable();
@@ -296,9 +297,10 @@ public class AdminHandoffsController : ControllerBase
         if (!IsAuthorized())
             return Unauthorized();
 
-        // JWT users are scoped to their own business
+        // Founder can view any business; other JWT users are scoped to their own
         var jwtBizId = GetJwtBusinessId();
-        if (jwtBizId.HasValue)
+        var jwtRole = User.FindFirstValue(ClaimTypes.Role);
+        if (jwtBizId.HasValue && jwtRole != "Founder")
             businessId = jwtBizId.Value;
 
         var q = _db.ConversationStates.AsNoTracking().AsQueryable();

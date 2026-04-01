@@ -84,14 +84,15 @@ public class AdminExportsController : ControllerBase
     {
         try
         {
-            // JWT users are scoped to their own business
+            // Founder can view any business; other JWT users are scoped to their own
             var jwtBizId = GetJwtBusinessId();
-            if (jwtBizId.HasValue)
+            var role = User.FindFirstValue(ClaimTypes.Role);
+            if (jwtBizId.HasValue && role != "Founder")
                 businessId = jwtBizId.Value;
 
             // JWT auth for scoped business
-            var role = User.FindFirstValue(ClaimTypes.Role);
-            var isJwtAuth = role is "Founder" or "Owner" or "Manager" or "Operator" && jwtBizId.HasValue && businessId == jwtBizId.Value;
+            var isJwtAuth = role is "Founder" or "Owner" or "Manager" or "Operator"
+                && (role == "Founder" || (jwtBizId.HasValue && businessId == jwtBizId.Value));
 
             if (!isJwtAuth)
             {
@@ -160,13 +161,14 @@ public class AdminExportsController : ControllerBase
     {
         try
         {
-            // JWT users are scoped to their own business
+            // Founder can view any business; other JWT users are scoped to their own
             var jwtBizId = GetJwtBusinessId();
-            if (jwtBizId.HasValue)
+            var role = User.FindFirstValue(ClaimTypes.Role);
+            if (jwtBizId.HasValue && role != "Founder")
                 businessId = jwtBizId.Value;
 
-            var role = User.FindFirstValue(ClaimTypes.Role);
-            var isJwtAuth = role is "Founder" or "Owner" or "Manager" or "Operator" && jwtBizId.HasValue && businessId == jwtBizId.Value;
+            var isJwtAuth = role is "Founder" or "Owner" or "Manager" or "Operator"
+                && (role == "Founder" || (jwtBizId.HasValue && businessId == jwtBizId.Value));
 
             if (!isJwtAuth)
             {

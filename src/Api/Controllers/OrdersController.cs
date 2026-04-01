@@ -42,9 +42,10 @@ public sealed class OrdersController : ControllerBase
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
 
-        // JWT users are scoped to their own business
+        // Founder can view any business; other JWT users are scoped to their own
         var jwtBizId = GetJwtBusinessId();
-        if (jwtBizId.HasValue)
+        var jwtRole = User.FindFirstValue(ClaimTypes.Role);
+        if (jwtBizId.HasValue && jwtRole != "Founder")
             businessId = jwtBizId.Value;
 
         if (take < 1) take = 1;
