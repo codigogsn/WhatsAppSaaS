@@ -109,6 +109,7 @@ try
     builder.Services.AddSingleton<WhatsAppSaaS.Application.Interfaces.IMessageQueue,
         WhatsAppSaaS.Infrastructure.Messaging.InMemoryMessageQueue>();
     builder.Services.AddHostedService<WhatsAppSaaS.Api.Workers.WebhookProcessingWorker>();
+    Log.Warning("MESSAGE QUEUE: using in-memory queue — messages in flight will be lost on container restart/deploy");
 
     // Background job processing
     builder.Services.AddScoped<WhatsAppSaaS.Application.Interfaces.IBackgroundJobService,

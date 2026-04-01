@@ -32,7 +32,28 @@ public sealed class ConversationStateStore : IConversationStateStore
                 StateJson = "{}"
             };
             _db.ConversationStates.Add(entity);
-            await _db.SaveChangesAsync(ct);
+
+            try
+            {
+                await _db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateException ex) when (IsDuplicateKeyException(ex))
+            {
+                // Race: another thread inserted first. Detach our failed entity and re-fetch.
+                var tracked = _db.ChangeTracker.Entries<ConversationState>()
+                    .FirstOrDefault(e => e.Entity.ConversationId == conversationId);
+                if (tracked is not null)
+                    tracked.State = EntityState.Detached;
+
+                entity = await _db.ConversationStates.FindAsync(new object[] { conversationId }, ct);
+                if (entity is not null)
+                {
+                    entity.UpdatedAtUtc = DateTime.UtcNow;
+                    try { return JsonSerializer.Deserialize<ConversationFields>(entity.StateJson, JsonOpts) ?? new ConversationFields(); }
+                    catch { return new ConversationFields(); }
+                }
+            }
+
             return new ConversationFields();
         }
 

@@ -35,10 +35,12 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
         var orderRows = await orderQ
             .Select(o => new { o.CheckoutCompleted, o.TotalAmount, o.CreatedAtUtc, o.PaymentProofMediaId, o.PaymentVerifiedAtUtc })
+            .Take(50_000)
             .ToListAsync(ct);
 
         var customers = await customerQ
             .Select(c => new { c.OrdersCount })
+            .Take(50_000)
             .ToListAsync(ct);
 
         var totalCustomers = customers.Count;
@@ -62,6 +64,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             var itemRows = await _db.OrderItems.AsNoTracking()
                 .Where(oi => oi.Order != null && oi.Order.BusinessId == businessId.Value)
                 .Select(oi => new { oi.Name, oi.Quantity })
+                .Take(50_000)
                 .ToListAsync(ct);
 
             topItem = itemRows
@@ -105,6 +108,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         var rows = await _db.OrderItems
             .AsNoTracking()
             .Select(oi => new { oi.Name, oi.Quantity, oi.UnitPrice })
+            .Take(50_000)
             .ToListAsync(ct);
 
         return rows
@@ -164,6 +168,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .AsNoTracking()
             .Where(o => o.BusinessId == businessId && o.CheckoutCompleted)
             .Select(o => o.TotalAmount)
+            .Take(100_000)
             .ToListAsync(ct);
 
         var allTimeCount = allTimeRows.Count;
@@ -272,6 +277,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .AsNoTracking()
             .Where(cs => cs.BusinessId == businessId)
             .Select(cs => cs.StateJson)
+            .Take(50_000)
             .ToListAsync(ct);
 
         var checkoutStarted = 0;
@@ -336,6 +342,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
                 o.DeliveryType,
                 o.Status
             })
+            .Take(50_000)
             .ToListAsync(ct);
 
         // Average preparation time: AcceptedAt -> PreparingAt (or CreatedAt -> PreparingAt if no AcceptedAt)
@@ -405,6 +412,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .AsNoTracking()
             .Where(c => c.BusinessId == businessId)
             .Select(c => new { c.PhoneE164, c.Name, c.TotalSpent, c.OrdersCount })
+            .Take(50_000)
             .ToListAsync(ct);
 
         var totalCustomers = customers.Count;
@@ -433,6 +441,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .AsNoTracking()
             .Where(o => o.BusinessId == businessId && o.CheckoutCompleted)
             .Select(o => new { o.PaymentMethod, o.TotalAmount })
+            .Take(100_000)
             .ToListAsync(ct);
 
         var revenueByPayment = orderPayments
@@ -460,6 +469,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Where(o => o.BusinessId == businessId && o.CheckoutCompleted)
             .OrderBy(o => o.CreatedAtUtc)
             .Select(o => new { o.CreatedAtUtc })
+            .Take(100_000)
             .ToListAsync(ct);
 
         // Best selling hours
@@ -491,6 +501,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .AsNoTracking()
             .Where(oi => oi.Order != null && oi.Order.BusinessId == businessId)
             .Select(oi => new { oi.Name, oi.Quantity, oi.UnitPrice, oi.OrderId })
+            .Take(50_000)
             .ToListAsync(ct);
 
         var mostPopular = items

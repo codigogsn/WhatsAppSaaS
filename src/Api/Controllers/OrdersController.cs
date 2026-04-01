@@ -335,6 +335,30 @@ public sealed class OrdersController : ControllerBase
                 });
             }
 
+            // Validate transition: only allow forward progression (+ cancel from any)
+            var allowedTransitions = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Pending"]        = new(StringComparer.OrdinalIgnoreCase) { "Preparing", "Cancelled" },
+                ["Preparing"]      = new(StringComparer.OrdinalIgnoreCase) { "ReadyForPickup", "OutForDelivery", "Cancelled" },
+                ["ReadyForPickup"] = new(StringComparer.OrdinalIgnoreCase) { "OutForDelivery", "Completed", "Cancelled" },
+                ["OutForDelivery"] = new(StringComparer.OrdinalIgnoreCase) { "Completed", "Cancelled" },
+                ["Completed"]      = new(StringComparer.OrdinalIgnoreCase) {},
+                ["Cancelled"]      = new(StringComparer.OrdinalIgnoreCase) {}
+            };
+
+            if (currentStatus != null
+                && allowedTransitions.TryGetValue(currentStatus, out var allowed)
+                && !allowed.Contains(newStatus))
+            {
+                return BadRequest(new
+                {
+                    error = $"Cannot change status from '{currentStatus}' to '{newStatus}'",
+                    currentStatus,
+                    requestedStatus = newStatus,
+                    allowed = allowed.OrderBy(s => s).ToArray()
+                });
+            }
+
             // Step 2: Update status with optimistic concurrency guard
             using (var updCmd = conn.CreateCommand())
             {
