@@ -224,18 +224,42 @@ public class PasswordResetController : ControllerBase
 
         var subject = "Reset your CODIGO password";
         var htmlBody = $"""
-            <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;max-width:480px;margin:0 auto;padding:32px 24px;">
-              <div style="font-size:18px;font-weight:700;letter-spacing:3px;margin-bottom:24px;color:#1D1D1F;">CODIGO</div>
-              <p style="font-size:15px;color:#333;line-height:1.6;">You requested a password reset for your account.</p>
-              <p style="font-size:15px;color:#333;line-height:1.6;">Click the button below to set a new password. This link expires in 1 hour.</p>
-              <div style="text-align:center;margin:32px 0;">
-                <a href="{resetUrl}" style="display:inline-block;padding:12px 32px;background:#007AFF;color:#fff;text-decoration:none;border-radius:10px;font-size:14px;font-weight:600;">Reset Password</a>
+            <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:520px;margin:0 auto;background:#ffffff;">
+              <div style="padding:40px 36px 32px;border-bottom:1px solid #f0f0f0;">
+                <div style="font-size:18px;font-weight:800;letter-spacing:3px;color:#1D1D1F;">CODIGO</div>
               </div>
-              <p style="font-size:12px;color:#999;line-height:1.5;">If you didn't request this, you can safely ignore this email.</p>
-              <p style="font-size:12px;color:#999;line-height:1.5;">Or copy this link: {resetUrl}</p>
+              <div style="padding:32px 36px;">
+                <h1 style="font-size:22px;font-weight:700;color:#1D1D1F;margin:0 0 12px;">Reset your password</h1>
+                <p style="font-size:15px;color:#555;line-height:1.65;margin:0 0 8px;">We received a request to reset the password for your account. Click the button below to choose a new one.</p>
+                <p style="font-size:13px;color:#999;line-height:1.5;margin:0 0 28px;">This link will expire in <strong style="color:#555;">1 hour</strong> and can only be used once.</p>
+                <div style="text-align:center;margin:0 0 28px;">
+                  <a href="{resetUrl}" style="display:inline-block;padding:14px 40px;background:#007AFF;color:#ffffff;text-decoration:none;border-radius:10px;font-size:15px;font-weight:600;letter-spacing:.3px;">Reset Password</a>
+                </div>
+                <div style="background:#f8f8fa;border-radius:8px;padding:14px 16px;margin:0 0 24px;">
+                  <p style="font-size:11px;color:#999;margin:0 0 6px;text-transform:uppercase;letter-spacing:.5px;font-weight:600;">Or copy this link:</p>
+                  <p style="font-size:12px;color:#007AFF;word-break:break-all;margin:0;line-height:1.5;">{resetUrl}</p>
+                </div>
+                <p style="font-size:12.5px;color:#999;line-height:1.5;margin:0;">If you didn't request this, you can safely ignore this email. Your password will remain unchanged.</p>
+              </div>
+              <div style="padding:20px 36px;border-top:1px solid #f0f0f0;">
+                <p style="font-size:11px;color:#bbb;margin:0;text-align:center;">CODIGO &mdash; WhatsApp Automation Platform</p>
+              </div>
             </div>
             """;
-        var textBody = $"Reset your CODIGO password.\n\nClick this link to set a new password (expires in 1 hour):\n{resetUrl}\n\nIf you didn't request this, ignore this email.";
+        var textBody = $"""
+            CODIGO — Password Reset
+
+            We received a request to reset your password.
+
+            Click this link to set a new password:
+            {resetUrl}
+
+            This link expires in 1 hour and can only be used once.
+
+            If you didn't request this, you can safely ignore this email.
+
+            — CODIGO · WhatsApp Automation Platform
+            """;
 
         using var client = new SmtpClient(host, port)
         {
