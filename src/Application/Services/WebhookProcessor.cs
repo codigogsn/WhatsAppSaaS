@@ -1901,6 +1901,27 @@ public sealed class WebhookProcessor : IWebhookProcessor
             }).ToList()
         };
 
+        // Guard: reject orders containing items with no resolved price
+        var zeroPriceItems = order.Items.Where(i => i.UnitPrice <= 0m).ToList();
+        if (zeroPriceItems.Count > 0)
+        {
+            _logger.LogWarning(
+                "ZERO PRICE GUARD: order blocked — businessId={BusinessId} from={From} items=[{Items}]",
+                businessId, from,
+                string.Join(", ", zeroPriceItems.Select(i => $"{i.Quantity}x {i.Name}")));
+
+            // Do NOT persist; reset order state so customer can retry
+            state.Items.Clear();
+            state.OrderConfirmed = false;
+            state.CheckoutFormSent = false;
+            state.DeliveryDataConfirmed = false;
+            state.ObservationAnswered = false;
+            state.ExtrasOffered = false;
+
+            return "Disculpa, no pudimos validar el precio de algunos productos de tu pedido. "
+                 + "Por favor, vuelve a hacer tu pedido eligiendo los productos del menú. 🙏";
+        }
+
         order.DeliveryFee = state.DeliveryType == "delivery" ? Msg.DeliveryFeeUsd : 0m;
         order.RecalculateTotal();
 
