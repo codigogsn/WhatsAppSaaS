@@ -37,6 +37,9 @@ public static class SchemaRepair
     {
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "PasswordResetTokens" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "TokenHash" varchar(128) NOT NULL, "ExpiresAtUtc" timestamp NOT NULL, "UsedAtUtc" timestamp, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
         ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_PasswordResetTokens_TokenHash" ON "PasswordResetTokens" ("TokenHash")""");
+        ExecSql(conn, """CREATE TABLE IF NOT EXISTS "WebhookQueue" ("Id" uuid NOT NULL PRIMARY KEY, "Payload" text NOT NULL, "CreatedAtUtc" timestamp NOT NULL DEFAULT now(), "ClaimedAtUtc" timestamp, "ProcessedAtUtc" timestamp, "AttemptCount" integer NOT NULL DEFAULT 0, "LastError" text)""");
+        ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_WebhookQueue_Pending" ON "WebhookQueue" ("CreatedAtUtc") WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" < 5""");
+        Log.Information("QUEUE SCHEMA: WebhookQueue ensured");
     }
 
     /// <summary>
@@ -121,8 +124,6 @@ public static class SchemaRepair
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "ProcessedMessages" ("Id" uuid NOT NULL PRIMARY KEY, "ConversationId" varchar(256) NOT NULL, "MessageId" varchar(256) NOT NULL, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "Orders" ("Id" uuid NOT NULL PRIMARY KEY, "From" text NOT NULL, "PhoneNumberId" text NOT NULL, "DeliveryType" text NOT NULL DEFAULT 'pickup', "Status" text NOT NULL DEFAULT 'Pending', "CreatedAtUtc" timestamp NOT NULL DEFAULT now(), "CheckoutFormSent" boolean NOT NULL DEFAULT false, "CheckoutCompleted" boolean NOT NULL DEFAULT false)""");
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "OrderItems" ("Id" uuid NOT NULL PRIMARY KEY, "OrderId" uuid NOT NULL, "Name" text NOT NULL, "Quantity" integer NOT NULL DEFAULT 1, "UnitPrice" numeric(12,2), "LineTotal" numeric(12,2))""");
-        ExecSql(conn, """CREATE TABLE IF NOT EXISTS "WebhookQueue" ("Id" uuid NOT NULL PRIMARY KEY, "Payload" text NOT NULL, "CreatedAtUtc" timestamp NOT NULL DEFAULT now(), "ClaimedAtUtc" timestamp, "ProcessedAtUtc" timestamp, "AttemptCount" integer NOT NULL DEFAULT 0, "LastError" text)""");
-        ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_WebhookQueue_Pending" ON "WebhookQueue" ("CreatedAtUtc") WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" < 5""");
 
         // ── Fix SQLite-style text columns → uuid ──
         RepairTextToUuid(conn);
