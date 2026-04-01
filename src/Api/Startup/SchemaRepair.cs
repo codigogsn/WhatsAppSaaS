@@ -14,6 +14,9 @@ public static class SchemaRepair
 {
     public static void RepairLegacySchema(System.Data.Common.DbConnection conn)
     {
+        // ── Always ensure newer tables exist (idempotent, runs even if schema is stable) ──
+        EnsureNewTables(conn);
+
         // ── Fast path: skip full repair if schema is already stable ──
         if (IsSchemaStable(conn))
         {
@@ -24,6 +27,16 @@ public static class SchemaRepair
         Log.Information("LEGACY SCHEMA REPAIR: schema needs repair — running full repair");
 
         RunFullRepair(conn);
+    }
+
+    /// <summary>
+    /// Creates tables added after the initial schema stabilized.
+    /// Runs on every startup, idempotent (IF NOT EXISTS).
+    /// </summary>
+    private static void EnsureNewTables(System.Data.Common.DbConnection conn)
+    {
+        ExecSql(conn, """CREATE TABLE IF NOT EXISTS "PasswordResetTokens" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "TokenHash" varchar(128) NOT NULL, "ExpiresAtUtc" timestamp NOT NULL, "UsedAtUtc" timestamp, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
+        ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_PasswordResetTokens_TokenHash" ON "PasswordResetTokens" ("TokenHash")""");
     }
 
     /// <summary>
@@ -192,10 +205,6 @@ public static class SchemaRepair
         // ── ExchangeRates table ──
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "ExchangeRates" ("Id" uuid NOT NULL PRIMARY KEY, "RateDate" timestamp NOT NULL, "UsdRate" numeric(12,2) NOT NULL, "EurRate" numeric(12,2) NOT NULL, "Source" varchar(50) NOT NULL DEFAULT 'bcv', "FetchedAtUtc" timestamp NOT NULL DEFAULT now())""");
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_ExchangeRates_RateDate" ON "ExchangeRates" ("RateDate")""");
-
-        // ── PasswordResetTokens table ──
-        ExecSql(conn, """CREATE TABLE IF NOT EXISTS "PasswordResetTokens" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "TokenHash" varchar(128) NOT NULL, "ExpiresAtUtc" timestamp NOT NULL, "UsedAtUtc" timestamp, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
-        ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_PasswordResetTokens_TokenHash" ON "PasswordResetTokens" ("TokenHash")""");
 
         // ── CurrencyReference column on Businesses ──
         ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "CurrencyReference" varchar(20)""");
