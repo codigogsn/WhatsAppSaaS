@@ -234,8 +234,25 @@ try
     // ────────────────────────────────────────
     DatabaseSeeder.RunAll(app.Services);
 
+    // ── Database connectivity check ──
+    try
+    {
+        using var scope = app.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var conn = db.Database.GetDbConnection();
+        await conn.OpenAsync();
+        Log.Information("DB CHECK: PostgreSQL connected | Provider: {Provider}", db.Database.ProviderName ?? "Npgsql");
+        await conn.CloseAsync();
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex, "DB CHECK: Failed to connect to database");
+    }
+
     // ── Production config warnings ──
     ConfigValidator.WarnIfMissing(app.Environment.EnvironmentName);
+
+    Log.Information("BACKUP REMINDER: Ensure Render PostgreSQL backups are enabled");
 
     app.UseGlobalExceptionHandling();
     app.UseRequestLogging();
@@ -260,7 +277,28 @@ try
     app.UseAuthorization();
 
     app.MapControllers();
-    app.MapHealthChecks("/health");
+
+    // Enhanced health endpoint
+    var startTime = DateTime.UtcNow;
+    app.MapGet("/health", async (AppDbContext db) =>
+    {
+        var dbStatus = "Disconnected";
+        try
+        {
+            var conn = db.Database.GetDbConnection();
+            await conn.OpenAsync();
+            dbStatus = "Connected";
+            await conn.CloseAsync();
+        }
+        catch { }
+
+        return Results.Ok(new
+        {
+            status = "Healthy",
+            db = dbStatus,
+            uptime = (DateTime.UtcNow - startTime).ToString(@"d\.hh\:mm\:ss")
+        });
+    });
 
     if (!EF.IsDesignTime)
     {

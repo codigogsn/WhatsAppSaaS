@@ -76,11 +76,11 @@ public class WebhookController : ControllerBase
                 Encoding.UTF8.GetBytes(verifyToken),
                 Encoding.UTF8.GetBytes(expectedToken)))
         {
-            Log.Warning("Webhook verification failed: token mismatch");
+            Log.Warning("WEBHOOK VERIFY FAILED: token mismatch");
             return StatusCode(403);
         }
 
-        Log.Information("Webhook verified successfully");
+        Log.Information("WEBHOOK VERIFY SUCCESS");
         return Ok(challenge);
     }
 
@@ -179,8 +179,11 @@ public class WebhookController : ControllerBase
             return Ok();
         }
 
-        Log.Information("WEBHOOK ENQUEUING: businessId={BusinessId} phoneNumberId={PhoneNumberId} entries={EntryCount}",
-            businessContext.BusinessId, phoneNumberId, payload.Entry?.Count ?? 0);
+        Log.Information("INCOMING MSG: {From} | {BusinessId}",
+            phoneNumberId, businessContext.BusinessId);
+
+        Log.Information("WEBHOOK ENQUEUING: businessId={BusinessId} phoneNumberId={PhoneNumberId} messageId={MessageId}",
+            businessContext.BusinessId, phoneNumberId, firstMessageId ?? "(none)");
 
         await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), ct);
         return Ok();

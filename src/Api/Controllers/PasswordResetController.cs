@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace Api.Controllers;
@@ -140,8 +141,9 @@ public class PasswordResetController : ControllerBase
             var result = await cmd.ExecuteScalarAsync(ct);
             return Ok(new { valid = result is not null });
         }
-        catch
+        catch (Exception ex)
         {
+            Log.Warning(ex, "Token validation query failed");
             return Ok(new { valid = false });
         }
     }

@@ -115,6 +115,8 @@ public sealed class OrderRepository : IOrderRepository
         try
         {
             await _db.SaveChangesAsync(ct);
+            _logger.LogInformation("ORDER CREATED: {OrderId} | {BusinessId} | {Total}",
+                order.Id, order.BusinessId, order.TotalAmount ?? 0m);
             _logger.LogInformation("ORDER SAVE: SUCCESS Id={Id}", order.Id);
         }
         catch (DbUpdateException dbEx)

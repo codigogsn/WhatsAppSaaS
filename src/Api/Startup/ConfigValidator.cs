@@ -12,14 +12,33 @@ public static class ConfigValidator
         if (string.Equals(environmentName, "Development", StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WHATSAPP_VERIFY_TOKEN")))
-            Log.Warning("CONFIG: WHATSAPP_VERIFY_TOKEN not set — webhook verification will reject all requests");
+        var criticalVars = new Dictionary<string, string>
+        {
+            ["WHATSAPP_VERIFY_TOKEN"] = "webhook verification will reject all requests",
+            ["WHATSAPP_PHONE_NUMBER_ID"] = "outbound messages will not work",
+            ["ADMIN_KEY"] = "admin endpoints will reject all requests",
+            ["JWT_SECRET"] = "founder login will not work",
+        };
+
+        // WhatsApp access token can be either name
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN"))
             && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("META_ACCESS_TOKEN")))
-            Log.Warning("CONFIG: No WhatsApp access token set (WHATSAPP_ACCESS_TOKEN / META_ACCESS_TOKEN)");
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("ADMIN_KEY")))
-            Log.Warning("CONFIG: ADMIN_KEY not set — admin endpoints will reject all requests");
-        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("JWT_SECRET")))
-            Log.Warning("CONFIG: JWT_SECRET not set — founder login will not work");
+            Log.Error("CONFIG MISSING: No WhatsApp access token set (WHATSAPP_ACCESS_TOKEN / META_ACCESS_TOKEN)");
+
+        foreach (var (key, impact) in criticalVars)
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(key)))
+                Log.Error("CONFIG MISSING: {Variable} not set — {Impact}", key, impact);
+        }
+
+        // SMTP (non-critical but warn)
+        var smtpVars = new[] { "SMTP_USERNAME", "SMTP_PASSWORD", "SMTP_PORT", "SMTP_USE_SSL" };
+        foreach (var v in smtpVars)
+        {
+            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(v)))
+                Log.Warning("CONFIG: {Variable} not set — password reset emails may not work", v);
+        }
+
+        Log.Information("CONFIG CHECK: WhatsApp + SMTP configuration loaded");
     }
 }
