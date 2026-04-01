@@ -39,9 +39,9 @@ public static class ConfigValidator
                 Log.Warning("CONFIG: {Variable} not set — password reset emails may not work", v);
         }
 
-        // Data Protection keys path
+        // Data Protection keys path (required for persistence)
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH")))
-            Log.Warning("CONFIG: DATA_PROTECTION_KEYS_PATH not set — using fallback /var/data/dataprotection-keys");
+            Log.Error("CONFIG MISSING: DATA_PROTECTION_KEYS_PATH not set — keys will NOT persist across deploys");
 
         Log.Information("CONFIG CHECK: WhatsApp + SMTP configuration loaded");
     }

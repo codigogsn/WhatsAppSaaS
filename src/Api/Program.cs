@@ -155,29 +155,45 @@ try
     // ────────────────────────────────────────
     // Data Protection (key persistence)
     // ────────────────────────────────────────
-    var dpKeysEnv = Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH");
-    var dpUsingFallback = string.IsNullOrWhiteSpace(dpKeysEnv);
-    var dpKeysPath = dpUsingFallback ? "/var/data/dataprotection-keys" : dpKeysEnv!;
+    var dpKeysPath = Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH");
+    var dpConfigured = false;
 
-    try
+    if (string.IsNullOrWhiteSpace(dpKeysPath))
     {
-        Directory.CreateDirectory(dpKeysPath);
-        Log.Information("DATA PROTECTION: keys directory ensured");
+        Log.Error("DATA PROTECTION ERROR: DATA_PROTECTION_KEYS_PATH env var is not set — keys will NOT persist across deploys. Set this to a Render persistent disk path.");
     }
-    catch (Exception ex)
+    else
     {
-        Log.Warning(ex, "DATA PROTECTION: could not create keys directory at {Path}, falling back to default", dpKeysPath);
-        dpKeysPath = Path.Combine(builder.Environment.ContentRootPath, "dataprotection-keys");
-        Directory.CreateDirectory(dpKeysPath);
+        try
+        {
+            Directory.CreateDirectory(dpKeysPath);
+
+            // Verify the directory is writable
+            var testFile = Path.Combine(dpKeysPath, ".dp-write-test");
+            File.WriteAllText(testFile, "ok");
+            File.Delete(testFile);
+
+            builder.Services.AddDataProtection()
+                .SetApplicationName("CODIGO-WhatsAppSaaS")
+                .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath));
+
+            dpConfigured = true;
+            Log.Information("DATA PROTECTION: path={Path} | writable=true | app=CODIGO-WhatsAppSaaS", dpKeysPath);
+            Log.Warning("DATA PROTECTION WARNING: keys are persisted but not encrypted at rest in current environment");
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "DATA PROTECTION ERROR: path {Path} is not writable — persistence not guaranteed", dpKeysPath);
+        }
     }
 
-    builder.Services.AddDataProtection()
-        .SetApplicationName("CODIGO-WhatsAppSaaS")
-        .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath));
-
-    Log.Information("DATA PROTECTION: path={Path} (fallback={IsFallback})", dpKeysPath, dpUsingFallback);
-    Log.Information("DATA PROTECTION: application name=CODIGO-WhatsAppSaaS");
-    Log.Warning("DATA PROTECTION WARNING: keys are persisted but not encrypted at rest in current environment");
+    if (!dpConfigured)
+    {
+        // Register Data Protection with defaults so the app still runs
+        builder.Services.AddDataProtection()
+            .SetApplicationName("CODIGO-WhatsAppSaaS");
+        Log.Error("DATA PROTECTION: running with default (non-persistent) key storage — sessions/tokens WILL break on restart");
+    }
 
     // ────────────────────────────────────────
     // Rate limiting
