@@ -8,5 +8,5 @@ public sealed record QueuedMessage(WebhookPayload Payload, BusinessContext Busin
 public interface IMessageQueue
 {
     ValueTask EnqueueAsync(QueuedMessage message, CancellationToken cancellationToken = default);
-    ValueTask<QueuedMessage> DequeueAsync(CancellationToken cancellationToken = default);
+    ValueTask<QueuedMessage?> DequeueAsync(CancellationToken cancellationToken = default);
 }

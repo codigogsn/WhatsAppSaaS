@@ -26,7 +26,8 @@ public class InMemoryMessageQueueTests
         await queue.EnqueueAsync(msg);
         var result = await queue.DequeueAsync();
 
-        result.BusinessContext.PhoneNumberId.Should().Be("123");
+        result.Should().NotBeNull();
+        result!.BusinessContext.PhoneNumberId.Should().Be("123");
         result.Payload.Object.Should().Be("whatsapp_business_account");
     }
 
@@ -44,7 +45,7 @@ public class InMemoryMessageQueueTests
         for (var i = 0; i < 5; i++)
         {
             var result = await queue.DequeueAsync();
-            result.BusinessContext.PhoneNumberId.Should().Be($"phone-{i}");
+            result!.BusinessContext.PhoneNumberId.Should().Be($"phone-{i}");
         }
     }
 
@@ -94,7 +95,7 @@ public class InMemoryMessageQueueTests
 
         var results = new List<QueuedMessage>();
         for (var i = 0; i < count; i++)
-            results.Add(await queue.DequeueAsync());
+            results.Add((await queue.DequeueAsync())!);
 
         results.Should().HaveCount(count);
         results.Select(r => r.BusinessContext.PhoneNumberId).Distinct().Should().HaveCount(count);

@@ -17,7 +17,7 @@ public sealed class InMemoryMessageQueue : IMessageQueue
         await _channel.Writer.WriteAsync(message, cancellationToken);
     }
 
-    public async ValueTask<QueuedMessage> DequeueAsync(CancellationToken cancellationToken = default)
+    public async ValueTask<QueuedMessage?> DequeueAsync(CancellationToken cancellationToken = default)
     {
         return await _channel.Reader.ReadAsync(cancellationToken);
     }

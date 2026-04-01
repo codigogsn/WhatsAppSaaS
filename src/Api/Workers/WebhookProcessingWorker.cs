@@ -24,9 +24,16 @@ public sealed class WebhookProcessingWorker : BackgroundService
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            QueuedMessage? message = null;
             try
             {
-                var message = await _queue.DequeueAsync(stoppingToken);
+                message = await _queue.DequeueAsync(stoppingToken);
+
+                if (message is null)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                    continue;
+                }
 
                 _logger.LogInformation(
                     "Dequeued message for business {BusinessId} ({BusinessName})",
@@ -37,6 +44,9 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 var processor = scope.ServiceProvider.GetRequiredService<IWebhookProcessor>();
 
                 await processor.ProcessAsync(message.Payload, message.BusinessContext, stoppingToken);
+
+                if (_queue is WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue pgq)
+                    await pgq.CompleteLastAsync(stoppingToken);
 
                 _logger.LogInformation(
                     "Processed message for business {BusinessId}",
@@ -49,7 +59,14 @@ public sealed class WebhookProcessingWorker : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing queued webhook message");
-                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+
+                if (_queue is WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue pgqFail)
+                {
+                    try { await pgqFail.FailLastAsync(ex.Message, stoppingToken); }
+                    catch (Exception failEx) { _logger.LogError(failEx, "Failed to return queue item for retry"); }
+                }
+
+                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
             }
         }
 

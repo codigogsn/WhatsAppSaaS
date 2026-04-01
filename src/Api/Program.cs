@@ -14,6 +14,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Microsoft.IdentityModel.Tokens;
 using Serilog;
 using WhatsAppSaaS.Api.Extensions;
@@ -76,21 +77,21 @@ try
     // ────────────────────────────────────────
     // DbContext
     // ────────────────────────────────────────
+    var databaseUrl = builder.Configuration["DATABASE_URL"]
+                      ?? Environment.GetEnvironmentVariable("DATABASE_URL");
+    string? npgsqlConnString = !string.IsNullOrWhiteSpace(databaseUrl)
+        ? ConvertDatabaseUrlToNpgsql(databaseUrl)
+        : null;
+
     builder.Services.AddDbContext<AppDbContext>(options =>
     {
-        var env = builder.Environment.EnvironmentName;
-
-        var databaseUrl = builder.Configuration["DATABASE_URL"]
-                          ?? Environment.GetEnvironmentVariable("DATABASE_URL");
-
-        if (!string.IsNullOrWhiteSpace(databaseUrl))
+        if (npgsqlConnString is not null)
         {
-            var connString = ConvertDatabaseUrlToNpgsql(databaseUrl);
-            options.UseNpgsql(connString);
+            options.UseNpgsql(npgsqlConnString);
             return;
         }
 
-        if (string.Equals(env, "Production", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(builder.Environment.EnvironmentName, "Production", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException("DATABASE_URL is missing in Production.");
         }
@@ -105,11 +106,22 @@ try
     builder.Services.AddHealthChecks();
     builder.Services.AddHostedService<WhatsAppSaaS.Api.Services.ConversationCleanupService>();
 
-    // Async webhook processing queue
-    builder.Services.AddSingleton<WhatsAppSaaS.Application.Interfaces.IMessageQueue,
-        WhatsAppSaaS.Infrastructure.Messaging.InMemoryMessageQueue>();
+    // Async webhook processing queue — PostgreSQL-backed when available, in-memory fallback for dev
+    if (npgsqlConnString is not null)
+    {
+        builder.Services.AddSingleton<WhatsAppSaaS.Application.Interfaces.IMessageQueue>(sp =>
+            new WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue(
+                npgsqlConnString,
+                sp.GetRequiredService<ILoggerFactory>().CreateLogger<WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue>()));
+        Log.Information("MESSAGE QUEUE: PostgreSQL-backed persistent queue enabled");
+    }
+    else
+    {
+        builder.Services.AddSingleton<WhatsAppSaaS.Application.Interfaces.IMessageQueue,
+            WhatsAppSaaS.Infrastructure.Messaging.InMemoryMessageQueue>();
+        Log.Warning("MESSAGE QUEUE: using in-memory queue — messages in flight will be lost on container restart/deploy");
+    }
     builder.Services.AddHostedService<WhatsAppSaaS.Api.Workers.WebhookProcessingWorker>();
-    Log.Warning("MESSAGE QUEUE: using in-memory queue — messages in flight will be lost on container restart/deploy");
 
     // Background job processing
     builder.Services.AddScoped<WhatsAppSaaS.Application.Interfaces.IBackgroundJobService,
