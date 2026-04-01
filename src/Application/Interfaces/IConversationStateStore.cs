@@ -169,6 +169,7 @@ public interface IConversationStateStore
     Task<ConversationFields> GetOrCreateAsync(string conversationId, Guid? businessId, CancellationToken ct = default);
     Task SaveAsync(string conversationId, ConversationFields fields, CancellationToken ct = default);
     Task<bool> IsMessageProcessedAsync(string conversationId, string messageId, CancellationToken ct = default);
-    Task MarkMessageProcessedAsync(string conversationId, string messageId, CancellationToken ct = default);
+    /// <summary>Returns true if newly marked; false if already processed (duplicate).</summary>
+    Task<bool> MarkMessageProcessedAsync(string conversationId, string messageId, CancellationToken ct = default);
     Task PurgeOldStatesAsync(TimeSpan ttl, CancellationToken ct = default);
 }

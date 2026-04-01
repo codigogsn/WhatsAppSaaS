@@ -126,14 +126,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // Ensure conversation row exists before idempotency check (FK dependency)
                     var state = await _stateStore.GetOrCreateAsync(conversationId, businessContext.BusinessId, cancellationToken);
 
-                    // Idempotency check
+                    // Idempotency: atomic insert-or-skip via DB unique index
                     var msgId = message.Id;
                     if (!string.IsNullOrWhiteSpace(msgId))
                     {
-                        if (await _stateStore.IsMessageProcessedAsync(conversationId, msgId, cancellationToken))
+                        var isNew = await _stateStore.MarkMessageProcessedAsync(conversationId, msgId, cancellationToken);
+                        if (!isNew)
+                        {
+                            _logger.LogInformation("DEDUP: ignoring duplicate message {MessageId} in {ConversationId}", msgId, conversationId);
                             continue;
-
-                        await _stateStore.MarkMessageProcessedAsync(conversationId, msgId, cancellationToken);
+                        }
                     }
 
                     // 0) Human override: admin has taken over — bot is completely silent

@@ -64,21 +64,41 @@ public sealed class ConversationStateStore : IConversationStateStore
             .AnyAsync(p => p.ConversationId == conversationId && p.MessageId == messageId, ct);
     }
 
-    public async Task MarkMessageProcessedAsync(string conversationId, string messageId, CancellationToken ct = default)
+    public async Task<bool> MarkMessageProcessedAsync(string conversationId, string messageId, CancellationToken ct = default)
     {
-        var exists = await _db.ProcessedMessages
-            .AnyAsync(p => p.ConversationId == conversationId && p.MessageId == messageId, ct);
-
-        if (!exists)
+        _db.ProcessedMessages.Add(new ProcessedMessage
         {
-            _db.ProcessedMessages.Add(new ProcessedMessage
-            {
-                ConversationId = conversationId,
-                MessageId = messageId,
-                CreatedAtUtc = DateTime.UtcNow
-            });
+            ConversationId = conversationId,
+            MessageId = messageId,
+            CreatedAtUtc = DateTime.UtcNow
+        });
+
+        try
+        {
             await _db.SaveChangesAsync(ct);
+            return true; // newly inserted
         }
+        catch (DbUpdateException ex) when (IsDuplicateKeyException(ex))
+        {
+            // Unique index IX_ProcessedMessages_ConversationId_MessageId caught the duplicate.
+            // Detach the failed entity so the DbContext remains usable for subsequent operations.
+            var entry = _db.ChangeTracker.Entries<ProcessedMessage>()
+                .FirstOrDefault(e => e.Entity.ConversationId == conversationId && e.Entity.MessageId == messageId);
+            if (entry is not null)
+                entry.State = EntityState.Detached;
+            return false; // duplicate
+        }
+    }
+
+    private static bool IsDuplicateKeyException(DbUpdateException ex)
+    {
+        // Npgsql: SqlState 23505 = unique_violation
+        if (ex.InnerException is Npgsql.PostgresException pg && pg.SqlState == "23505")
+            return true;
+        // SQLite (dev): UNIQUE constraint failed
+        if (ex.InnerException?.Message?.Contains("UNIQUE constraint failed", StringComparison.OrdinalIgnoreCase) == true)
+            return true;
+        return false;
     }
 
     public async Task PurgeOldStatesAsync(TimeSpan ttl, CancellationToken ct = default)
