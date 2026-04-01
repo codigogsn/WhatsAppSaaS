@@ -704,6 +704,187 @@ public class AdminAnalyticsController : ControllerBase
         }
     }
 
+    // ── Founder Global Dashboard ──
+    [HttpGet("founder-overview")]
+    public async Task<IActionResult> GetFounderOverview(CancellationToken ct)
+    {
+        var role = User.FindFirstValue(ClaimTypes.Role);
+        if (role != "Founder" && !IsGlobalAdminKey())
+            return Unauthorized(new { error = "Founder or global admin key required" });
+
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(ct);
+
+            // ── System totals ──
+            int totalBiz = 0, activeBiz = 0, totalUsers = 0, totalOrders = 0, ordersToday = 0, totalCustomers = 0;
+            int pendingPayments = 0, handoffCount = 0, bizWithOrdersToday = 0;
+            decimal totalRevenue = 0m, revenueToday = 0m;
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT COUNT(*), SUM(CASE WHEN "IsActive"::boolean THEN 1 ELSE 0 END)
+                    FROM "Businesses"
+                """;
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                if (await r.ReadAsync(ct)) { totalBiz = r.GetInt32(0); activeBiz = r.IsDBNull(1) ? 0 : Convert.ToInt32(r[1]); }
+            }
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """SELECT COUNT(*) FROM "BusinessUsers" WHERE "IsActive"::boolean = true""";
+                totalUsers = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+            }
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """SELECT COUNT(DISTINCT "Id") FROM "Customers" """;
+                totalCustomers = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+            }
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT
+                        COUNT(*),
+                        COALESCE(SUM(CASE WHEN "CheckoutCompleted"::boolean AND "CreatedAtUtc" >= @today THEN 1 ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN "CheckoutCompleted"::boolean THEN COALESCE("TotalAmount",0) ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN "CheckoutCompleted"::boolean AND "CreatedAtUtc" >= @today THEN COALESCE("TotalAmount",0) ELSE 0 END), 0),
+                        COALESCE(SUM(CASE WHEN "PaymentProofMediaId" IS NOT NULL AND "PaymentProofMediaId" != '' AND "PaymentVerifiedAtUtc" IS NULL THEN 1 ELSE 0 END), 0)
+                    FROM "Orders"
+                """;
+                AddParam(cmd, "today", DateTime.UtcNow.Date);
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                if (await r.ReadAsync(ct))
+                {
+                    totalOrders = r.GetInt32(0);
+                    ordersToday = Convert.ToInt32(r[1]);
+                    totalRevenue = Convert.ToDecimal(r[2]);
+                    revenueToday = Convert.ToDecimal(r[3]);
+                    pendingPayments = Convert.ToInt32(r[4]);
+                }
+            }
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT COUNT(DISTINCT "ConversationId") FROM "ConversationStates"
+                    WHERE "StateJson" LIKE '%"humanHandoffRequested":true%'
+                       OR "StateJson" LIKE '%"humanHandoffRequested": true%'
+                """;
+                handoffCount = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+            }
+
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT COUNT(DISTINCT "BusinessId") FROM "Orders"
+                    WHERE "CreatedAtUtc" >= @today
+                """;
+                AddParam(cmd, "today", DateTime.UtcNow.Date);
+                bizWithOrdersToday = Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+            }
+
+            // ── Per-business breakdown ──
+            var businesses = new List<object>();
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT
+                        b."Id", b."Name", b."IsActive"::boolean,
+                        COALESCE(stats.order_count, 0) AS orders_total,
+                        COALESCE(stats.orders_today, 0) AS orders_today,
+                        COALESCE(stats.revenue, 0) AS revenue,
+                        COALESCE(ucnt.user_count, 0) AS users,
+                        b."CreatedAtUtc"
+                    FROM "Businesses" b
+                    LEFT JOIN (
+                        SELECT "BusinessId",
+                            COUNT(*) AS order_count,
+                            SUM(CASE WHEN "CreatedAtUtc" >= @today THEN 1 ELSE 0 END) AS orders_today,
+                            SUM(CASE WHEN "CheckoutCompleted"::boolean THEN COALESCE("TotalAmount",0) ELSE 0 END) AS revenue
+                        FROM "Orders" GROUP BY "BusinessId"
+                    ) stats ON stats."BusinessId" = b."Id"
+                    LEFT JOIN (
+                        SELECT "BusinessId", COUNT(*) AS user_count
+                        FROM "BusinessUsers" WHERE "IsActive"::boolean = true
+                        GROUP BY "BusinessId"
+                    ) ucnt ON ucnt."BusinessId" = b."Id"
+                    WHERE b."IsActive"::boolean = true
+                    ORDER BY COALESCE(stats.revenue, 0) DESC
+                """;
+                AddParam(cmd, "today", DateTime.UtcNow.Date);
+                using var r = await cmd.ExecuteReaderAsync(ct);
+                while (await r.ReadAsync(ct))
+                {
+                    businesses.Add(new
+                    {
+                        id = r[0]?.ToString(),
+                        name = r[1]?.ToString(),
+                        isActive = r.GetBoolean(2),
+                        ordersTotal = Convert.ToInt32(r[3]),
+                        ordersToday = Convert.ToInt32(r[4]),
+                        revenue = Convert.ToDecimal(r[5]),
+                        users = Convert.ToInt32(r[6]),
+                        createdAtUtc = r.IsDBNull(7) ? (DateTime?)null : Convert.ToDateTime(r[7])
+                    });
+                }
+            }
+
+            // ── Top product (global) ──
+            string? topProduct = null;
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT "Name" FROM "OrderItems"
+                    GROUP BY "Name" ORDER BY SUM("Quantity") DESC LIMIT 1
+                """;
+                var result = await cmd.ExecuteScalarAsync(ct);
+                topProduct = result?.ToString();
+            }
+
+            var avgOrdersPerBiz = activeBiz > 0 ? Math.Round((decimal)totalOrders / activeBiz, 1) : 0;
+            var avgRevenuePerBiz = activeBiz > 0 ? Math.Round(totalRevenue / activeBiz, 2) : 0;
+            var topBiz = businesses.Count > 0 ? businesses[0] : null;
+            var newestBiz = businesses.OrderByDescending(b => ((dynamic)b).createdAtUtc).FirstOrDefault();
+
+            return Ok(new
+            {
+                totalBusinesses = totalBiz,
+                activeBusinesses = activeBiz,
+                totalUsers,
+                totalOrders,
+                ordersToday,
+                totalRevenue,
+                revenueToday,
+                totalCustomers,
+                pendingPayments,
+                handoffCount,
+                topProduct,
+                avgOrdersPerBiz,
+                avgRevenuePerBiz,
+                bizWithOrdersToday,
+                topBusiness = topBiz,
+                newestBusiness = newestBiz,
+                businesses
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(500, new { error = $"Founder overview failed: {ex.GetType().Name}: {ex.Message}" });
+        }
+    }
+
+    private bool IsGlobalAdminKey()
+    {
+        var globalKey = (_config["ADMIN_KEY"] ?? Environment.GetEnvironmentVariable("ADMIN_KEY"))?.Trim();
+        if (string.IsNullOrWhiteSpace(globalKey)) return false;
+        if (!Request.Headers.TryGetValue("X-Admin-Key", out var hk)) return false;
+        return SafeEquals(hk.ToString().Trim(), globalKey);
+    }
+
     private static void AddParam(System.Data.Common.DbCommand cmd, string name, object value)
     {
         var p = cmd.CreateParameter();

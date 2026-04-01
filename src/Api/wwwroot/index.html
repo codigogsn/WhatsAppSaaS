@@ -1629,6 +1629,51 @@ Tipo: burger"></textarea>
     <div class="global-banner-hint">Use the business selector above to get started</div>
   </div>
 
+  <!-- Founder Global Dashboard -->
+  <div id="founderDashboard" style="display:none;">
+    <div class="hero-kpi" style="grid-template-columns:1fr 1fr 1fr 1fr;">
+      <div class="hero-panel"><div class="hero-panel-title">System</div>
+        <div class="hero-stat"><div class="label">Businesses</div><div class="value" id="fdBiz">-</div></div>
+        <div class="hero-stat"><div class="label">Active</div><div class="value" id="fdBizActive">-</div></div>
+        <div class="hero-stat hero-stat-secondary"><div class="label">Users</div><div class="value" id="fdUsers">-</div></div>
+      </div>
+      <div class="hero-panel"><div class="hero-panel-title">Revenue</div>
+        <div class="hero-stat hero-stat-primary"><div class="label">Total Revenue</div><div class="value" id="fdRevenue">-</div></div>
+        <div class="hero-stat"><div class="label">Revenue Today</div><div class="value" id="fdRevenueToday">-</div></div>
+        <div class="hero-stat hero-stat-secondary"><div class="label">Avg / Business</div><div class="value" id="fdAvgRevBiz">-</div></div>
+      </div>
+      <div class="hero-panel"><div class="hero-panel-title">Orders</div>
+        <div class="hero-stat hero-stat-primary"><div class="label">Total Orders</div><div class="value" id="fdOrders">-</div></div>
+        <div class="hero-stat"><div class="label">Orders Today</div><div class="value" id="fdOrdersToday">-</div></div>
+        <div class="hero-stat hero-stat-secondary"><div class="label">Avg / Business</div><div class="value" id="fdAvgOrdBiz">-</div></div>
+      </div>
+      <div class="hero-panel"><div class="hero-panel-title">Alerts</div>
+        <div class="hero-stat hero-alert-warning"><div class="label">Pending Payments</div><div class="value" id="fdPending">0</div></div>
+        <div class="hero-stat hero-alert-danger"><div class="label">Human Handoffs</div><div class="value" id="fdHandoffs">0</div></div>
+        <div class="hero-stat hero-stat-secondary"><div class="label">Active Today</div><div class="value" id="fdBizToday">0</div></div>
+      </div>
+    </div>
+    <div class="hero-kpi" style="grid-template-columns:1fr 1fr;">
+      <div class="hero-panel"><div class="hero-panel-title">Top Insights</div>
+        <div class="hero-stat"><div class="label">Customers (Global)</div><div class="value" id="fdCustomers">-</div></div>
+        <div class="hero-stat"><div class="label">Top Product</div><div class="value" id="fdTopProduct">-</div></div>
+        <div class="hero-stat"><div class="label">Top Business</div><div class="value" id="fdTopBiz">-</div></div>
+      </div>
+      <div class="hero-panel"><div class="hero-panel-title">Newest Business</div>
+        <div class="hero-stat"><div class="label">Name</div><div class="value" id="fdNewestBiz">-</div></div>
+        <div class="hero-stat hero-stat-secondary"><div class="label">Created</div><div class="value" id="fdNewestDate">-</div></div>
+      </div>
+    </div>
+    <details class="section-panel" open>
+      <summary>Business Performance</summary>
+      <div>
+        <table><thead><tr>
+          <th>Business</th><th>Orders</th><th>Today</th><th>Revenue</th><th>Users</th>
+        </tr></thead><tbody id="fdBizTable"></tbody></table>
+      </div>
+    </details>
+  </div>
+
   <!-- Hero KPI Area -->
   <div id="heroKpi" class="hero-kpi">
     <!-- LEFT: Revenue focus -->
@@ -2929,8 +2974,11 @@ function stopAutoRefresh() {
 }
 
 // ── Global mode: hide all business-scoped sections ──
+function isFounderUser() { return getAuthRole() === 'Founder'; }
+
 function applyGlobalModeUI() {
   var global = !getBusinessId();
+  var founder = isFounderUser();
   var show = global ? 'none' : '';
   // Business-scoped dashboard sections
   var ids = ['heroKpi','statusStrip','extAnalytics','handoffInbox','ordersFilters','ordersTable','customersPanel'];
@@ -2938,9 +2986,16 @@ function applyGlobalModeUI() {
     var el = document.getElementById(ids[i]);
     if (el) el.style.display = show;
   }
-  // Banner
+  // Founder dashboard vs generic banner
+  var fd = document.getElementById('founderDashboard');
   var banner = document.getElementById('globalModeBanner');
-  if (banner) banner.style.display = global ? '' : 'none';
+  if (global && founder) {
+    if (fd) fd.style.display = '';
+    if (banner) banner.style.display = 'none';
+  } else {
+    if (fd) fd.style.display = 'none';
+    if (banner) banner.style.display = global ? '' : 'none';
+  }
   // Clear stale data when entering global mode
   if (global) {
     document.getElementById('tbody').innerHTML = '';
@@ -2949,11 +3004,57 @@ function applyGlobalModeUI() {
   }
 }
 
+// ── Founder dashboard data loader ──
+async function loadFounderDashboard() {
+  try {
+    var res = await fetch('/api/admin/analytics/founder-overview', { headers: jwtHeaders(), cache: 'no-store' });
+    if (!res.ok) { console.warn('Founder overview failed:', res.status); return; }
+    var d = await res.json();
+
+    document.getElementById('fdBiz').textContent = d.totalBusinesses ?? '-';
+    document.getElementById('fdBizActive').textContent = d.activeBusinesses ?? '-';
+    document.getElementById('fdUsers').textContent = d.totalUsers ?? '-';
+    document.getElementById('fdRevenue').textContent = '$' + fmtMoney(d.totalRevenue);
+    document.getElementById('fdRevenueToday').textContent = '$' + fmtMoney(d.revenueToday);
+    document.getElementById('fdAvgRevBiz').textContent = '$' + fmtMoney(d.avgRevenuePerBiz);
+    document.getElementById('fdOrders').textContent = d.totalOrders ?? '-';
+    document.getElementById('fdOrdersToday').textContent = d.ordersToday ?? '-';
+    document.getElementById('fdAvgOrdBiz').textContent = d.avgOrdersPerBiz ?? '-';
+    document.getElementById('fdPending').textContent = d.pendingPayments ?? 0;
+    document.getElementById('fdHandoffs').textContent = d.handoffCount ?? 0;
+    document.getElementById('fdBizToday').textContent = d.bizWithOrdersToday ?? 0;
+    document.getElementById('fdCustomers').textContent = d.totalCustomers ?? '-';
+    document.getElementById('fdTopProduct').textContent = d.topProduct || '-';
+    document.getElementById('fdTopBiz').textContent = d.topBusiness ? d.topBusiness.name : '-';
+    document.getElementById('fdNewestBiz').textContent = d.newestBusiness ? d.newestBusiness.name : '-';
+    document.getElementById('fdNewestDate').textContent = d.newestBusiness && d.newestBusiness.createdAtUtc
+      ? new Date(d.newestBusiness.createdAtUtc).toLocaleDateString('es-VE') : '-';
+
+    // Business performance table
+    var tbody = document.getElementById('fdBizTable');
+    tbody.innerHTML = '';
+    var biz = d.businesses || [];
+    for (var i = 0; i < biz.length; i++) {
+      var b = biz[i];
+      var tr = document.createElement('tr');
+      tr.innerHTML = '<td style="font-weight:500;">' + esc(b.name) + '</td>'
+        + '<td>' + b.ordersTotal + '</td>'
+        + '<td>' + b.ordersToday + '</td>'
+        + '<td>$' + fmtMoney(b.revenue) + '</td>'
+        + '<td>' + b.users + '</td>';
+      tbody.appendChild(tr);
+    }
+  } catch(e) { console.warn('Founder dashboard error:', e); }
+}
+
 // ── Load ──
 async function load() {
   applyGlobalModeUI();
-  // Global mode: no business-scoped fetches
-  if (!getBusinessId()) { return; }
+  // Global mode: founder gets global dashboard, others get nothing
+  if (!getBusinessId()) {
+    if (isFounderUser()) { await loadFounderDashboard(); }
+    return;
+  }
 
   if (_loadInProgress) {
     console.log('[AUTOREFRESH] load() called but already in progress — skipping');
