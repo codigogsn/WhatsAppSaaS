@@ -115,6 +115,37 @@ public class PasswordResetController : ControllerBase
         return Ok(genericResponse);
     }
 
+    // GET /api/auth/validate-reset-token?token=...
+    [HttpGet("validate-reset-token")]
+    public async Task<IActionResult> ValidateToken([FromQuery] string? token, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return Ok(new { valid = false });
+
+        var tokenHash = HashToken(token);
+        try
+        {
+            var conn = _db.Database.GetDbConnection();
+            if (conn.State != System.Data.ConnectionState.Open)
+                await conn.OpenAsync(ct);
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT 1 FROM "PasswordResetTokens"
+                WHERE "TokenHash" = @hash AND "UsedAtUtc" IS NULL AND "ExpiresAtUtc" > @now
+                LIMIT 1
+            """;
+            var p1 = cmd.CreateParameter(); p1.ParameterName = "hash"; p1.Value = tokenHash; cmd.Parameters.Add(p1);
+            var p2 = cmd.CreateParameter(); p2.ParameterName = "now"; p2.Value = DateTime.UtcNow; cmd.Parameters.Add(p2);
+            var result = await cmd.ExecuteScalarAsync(ct);
+            return Ok(new { valid = result is not null });
+        }
+        catch
+        {
+            return Ok(new { valid = false });
+        }
+    }
+
     // POST /api/auth/reset-password
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest req, CancellationToken ct)

@@ -705,7 +705,7 @@ public class AdminAnalyticsController : ControllerBase
     }
 
     // ── Founder Global Dashboard ──
-    [HttpGet("founder-overview")]
+    [HttpGet("/api/admin/analytics/founder-overview")]
     public async Task<IActionResult> GetFounderOverview(CancellationToken ct)
     {
         var role = User.FindFirstValue(ClaimTypes.Role);
