@@ -350,6 +350,18 @@ public static class DatabaseSeeder
                         Log.Error("FOUNDER SEED: user does NOT exist in table at all after write — INSERT was silently lost?");
                 }
             }
+
+            // Demote any other users with role='Founder' that are NOT the current founder email
+            using (var demoteCmd = conn.CreateCommand())
+            {
+                demoteCmd.CommandText = """
+                    UPDATE "BusinessUsers" SET "Role" = 'Owner'
+                    WHERE "Role" = 'Founder' AND "Email" != @email
+                """;
+                var pd = demoteCmd.CreateParameter(); pd.ParameterName = "email"; pd.Value = founderEmail; demoteCmd.Parameters.Add(pd);
+                var demoted = demoteCmd.ExecuteNonQuery();
+                if (demoted > 0) Log.Information("FOUNDER SEED: demoted {Count} stale Founder account(s) to Owner", demoted);
+            }
         }
         catch (Exception ex)
         {

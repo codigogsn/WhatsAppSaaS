@@ -147,6 +147,7 @@ public class AdminBusinessesController : ControllerBase
         var jwtBizIds = AdminAuth.GetBusinessIds(User);
         var jwtRole = AdminAuth.GetRole(User);
         var isJwtAuth = jwtRole is "Founder" or "Owner" or "Manager" or "Operator" && jwtBizIds.Count > 0;
+        var isJwtFounder = jwtRole == "Founder";
 
         // Path 2: X-Admin-Key fallback
         string? key = null;
@@ -173,7 +174,12 @@ public class AdminBusinessesController : ControllerBase
 
             // Build query — read ALL columns as their raw DB type (text-safe)
             // SELECT * avoids "column does not exist" if legacy schema is missing columns
-            if (isJwtAuth)
+            if (isJwtFounder)
+            {
+                // Founder sees ALL businesses (global visibility)
+                cmd.CommandText = """SELECT * FROM "Businesses" ORDER BY "CreatedAtUtc" DESC""";
+            }
+            else if (isJwtAuth)
             {
                 // JWT users see all their assigned businesses
                 var placeholders = new List<string>();
