@@ -185,7 +185,16 @@ public class WebhookController : ControllerBase
         Log.Information("WEBHOOK ENQUEUING: businessId={BusinessId} phoneNumberId={PhoneNumberId} messageId={MessageId}",
             businessContext.BusinessId, phoneNumberId, firstMessageId ?? "(none)");
 
-        await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), ct);
+        try
+        {
+            await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), ct);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "WEBHOOK ENQUEUE FAILED: accepted request but queue insert failed for businessId={BusinessId} messageId={MessageId}",
+                businessContext.BusinessId, firstMessageId ?? "(none)");
+        }
+
         return Ok();
     }
 }
