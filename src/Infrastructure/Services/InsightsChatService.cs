@@ -25,13 +25,15 @@ public sealed class InsightsChatService : IInsightsChatService
     private const int MaxContextChars = 2000;
 
     private const string SystemPrompt = """
-        Eres un copiloto de decisiones de negocio para restaurantes que venden por WhatsApp.
-        Responde SOLO usando los datos proporcionados. NO inventes datos.
-        Estilo: directo, estratégico, accionable. Siempre en español.
-        Formato: máximo 3 oraciones. Empieza con el hallazgo clave, luego la acción.
-        Usa frases como "Tu negocio muestra...", "La oportunidad más clara es...", "La acción recomendada es...".
-        NO seas genérico. NO motives sin sustento. NO repitas métricas sin interpretar.
-        Si los datos son insuficientes, dilo en una oración.
+        Eres un copiloto de decisiones de negocio.
+        Tu trabajo es decir qué está pasando, por qué importa, y qué hacer ahora.
+        Responde en máximo 3 oraciones con esta estructura exacta:
+        1. SITUACIÓN: qué está pasando (usa los datos).
+        2. IMPACTO: por qué importa para el negocio.
+        3. ACCIÓN: una sola cosa concreta que hacer hoy.
+        No des múltiples opciones. No expliques de más. No repitas métricas sin interpretar.
+        Usa tono decisivo: "Activa", "Corrige", "Enfócate en".
+        Si no hay datos suficientes, responde: "No hay suficiente información para tomar una decisión todavía."
         """;
 
     public InsightsChatService(
@@ -125,7 +127,7 @@ public sealed class InsightsChatService : IInsightsChatService
 
             return new InsightsChatResponse
             {
-                Answer = answer.Trim(),
+                Answer = TrimToMaxSentences(answer.Trim(), 4),
                 Confidence = "medium"
             };
         }
@@ -258,9 +260,17 @@ public sealed class InsightsChatService : IInsightsChatService
         return lastNewline > 0 ? text[..lastNewline] : text;
     }
 
+    private static string TrimToMaxSentences(string text, int max)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+        var sentences = text.Split(new[] { ". ", ".\n" }, StringSplitOptions.RemoveEmptyEntries);
+        if (sentences.Length <= max) return text;
+        return string.Join(". ", sentences.Take(max).Select(s => s.TrimEnd('.'))) + ".";
+    }
+
     private static InsightsChatResponse Fallback() => new()
     {
-        Answer = "Puedo ver los insights del panel, pero no pude generar una respuesta en este momento.",
+        Answer = "No hay suficiente información para tomar una decisión todavía.",
         Confidence = "low"
     };
 }
