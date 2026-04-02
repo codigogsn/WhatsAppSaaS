@@ -121,47 +121,71 @@ public sealed class WhatsAppClient : IWhatsAppClient
 
         _logger.LogDebug("Sending message to {To} via phone {PhoneNumberId}", message.To, phoneNumberId);
 
-        try
+        var retryDelays = new[] { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(3) };
+        var retryableStatuses = new HashSet<int> { 429, 500, 502, 503, 504 };
+
+        for (var attempt = 0; attempt <= retryDelays.Length; attempt++)
         {
-            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
-            httpRequest.Headers.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
-
-            httpRequest.Content = JsonContent.Create(request, options: new JsonSerializerOptions
+            try
             {
-                PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-            });
+                using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
+                httpRequest.Headers.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
 
-            using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+                httpRequest.Content = JsonContent.Create(request, options: new JsonSerializerOptions
+                {
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                });
 
-            if (response.IsSuccessStatusCode)
-            {
-                _logger.LogInformation("Message sent successfully to {To}, status: {StatusCode}", message.To, (int)response.StatusCode);
-                return true;
+                using var response = await _httpClient.SendAsync(httpRequest, cancellationToken);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    _logger.LogInformation("Message sent successfully to {To}, status: {StatusCode}", message.To, (int)response.StatusCode);
+                    return true;
+                }
+
+                var statusCode = (int)response.StatusCode;
+
+                if (retryableStatuses.Contains(statusCode) && attempt < retryDelays.Length)
+                {
+                    var delay = retryDelays[attempt];
+
+                    // Respect Retry-After header if present
+                    if (response.Headers.RetryAfter?.Delta is { } retryAfter && retryAfter.TotalSeconds is > 0 and <= 10)
+                        delay = retryAfter;
+
+                    _logger.LogWarning("WhatsApp API returned {StatusCode} for {To}, retrying in {Delay}s (attempt {Attempt})",
+                        statusCode, message.To, delay.TotalSeconds, attempt + 1);
+                    await Task.Delay(delay, cancellationToken);
+                    continue;
+                }
+
+                var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogError(
+                    "Failed to send message to {To}. Status: {StatusCode}, Response: {ResponseBody}",
+                    message.To, statusCode, errorBody);
+
+                return false;
             }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "HTTP error sending message to {To} via {Url}", message.To, url);
+                return false;
+            }
+            catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
+            {
+                _logger.LogError(ex, "Timeout sending message to {To} via {Url}", message.To, url);
+                return false;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error sending message to {To} via {Url}", message.To, url);
+                return false;
+            }
+        }
 
-            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
-            _logger.LogError(
-                "Failed to send message to {To}. Status: {StatusCode}, Response: {ResponseBody}",
-                message.To, (int)response.StatusCode, errorBody);
-
-            return false;
-        }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "HTTP error sending message to {To} via {Url}", message.To, url);
-            return false;
-        }
-        catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
-        {
-            _logger.LogError(ex, "Timeout sending message to {To} via {Url}", message.To, url);
-            return false;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error sending message to {To} via {Url}", message.To, url);
-            return false;
-        }
+        return false;
     }
 
     public async Task<MediaDownloadResult?> GetMediaAsync(string mediaId, string? accessToken = null, CancellationToken cancellationToken = default)
