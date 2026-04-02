@@ -92,7 +92,7 @@ public sealed class AiParser : IAiParser
             messages = new object[]
             {
                 new { role = "system", content = SystemPrompt },
-                new { role = "user",   content = $"Customer phone: {from}\nMessage: {message}" }
+                new { role = "user",   content = $"Customer ID: {conversationId}\nMessage: {message}" }
             }
         };
 
