@@ -1837,6 +1837,17 @@ Tipo: burger"></textarea>
       </tr></thead><tbody id="fdBizTable"></tbody></table>
     </div>
 
+    <!-- Founder Global Insights -->
+    <div id="founderInsights" class="insights-panel" style="margin-top:20px;">
+      <div class="insights-panel-header">
+        <div class="insights-panel-header-icon">&#x1f30e;</div>
+        <div class="insights-panel-header-title">Global Intelligence</div>
+      </div>
+      <div id="founderInsightsContent">
+        <div class="insights-empty">Loading global insights...</div>
+      </div>
+    </div>
+
   </div>
 
   <!-- Hero KPI Area -->
@@ -3222,8 +3233,110 @@ async function loadFounderDashboard() {
         + '<td class="fd-table-num" style="text-align:right;">' + b.users + '</td>';
       tbody.appendChild(tr);
     }
+    // Load founder global insights in parallel (non-blocking)
+    loadFounderInsights();
+
   } catch(e) { console.warn('Founder dashboard error:', e); }
 }
+
+async function loadFounderInsights() {
+  var content = document.getElementById('founderInsightsContent');
+  if (!content) return;
+
+  try {
+    var res = await fetch('/api/founder/insights', { headers: jwtHeaders(), cache: 'no-store' });
+    if (res.status === 403) { content.innerHTML = ''; return; }
+    if (!res.ok) { content.innerHTML = '<div class="insights-empty">Unable to load global insights.</div>'; return; }
+
+    var data = await res.json();
+    var hasData = (data.summary && data.summary.totalOrders > 0) ||
+                  (data.alerts && data.alerts.length > 0);
+
+    if (!hasData) {
+      content.innerHTML = '<div class="insights-empty">No global data available yet.</div>';
+      return;
+    }
+
+    var html = '';
+
+    // Summary strip
+    if (data.summary) {
+      html += '<div class="kpi" style="margin-bottom:16px;">';
+      html += '<div class="card" style="min-height:auto;padding:14px 18px;"><div class="label">Orders (30d)</div><div class="value" style="font-size:22px;">' + esc(String(data.summary.totalOrders)) + '</div></div>';
+      html += '<div class="card" style="min-height:auto;padding:14px 18px;"><div class="label">Revenue (30d)</div><div class="value" style="font-size:22px;">$' + fmtMoney(data.summary.totalRevenue) + '</div></div>';
+      html += '<div class="card" style="min-height:auto;padding:14px 18px;"><div class="label">Avg Orders/Biz</div><div class="value" style="font-size:22px;">' + esc(String(data.summary.avgOrdersPerBusiness)) + '</div></div>';
+      html += '</div>';
+    }
+
+    // Alerts
+    if (data.alerts && data.alerts.length > 0) {
+      html += '<div class="insights-section">';
+      html += '<div class="insights-section-title" data-kind="alerts">\u26a0\ufe0f Action Required</div>';
+      html += '<div class="insights-grid">';
+      var alerts = data.alerts.slice(0, 5);
+      for (var i = 0; i < alerts.length; i++) {
+        var sev = alerts[i].severity === 'high' ? 'critical' : 'warning';
+        html += insightCard(alerts[i].message, sev, founderAlertLabel(alerts[i].type));
+      }
+      html += '</div></div>';
+    }
+
+    // Insights
+    if (data.insights && data.insights.length > 0) {
+      html += '<div class="insights-section">';
+      html += '<div class="insights-section-title" data-kind="insights">\ud83d\udcca Platform Insights</div>';
+      html += '<div class="insights-grid">';
+      var ins = data.insights.slice(0, 5);
+      for (var i = 0; i < ins.length; i++) {
+        html += insightCard(ins[i].message, 'info', founderInsightLabel(ins[i].type));
+      }
+      html += '</div></div>';
+    }
+
+    // Recommendations
+    if (data.recommendations && data.recommendations.length > 0) {
+      html += '<div class="insights-section">';
+      html += '<div class="insights-section-title" data-kind="recommendations">\ud83d\udca1 Recommendations</div>';
+      html += '<div class="insights-grid">';
+      var recs = data.recommendations.slice(0, 5);
+      for (var i = 0; i < recs.length; i++) {
+        html += insightCard(recs[i].message, 'info', 'Suggested Action');
+      }
+      html += '</div></div>';
+    }
+
+    // Top businesses
+    if (data.topBusinesses && data.topBusinesses.length > 0) {
+      html += '<div class="insights-section">';
+      html += '<div class="insights-section-title" data-kind="insights">\ud83c\udfc6 Top Businesses</div>';
+      html += '<div class="insights-grid">';
+      for (var i = 0; i < data.topBusinesses.length; i++) {
+        var b = data.topBusinesses[i];
+        html += insightCard(b.orders + ' orders in 30 days', 'info', b.name || 'Business');
+      }
+      html += '</div></div>';
+    }
+
+    content.innerHTML = html;
+
+  } catch (e) {
+    console.warn('Founder insights error:', e);
+    content.innerHTML = '<div class="insights-empty">Unable to load global insights.</div>';
+  }
+}
+
+var _founderAlertLabels = {
+  'high_pending_payments': 'Pending Payments Risk',
+  'low_conversion': 'Low Conversion Detected'
+};
+var _founderInsightLabels = {
+  'top_performer': 'Top Performing Business',
+  'strong_retention': 'Strong Customer Loyalty',
+  'weak_retention': 'Weak Retention Detected',
+  'platform_health': 'Platform Health'
+};
+function founderAlertLabel(t) { return _founderAlertLabels[t] || (t ? t.replace(/_/g, ' ') : 'Alert'); }
+function founderInsightLabel(t) { return _founderInsightLabels[t] || (t ? t.replace(/_/g, ' ') : 'Insight'); }
 
 // ── Business Insights ──
 async function loadBusinessInsights() {

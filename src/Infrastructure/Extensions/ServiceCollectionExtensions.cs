@@ -62,6 +62,9 @@ public static class ServiceCollectionExtensions
         // ── Business Insights (read-only intelligence layer) ──
         services.AddScoped<IBusinessInsightsService, BusinessInsightsService>();
 
+        // ── Founder Insights (global read-only, Founder only) ──
+        services.AddScoped<IFounderInsightsService, FounderInsightsService>();
+
         // ── BCV Exchange Rate ─────────────────────────────
         services.AddHttpClient<IBcvRateService, BcvRateService>(client =>
         {
