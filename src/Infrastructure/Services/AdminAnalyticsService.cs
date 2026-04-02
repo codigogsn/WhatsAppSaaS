@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using WhatsAppSaaS.Application.DTOs;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -14,10 +15,18 @@ namespace WhatsAppSaaS.Infrastructure.Services;
 public sealed class AdminAnalyticsService : IAdminAnalyticsService
 {
     private readonly AppDbContext _db;
+    private readonly ILogger<AdminAnalyticsService> _logger;
 
-    public AdminAnalyticsService(AppDbContext db)
+    public AdminAnalyticsService(AppDbContext db, ILogger<AdminAnalyticsService> logger)
     {
         _db = db;
+        _logger = logger;
+    }
+
+    private void WarnIfTruncated<T>(ICollection<T> results, int ceiling, string query)
+    {
+        if (results.Count >= ceiling)
+            _logger.LogWarning("ANALYTICS TRUNCATED: {Query} returned {Count} rows (ceiling {Ceiling})", query, results.Count, ceiling);
     }
 
     // ── Legacy summary (unscoped) ──
@@ -37,11 +46,13 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Select(o => new { o.CheckoutCompleted, o.TotalAmount, o.CreatedAtUtc, o.PaymentProofMediaId, o.PaymentVerifiedAtUtc })
             .Take(50_000)
             .ToListAsync(ct);
+        WarnIfTruncated(orderRows, 50_000, "GetSummary.orders");
 
         var customers = await customerQ
             .Select(c => new { c.OrdersCount })
             .Take(50_000)
             .ToListAsync(ct);
+        WarnIfTruncated(customers, 50_000, "GetSummary.customers");
 
         var totalCustomers = customers.Count;
 
@@ -66,6 +77,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
                 .Select(oi => new { oi.Name, oi.Quantity })
                 .Take(50_000)
                 .ToListAsync(ct);
+            WarnIfTruncated(itemRows, 50_000, "GetSummary.topItems");
 
             topItem = itemRows
                 .Where(x => !string.IsNullOrWhiteSpace(x.Name) && x.Quantity > 0)
@@ -110,6 +122,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Select(oi => new { oi.Name, oi.Quantity, oi.UnitPrice })
             .Take(50_000)
             .ToListAsync(ct);
+        WarnIfTruncated(rows, 50_000, "GetTopProducts");
 
         return rows
             .Where(x => !string.IsNullOrWhiteSpace(x.Name) && x.Quantity > 0)
@@ -170,6 +183,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Select(o => o.TotalAmount)
             .Take(100_000)
             .ToListAsync(ct);
+        WarnIfTruncated(allTimeRows, 100_000, "GetSales.allTime");
 
         var allTimeCount = allTimeRows.Count;
         var allTimeRevenue = allTimeRows.Sum(t => t ?? 0m);
@@ -220,6 +234,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Select(oi => new { oi.Name, oi.Quantity, oi.UnitPrice, oi.OrderId })
             .Take(50_000)
             .ToListAsync(ct);
+        WarnIfTruncated(rows, 50_000, "GetProductAnalytics");
 
         var totalOrders = rows.Select(r => r.OrderId).Distinct().Count();
         var totalItems = rows.Sum(r => r.Quantity);
@@ -280,6 +295,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Select(cs => cs.StateJson)
             .Take(50_000)
             .ToListAsync(ct);
+        WarnIfTruncated(states, 50_000, "GetConversion.states");
 
         var checkoutStarted = 0;
         var checkoutCompleted = 0;
@@ -345,6 +361,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             })
             .Take(50_000)
             .ToListAsync(ct);
+        WarnIfTruncated(orders, 50_000, "GetOperational.orders");
 
         // Average preparation time: AcceptedAt -> PreparingAt (or CreatedAt -> PreparingAt if no AcceptedAt)
         var prepTimes = orders
@@ -415,6 +432,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Select(c => new { c.PhoneE164, c.Name, c.TotalSpent, c.OrdersCount })
             .Take(50_000)
             .ToListAsync(ct);
+        WarnIfTruncated(customers, 50_000, "GetBusinessIntelligence.customers");
 
         var totalCustomers = customers.Count;
         var repeatCustomers = customers.Count(c => c.OrdersCount > 1);
@@ -444,6 +462,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Select(o => new { o.PaymentMethod, o.TotalAmount })
             .Take(100_000)
             .ToListAsync(ct);
+        WarnIfTruncated(orderPayments, 100_000, "GetBusinessIntelligence.payments");
 
         var revenueByPayment = orderPayments
             .GroupBy(o => o.PaymentMethod ?? "unknown")
@@ -472,6 +491,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Select(o => new { o.CreatedAtUtc })
             .Take(100_000)
             .ToListAsync(ct);
+        WarnIfTruncated(orders, 100_000, "GetRestaurantInsights.orders");
 
         // Best selling hours
         var ordersByHour = new Dictionary<int, int>();
@@ -504,6 +524,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
             .Select(oi => new { oi.Name, oi.Quantity, oi.UnitPrice, oi.OrderId })
             .Take(50_000)
             .ToListAsync(ct);
+        WarnIfTruncated(items, 50_000, "GetRestaurantInsights.items");
 
         var mostPopular = items
             .Where(x => !string.IsNullOrWhiteSpace(x.Name) && x.Quantity > 0)
