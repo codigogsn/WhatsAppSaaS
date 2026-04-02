@@ -24,12 +24,14 @@ public class AdminAnalyticsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IAdminAnalyticsService _analytics;
     private readonly IConfiguration _config;
+    private readonly ILogger<AdminAnalyticsController> _logger;
 
-    public AdminAnalyticsController(AppDbContext db, IAdminAnalyticsService analytics, IConfiguration config)
+    public AdminAnalyticsController(AppDbContext db, IAdminAnalyticsService analytics, IConfiguration config, ILogger<AdminAnalyticsController> logger)
     {
         _db = db;
         _analytics = analytics;
         _config = config;
+        _logger = logger;
     }
 
     private Guid? GetJwtBusinessId()
@@ -241,8 +243,9 @@ public class AdminAnalyticsController : ControllerBase
                 paymentsPendingVerification = paymentsPending
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin analytics endpoint error");
             return StatusCode(500, new { error = $"Analytics summary failed: Unexpected server error" });
         }
     }
@@ -598,8 +601,9 @@ public class AdminAnalyticsController : ControllerBase
                 topCustomers
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin analytics endpoint error");
             return StatusCode(500, new { error = $"Extended analytics failed: Unexpected server error" });
         }
     }
@@ -621,8 +625,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetSalesAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin analytics endpoint error");
             return StatusCode(500, new { error = $"Sales analytics failed: Unexpected server error" });
         }
     }
@@ -638,8 +643,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetProductAnalyticsAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin analytics endpoint error");
             return StatusCode(500, new { error = $"Product analytics failed: Unexpected server error" });
         }
     }
@@ -655,8 +661,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetConversionAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin analytics endpoint error");
             return StatusCode(500, new { error = $"Conversion analytics failed: Unexpected server error" });
         }
     }
@@ -672,8 +679,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetOperationalAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin analytics endpoint error");
             return StatusCode(500, new { error = $"Operational analytics failed: Unexpected server error" });
         }
     }
@@ -689,8 +697,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetBusinessIntelligenceAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin analytics endpoint error");
             return StatusCode(500, new { error = $"Business intelligence failed: Unexpected server error" });
         }
     }
@@ -706,8 +715,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetRestaurantInsightsAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin analytics endpoint error");
             return StatusCode(500, new { error = $"Restaurant insights failed: Unexpected server error" });
         }
     }
@@ -935,8 +945,9 @@ public class AdminAnalyticsController : ControllerBase
                 businesses
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin analytics endpoint error");
             return StatusCode(500, new { error = $"Founder overview failed: Unexpected server error" });
         }
     }

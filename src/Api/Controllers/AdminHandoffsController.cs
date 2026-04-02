@@ -19,13 +19,15 @@ public class AdminHandoffsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
     private readonly IWhatsAppClient _whatsAppClient;
+    private readonly ILogger<AdminHandoffsController> _logger;
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public AdminHandoffsController(AppDbContext db, IConfiguration config, IWhatsAppClient whatsAppClient)
+    public AdminHandoffsController(AppDbContext db, IConfiguration config, IWhatsAppClient whatsAppClient, ILogger<AdminHandoffsController> logger)
     {
         _db = db;
         _config = config;
         _whatsAppClient = whatsAppClient;
+        _logger = logger;
     }
 
     private Guid? GetJwtBusinessId()
@@ -179,8 +181,9 @@ public class AdminHandoffsController : ControllerBase
 
             return Ok(new { resolved = true, conversationId });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin handoffs endpoint error");
             return StatusCode(500, new { error = "Unexpected server error" });
         }
     }
@@ -281,8 +284,9 @@ public class AdminHandoffsController : ControllerBase
 
             return Ok(new { returnedToBot = true, conversationId });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin handoffs endpoint error");
             return StatusCode(500, new { error = "Unexpected server error" });
         }
     }

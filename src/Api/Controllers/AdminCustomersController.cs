@@ -16,11 +16,13 @@ public class AdminCustomersController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly ILogger<AdminCustomersController> _logger;
 
-    public AdminCustomersController(AppDbContext db, IConfiguration config)
+    public AdminCustomersController(AppDbContext db, IConfiguration config, ILogger<AdminCustomersController> logger)
     {
         _db = db;
         _config = config;
+        _logger = logger;
     }
 
     /// <summary>
@@ -143,8 +145,9 @@ public class AdminCustomersController : ControllerBase
 
             return Ok(new { total = customers.Count, customers });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin customers endpoint error");
             return StatusCode(500, new { error = $"CRM query failed: Unexpected server error" });
         }
     }
@@ -253,8 +256,9 @@ public class AdminCustomersController : ControllerBase
 
             return Ok(new { customersFixed, ordersFixed });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin customers endpoint error");
             return StatusCode(500, new { error = $"Backfill failed: Unexpected server error" });
         }
     }

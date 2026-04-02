@@ -21,11 +21,13 @@ public sealed class AdminMenuController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly ILogger<AdminMenuController> _logger;
 
-    public AdminMenuController(AppDbContext db, IConfiguration config)
+    public AdminMenuController(AppDbContext db, IConfiguration config, ILogger<AdminMenuController> logger)
     {
         _db = db;
         _config = config;
+        _logger = logger;
     }
 
     // ── Helpers ──
@@ -141,8 +143,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(cats);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"ListCategories failed: Unexpected server error" });
         }
     }
@@ -182,8 +185,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { id, name = req.Name.Trim(), sortOrder = req.SortOrder, isActive = req.IsActive });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"CreateCategory failed: Unexpected server error" });
         }
     }
@@ -221,8 +225,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { id, name = req.Name?.Trim(), sortOrder = req.SortOrder, isActive = req.IsActive });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"UpdateCategory failed: Unexpected server error" });
         }
     }
@@ -265,8 +270,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { deleted = true });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"DeleteCategory failed: Unexpected server error" });
         }
     }
@@ -388,8 +394,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(items);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"ListItems failed: Unexpected server error" });
         }
     }
@@ -471,8 +478,9 @@ public sealed class AdminMenuController : ControllerBase
                 aliases = aliasResults
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"CreateItem failed: Unexpected server error" });
         }
     }
@@ -558,8 +566,9 @@ public sealed class AdminMenuController : ControllerBase
                 aliases
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"UpdateItem failed: Unexpected server error" });
         }
     }
@@ -598,8 +607,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { deleted = true });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"DeleteItem failed: Unexpected server error" });
         }
     }
@@ -636,8 +646,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { id, name = itemName, isAvailable = req.IsAvailable });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"ToggleAvailability failed: Unexpected server error" });
         }
     }
@@ -685,8 +696,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { id, alias = req.Alias.Trim().ToLowerInvariant(), menuItemId = itemId });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"AddAlias failed: Unexpected server error" });
         }
     }
@@ -721,8 +733,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { deleted = true });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"DeleteAlias failed: Unexpected server error" });
         }
     }
@@ -891,8 +904,9 @@ public sealed class AdminMenuController : ControllerBase
                 warnings
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"BulkImport failed: Unexpected server error" });
         }
     }
@@ -1110,8 +1124,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(result);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin menu endpoint error");
             return StatusCode(500, new { error = $"PublicMenu failed: Unexpected server error" });
         }
     }

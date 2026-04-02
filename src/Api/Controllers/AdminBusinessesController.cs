@@ -17,11 +17,13 @@ public class AdminBusinessesController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly ILogger<AdminBusinessesController> _logger;
 
-    public AdminBusinessesController(AppDbContext db, IConfiguration config)
+    public AdminBusinessesController(AppDbContext db, IConfiguration config, ILogger<AdminBusinessesController> logger)
     {
         _db = db;
         _config = config;
+        _logger = logger;
     }
 
     private bool IsGlobalAdmin()
@@ -267,8 +269,9 @@ public class AdminBusinessesController : ControllerBase
 
             return Ok(items);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin businesses endpoint error");
             return StatusCode(500, new { error = $"DB query failed: Unexpected server error" });
         }
     }
@@ -631,8 +634,9 @@ public class AdminBusinessesController : ControllerBase
                 zelleInstructions = req.ZelleInstructions?.Trim()
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin businesses endpoint error");
             return StatusCode(500, new { error = $"Update failed: Unexpected server error" });
         }
     }
@@ -679,8 +683,9 @@ public class AdminBusinessesController : ControllerBase
 
             return Ok(new { id = id.ToString(), name = bizName, isActive = !currentActive });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin businesses endpoint error");
             return StatusCode(500, new { error = $"Toggle failed: Unexpected server error" });
         }
     }
@@ -852,8 +857,9 @@ public class AdminBusinessesController : ControllerBase
 
             return Ok(new { total = results.Count, real = realCount, junk = junkCount, businesses = results });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin businesses endpoint error");
             return StatusCode(500, new { error = $"Audit failed: Unexpected server error" });
         }
     }
@@ -931,8 +937,9 @@ public class AdminBusinessesController : ControllerBase
                 affected = deactivated
             });
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Admin businesses endpoint error");
             return StatusCode(500, new { error = $"Cleanup failed: Unexpected server error" });
         }
     }

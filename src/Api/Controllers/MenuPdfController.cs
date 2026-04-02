@@ -14,12 +14,14 @@ public sealed class MenuPdfController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly ILogger<MenuPdfController> _logger;
     private const long MaxFileSize = 10 * 1024 * 1024; // 10 MB
 
-    public MenuPdfController(AppDbContext db, IConfiguration config)
+    public MenuPdfController(AppDbContext db, IConfiguration config, ILogger<MenuPdfController> logger)
     {
         _db = db;
         _config = config;
+        _logger = logger;
     }
 
     /// <summary>
@@ -95,8 +97,9 @@ public sealed class MenuPdfController : ControllerBase
         {
             await _db.SaveChangesAsync(ct);
         }
-        catch (Exception)
+        catch (Exception ex)
         {
+            _logger.LogError(ex, "Menu PDF endpoint error");
             return StatusCode(500, new { error = "Unexpected server error" });
         }
 
