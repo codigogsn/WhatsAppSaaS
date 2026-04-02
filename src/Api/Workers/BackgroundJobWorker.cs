@@ -21,8 +21,7 @@ public sealed class BackgroundJobWorker : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("BackgroundJobWorker started");
-        _logger.LogWarning("BackgroundJobWorker running in single-instance mode. Horizontal scaling requires FOR UPDATE SKIP LOCKED.");
+        _logger.LogInformation("BackgroundJobWorker started (FOR UPDATE SKIP LOCKED enabled)");
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -51,23 +50,43 @@ public sealed class BackgroundJobWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Acquire next pending job (or stuck Processing job past lock timeout)
+        // Atomic claim: SELECT + UPDATE with FOR UPDATE SKIP LOCKED
         var lockCutoff = DateTime.UtcNow - LockTimeout;
         var now = DateTime.UtcNow;
 
-        var job = await db.BackgroundJobs
-            .Where(j =>
-                (j.Status == "Pending" && j.ScheduledAtUtc <= now) ||
-                (j.Status == "Processing" && j.LockedAtUtc < lockCutoff))
-            .OrderBy(j => j.ScheduledAtUtc)
-            .FirstOrDefaultAsync(ct);
+        var conn = db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync(ct);
 
+        Guid? jobId = null;
+        using (var cmd = conn.CreateCommand())
+        {
+            cmd.CommandText = """
+                WITH next AS (
+                    SELECT "Id"
+                    FROM "BackgroundJobs"
+                    WHERE ("Status" = 'Pending' AND "ScheduledAtUtc" <= @now)
+                       OR ("Status" = 'Processing' AND "LockedAtUtc" < @lockCutoff)
+                    ORDER BY "ScheduledAtUtc"
+                    LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                )
+                UPDATE "BackgroundJobs" j
+                SET "Status" = 'Processing', "LockedAtUtc" = @now
+                FROM next
+                WHERE j."Id" = next."Id"
+                RETURNING j."Id"
+            """;
+            var pNow = cmd.CreateParameter(); pNow.ParameterName = "now"; pNow.Value = now; cmd.Parameters.Add(pNow);
+            var pCut = cmd.CreateParameter(); pCut.ParameterName = "lockCutoff"; pCut.Value = lockCutoff; cmd.Parameters.Add(pCut);
+            var result = await cmd.ExecuteScalarAsync(ct);
+            if (result is Guid g) jobId = g;
+        }
+
+        if (!jobId.HasValue) return false;
+
+        // Load the claimed job into EF for processing and status updates
+        var job = await db.BackgroundJobs.FindAsync(new object[] { jobId.Value }, ct);
         if (job is null) return false;
-
-        // Lock the job
-        job.Status = "Processing";
-        job.LockedAtUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync(ct);
 
         _logger.LogInformation("Processing job {JobId} type={JobType} attempt={Attempt}",
             job.Id, job.JobType, job.RetryCount + 1);
