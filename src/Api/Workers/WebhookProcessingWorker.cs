@@ -113,11 +113,23 @@ public sealed class WebhookProcessingWorker : BackgroundService
         var stuck = reader.GetInt64(1);
 
         if (stuck > 0)
-            _logger.LogWarning("QUEUE ALERT: stuck items detected count={Count}", stuck);
+        {
+            var msg = $"QUEUE ALERT: stuck items detected count={stuck}";
+            _logger.LogWarning(msg);
+            Diagnostics.AlertDispatcher.TrySendAlert(msg, Microsoft.Extensions.Logging.LogLevel.Warning);
+        }
 
         if (pending >= 200)
-            _logger.LogError("QUEUE ALERT: pending backlog critical count={Count}", pending);
+        {
+            var msg = $"QUEUE ALERT: pending backlog critical count={pending}";
+            _logger.LogError(msg);
+            Diagnostics.AlertDispatcher.TrySendAlert(msg, Microsoft.Extensions.Logging.LogLevel.Error);
+        }
         else if (pending >= 50)
-            _logger.LogWarning("QUEUE ALERT: pending backlog warning count={Count}", pending);
+        {
+            var msg = $"QUEUE ALERT: pending backlog warning count={pending}";
+            _logger.LogWarning(msg);
+            Diagnostics.AlertDispatcher.TrySendAlert(msg, Microsoft.Extensions.Logging.LogLevel.Warning);
+        }
     }
 }
