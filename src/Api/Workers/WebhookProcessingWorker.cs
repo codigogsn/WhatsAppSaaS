@@ -35,6 +35,14 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 {
                     emptyPolls++;
                     var delay = emptyPolls >= 10 ? 1000 : 250;
+
+                    // Periodic queue health check (~every 60s of idle)
+                    if (emptyPolls % 60 == 0 && _queue is WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue)
+                    {
+                        try { await CheckQueueHealthAsync(stoppingToken); }
+                        catch (Exception ex) { _logger.LogDebug(ex, "Queue health check failed (non-fatal)"); }
+                    }
+
                     await Task.Delay(TimeSpan.FromMilliseconds(delay), stoppingToken);
                     continue;
                 }
@@ -82,5 +90,34 @@ public sealed class WebhookProcessingWorker : BackgroundService
         }
 
         _logger.LogInformation("WebhookProcessingWorker stopped");
+    }
+
+    private async Task CheckQueueHealthAsync(CancellationToken ct)
+    {
+        if (_queue is not WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue pgq) return;
+
+        await using var conn = new Npgsql.NpgsqlConnection(pgq.ConnectionString);
+        await conn.OpenAsync(ct);
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT
+                COUNT(*) FILTER (WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" < 5) AS pending,
+                COUNT(*) FILTER (WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" >= 5) AS stuck
+            FROM "WebhookQueue"
+        """;
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        if (!await reader.ReadAsync(ct)) return;
+
+        var pending = reader.GetInt64(0);
+        var stuck = reader.GetInt64(1);
+
+        if (stuck > 0)
+            _logger.LogWarning("QUEUE ALERT: stuck items detected count={Count}", stuck);
+
+        if (pending >= 200)
+            _logger.LogError("QUEUE ALERT: pending backlog critical count={Count}", pending);
+        else if (pending >= 50)
+            _logger.LogWarning("QUEUE ALERT: pending backlog warning count={Count}", pending);
     }
 }

@@ -16,6 +16,9 @@ public sealed class PostgresMessageQueue : IMessageQueue
     private readonly string _connectionString;
     private readonly ILogger<PostgresMessageQueue> _logger;
 
+    /// <summary>Exposed for lightweight health checks from the worker.</summary>
+    public string ConnectionString => _connectionString;
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
