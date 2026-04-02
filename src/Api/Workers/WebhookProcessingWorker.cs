@@ -22,6 +22,8 @@ public sealed class WebhookProcessingWorker : BackgroundService
     {
         _logger.LogInformation("WebhookProcessingWorker started");
 
+        var emptyPolls = 0;
+
         while (!stoppingToken.IsCancellationRequested)
         {
             QueuedMessage? message = null;
@@ -31,9 +33,13 @@ public sealed class WebhookProcessingWorker : BackgroundService
 
                 if (message is null)
                 {
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken);
+                    emptyPolls++;
+                    var delay = emptyPolls >= 10 ? 1000 : 250;
+                    await Task.Delay(TimeSpan.FromMilliseconds(delay), stoppingToken);
                     continue;
                 }
+
+                emptyPolls = 0;
 
                 _logger.LogInformation(
                     "Dequeued message for business {BusinessId} ({BusinessName})",
