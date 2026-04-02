@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -20,6 +21,8 @@ public sealed class InsightsChatService : IInsightsChatService
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         WriteIndented = false
     };
+
+    private const int MaxContextChars = 2000;
 
     private const string SystemPrompt = """
         Eres un analista de negocios conciso para una plataforma de pedidos por WhatsApp.
@@ -45,14 +48,14 @@ public sealed class InsightsChatService : IInsightsChatService
 
     public async Task<InsightsChatResponse> AskAsync(InsightsChatRequest request, Guid? businessId, CancellationToken ct)
     {
-        // 1. Gather context from existing insights services (no direct DB access)
-        string contextJson;
+        // 1. Build compact context from existing insights services (no direct DB access)
+        string context;
         try
         {
             if (request.Scope == "founder")
             {
                 var data = await _founderInsights.GetInsightsAsync(ct);
-                contextJson = JsonSerializer.Serialize(data, JsonOpts);
+                context = BuildFounderContext(data);
             }
             else
             {
@@ -60,7 +63,7 @@ public sealed class InsightsChatService : IInsightsChatService
                     return new InsightsChatResponse { Answer = "No hay contexto de negocio disponible.", Confidence = "low" };
 
                 var data = await _bizInsights.GetInsightsAsync(businessId.Value, 30, ct);
-                contextJson = JsonSerializer.Serialize(data, JsonOpts);
+                context = BuildBusinessContext(data);
             }
         }
         catch (Exception ex)
@@ -69,7 +72,7 @@ public sealed class InsightsChatService : IInsightsChatService
             return Fallback();
         }
 
-        // 2. Call OpenAI
+        // 2. Call OpenAI with compact context
         var apiKey = _options.ResolveApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
@@ -90,7 +93,7 @@ public sealed class InsightsChatService : IInsightsChatService
                 messages = new object[]
                 {
                     new { role = "system", content = SystemPrompt },
-                    new { role = "user", content = $"Business data:\n{contextJson}\n\nQuestion: {request.Question}" }
+                    new { role = "user", content = $"Datos del negocio:\n{context}\n\nPregunta: {request.Question}" }
                 }
             };
 
@@ -115,12 +118,13 @@ public sealed class InsightsChatService : IInsightsChatService
                 .GetProperty("content")
                 .GetString() ?? "";
 
-            _logger.LogInformation("INSIGHTS CHAT: answered for scope={Scope}", request.Scope);
+            _logger.LogInformation("INSIGHTS CHAT: answered for scope={Scope} contextLen={Len}",
+                request.Scope, context.Length);
 
             return new InsightsChatResponse
             {
                 Answer = answer.Trim(),
-                Confidence = answer.Length > 20 ? "high" : "medium"
+                Confidence = "medium"
             };
         }
         catch (OperationCanceledException)
@@ -133,6 +137,103 @@ public sealed class InsightsChatService : IInsightsChatService
             _logger.LogWarning(ex, "INSIGHTS CHAT: OpenAI call failed");
             return Fallback();
         }
+    }
+
+    // ── Compact context builders ──
+
+    private static string BuildBusinessContext(BusinessInsightsResponse d)
+    {
+        var sb = new StringBuilder(1024);
+
+        // Metrics
+        var m = d.Metrics;
+        sb.AppendLine($"Pedidos completados: {m.CompletedOrders}");
+        sb.AppendLine($"Ticket promedio: ${m.AverageTicket:F2}");
+        sb.AppendLine($"Items por pedido: {m.AverageItemsPerOrder:F1}");
+        sb.AppendLine($"Tasa de recompra: {m.RepeatCustomerRate}%");
+        sb.AppendLine($"Tasa de conversión: {m.ConversionRate}%");
+        sb.AppendLine($"Pagos pendientes: {m.PendingPayments}");
+
+        // Top selling (max 3)
+        if (d.TopSellingItems.Count > 0)
+        {
+            sb.AppendLine("Más vendidos:");
+            foreach (var item in d.TopSellingItems.Take(3))
+                sb.AppendLine($"  - {item.Name}: {item.TotalQuantity} unidades");
+        }
+
+        // Low performing (max 3)
+        if (d.LowPerformingItems.Count > 0)
+        {
+            sb.AppendLine("Menor demanda:");
+            foreach (var item in d.LowPerformingItems.Take(3))
+                sb.AppendLine($"  - {item.Name}: {item.TotalQuantity} unidades");
+        }
+
+        // Peak hours (max 3)
+        if (d.PeakHours.Count > 0)
+        {
+            sb.AppendLine("Horas pico:");
+            foreach (var h in d.PeakHours.Take(3))
+                sb.AppendLine($"  - {h.Hour:D2}:00 → {h.OrderCount} pedidos");
+        }
+
+        // Alerts (max 3)
+        foreach (var a in d.Alerts.Take(3))
+            sb.AppendLine($"ALERTA: {a}");
+
+        // Insights (max 3)
+        foreach (var i in d.Insights.Take(3))
+            sb.AppendLine($"INSIGHT: {i.Message}");
+
+        // Recommendations (max 3)
+        foreach (var r in d.Recommendations.Take(3))
+            sb.AppendLine($"RECOMENDACIÓN: {r}");
+
+        return Cap(sb);
+    }
+
+    private static string BuildFounderContext(FounderInsightsResponse d)
+    {
+        var sb = new StringBuilder(1024);
+
+        // Summary
+        sb.AppendLine($"Pedidos totales (30d): {d.Summary.TotalOrders}");
+        sb.AppendLine($"Revenue total: ${d.Summary.TotalRevenue:F2}");
+        sb.AppendLine($"Promedio pedidos/negocio: {d.Summary.AvgOrdersPerBusiness:F1}");
+
+        // Top businesses (max 3)
+        if (d.TopBusinesses.Count > 0)
+        {
+            sb.AppendLine("Negocios top:");
+            foreach (var b in d.TopBusinesses.Take(3))
+                sb.AppendLine($"  - {b.Name}: {b.Orders} pedidos");
+        }
+
+        // Alerts (max 3)
+        foreach (var a in d.Alerts.Take(3))
+            sb.AppendLine($"ALERTA: {a.Message}");
+
+        // Insights (max 3)
+        foreach (var i in d.Insights.Take(3))
+            sb.AppendLine($"INSIGHT: {i.Message}");
+
+        // Recommendations (max 3)
+        foreach (var r in d.Recommendations.Take(3))
+            sb.AppendLine($"RECOMENDACIÓN: {r.Message}");
+
+        return Cap(sb);
+    }
+
+    private static string Cap(StringBuilder sb)
+    {
+        if (sb.Length <= MaxContextChars)
+            return sb.ToString();
+
+        // Truncate cleanly at last newline before limit
+        var text = sb.ToString(0, MaxContextChars);
+        var lastNewline = text.LastIndexOf('\n');
+        return lastNewline > 0 ? text[..lastNewline] : text;
     }
 
     private static InsightsChatResponse Fallback() => new()
