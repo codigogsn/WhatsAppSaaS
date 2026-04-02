@@ -1401,6 +1401,36 @@
       .status-actions select { min-width: 100%; }
       .nav-bar { padding: 10px 14px; }
     }
+
+    /* ── Business Insights Panel ── */
+    .insights-panel { margin-bottom: 24px; }
+    .insights-panel-title {
+      font-size: 10px; font-weight: 500; text-transform: uppercase;
+      letter-spacing: 1.2px; color: var(--muted); margin-bottom: 14px;
+    }
+    .insights-grid { display: flex; flex-direction: column; gap: 10px; }
+    .insight-card {
+      background: var(--card); border-radius: var(--radius);
+      padding: 14px 18px; display: flex; align-items: flex-start; gap: 12px;
+      border-left: 3px solid var(--border-light);
+    }
+    .insight-card[data-severity="info"] { border-left-color: var(--accent, #3b82f6); }
+    .insight-card[data-severity="warning"] { border-left-color: var(--warning, #f59e0b); }
+    .insight-card[data-severity="critical"] { border-left-color: var(--danger, #ef4444); }
+    .insight-card-icon {
+      font-size: 16px; flex-shrink: 0; width: 22px; text-align: center; padding-top: 1px;
+    }
+    .insight-card-body { flex: 1; min-width: 0; }
+    .insight-card-type {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .5px; color: var(--muted); margin-bottom: 3px;
+    }
+    .insight-card-msg { font-size: 13px; color: var(--text); line-height: 1.4; }
+    .insights-empty {
+      color: var(--muted); font-size: 13px; font-style: italic; padding: 14px 0;
+    }
+    .insights-section { margin-bottom: 18px; }
+    .insights-section:last-child { margin-bottom: 0; }
   </style>
 </head>
 <body>
@@ -1859,6 +1889,14 @@ Tipo: burger"></textarea>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--accent);">En Camino</div><div class="status-chip-value" style="color:var(--accent);" id="kpiOut">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--success);">Completed</div><div class="status-chip-value" style="color:var(--success);" id="kpiCompleted">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--danger);">Cancelled</div><div class="status-chip-value" style="color:var(--danger);" id="kpiCancelled">0</div></div>
+  </div>
+
+  <!-- Business Insights (Owner/Manager only) -->
+  <div id="businessInsights" class="insights-panel" style="display:none;">
+    <div class="insights-panel-title">Business Insights</div>
+    <div id="insightsContent">
+      <div class="insights-empty">Cargando insights...</div>
+    </div>
   </div>
 
   <!-- Extended Analytics -->
@@ -3094,7 +3132,7 @@ function applyGlobalModeUI() {
   var founder = isFounderUser();
   var show = global ? 'none' : '';
   // Business-scoped dashboard sections
-  var ids = ['heroKpi','statusStrip','extAnalytics','handoffInbox','ordersFilters','ordersTable','customersPanel'];
+  var ids = ['heroKpi','statusStrip','businessInsights','extAnalytics','handoffInbox','ordersFilters','ordersTable','customersPanel'];
   for (var i = 0; i < ids.length; i++) {
     var el = document.getElementById(ids[i]);
     if (el) el.style.display = show;
@@ -3162,6 +3200,94 @@ async function loadFounderDashboard() {
   } catch(e) { console.warn('Founder dashboard error:', e); }
 }
 
+// ── Business Insights ──
+async function loadBusinessInsights() {
+  var panel = document.getElementById('businessInsights');
+  var content = document.getElementById('insightsContent');
+  if (!panel || !content) return;
+
+  // Role gate: Owner or Manager only (hide for Operator and Founder in this phase)
+  var role = getAuthRole();
+  if (role !== 'Owner' && role !== 'Manager') {
+    panel.style.display = 'none';
+    return;
+  }
+
+  panel.style.display = '';
+  content.innerHTML = '<div class="insights-empty">Cargando insights...</div>';
+
+  try {
+    var res = await fetch('/api/insights?windowDays=30', { headers: jwtHeaders(), cache: 'no-store' });
+
+    if (res.status === 403) { panel.style.display = 'none'; return; }
+    if (!res.ok) { content.innerHTML = '<div class="insights-empty">No se pudieron cargar los insights.</div>'; return; }
+
+    var data = await res.json();
+
+    // Check if there's meaningful data
+    var hasData = (data.metrics && data.metrics.completedOrders > 0) ||
+                  (data.alerts && data.alerts.length > 0) ||
+                  (data.insights && data.insights.length > 0);
+
+    if (!hasData) {
+      content.innerHTML = '<div class="insights-empty">No hay suficientes datos para generar insights.</div>';
+      return;
+    }
+
+    var html = '';
+
+    // 1. Alerts (most urgent)
+    if (data.alerts && data.alerts.length > 0) {
+      html += '<div class="insights-section"><div class="insights-panel-title">Alertas</div><div class="insights-grid">';
+      var alerts = data.alerts.slice(0, 3);
+      for (var i = 0; i < alerts.length; i++) {
+        html += renderInsightCard(alerts[i], 'critical', '\u26a0\ufe0f');
+      }
+      html += '</div></div>';
+    }
+
+    // 2. Insights
+    if (data.insights && data.insights.length > 0) {
+      html += '<div class="insights-section"><div class="insights-panel-title">Insights</div><div class="insights-grid">';
+      var insights = data.insights.slice(0, 3);
+      for (var i = 0; i < insights.length; i++) {
+        var sev = insights[i].severity || 'info';
+        var icon = sev === 'critical' ? '\ud83d\udea8' : sev === 'warning' ? '\ud83d\udfe1' : '\ud83d\udfe2';
+        html += renderInsightCard(insights[i].message, sev, icon, insights[i].type);
+      }
+      html += '</div></div>';
+    }
+
+    // 3. Recommendations
+    if (data.recommendations && data.recommendations.length > 0) {
+      html += '<div class="insights-section"><div class="insights-panel-title">Recomendaciones</div><div class="insights-grid">';
+      var recs = data.recommendations.slice(0, 3);
+      for (var i = 0; i < recs.length; i++) {
+        html += renderInsightCard(recs[i], 'info', '\ud83d\udca1');
+      }
+      html += '</div></div>';
+    }
+
+    content.innerHTML = html || '<div class="insights-empty">No hay insights disponibles.</div>';
+
+  } catch (e) {
+    console.warn('Business insights load error:', e);
+    content.innerHTML = '<div class="insights-empty">No se pudieron cargar los insights.</div>';
+  }
+}
+
+function renderInsightCard(msgOrObj, severity, icon, type) {
+  var msg = typeof msgOrObj === 'string' ? msgOrObj : (msgOrObj.message || msgOrObj);
+  var t = type || (typeof msgOrObj === 'object' ? msgOrObj.type : '');
+  var sev = severity || 'info';
+  return '<div class="insight-card" data-severity="' + esc(sev) + '">' +
+    '<div class="insight-card-icon">' + icon + '</div>' +
+    '<div class="insight-card-body">' +
+      (t ? '<div class="insight-card-type">' + esc(t.replace(/_/g, ' ')) + '</div>' : '') +
+      '<div class="insight-card-msg">' + esc(msg) + '</div>' +
+    '</div></div>';
+}
+
 // ── Load ──
 async function load() {
   applyGlobalModeUI();
@@ -3197,7 +3323,7 @@ async function load() {
   console.log(`${tag} load() starting — url=/api/orders?${qs.toString()}`);
 
   document.getElementById('msg').textContent = 'Cargando...';
-  await Promise.all([loadSummary(), loadHandoffs(), loadExchangeRate(), loadExtended()]);
+  await Promise.all([loadSummary(), loadHandoffs(), loadExchangeRate(), loadExtended(), loadBusinessInsights()]);
 
   const isHandoffFilter = status === 'NeedsHuman';
   const fetchUrl = '/api/orders?' + qs.toString().replace('status=NeedsHuman','');
