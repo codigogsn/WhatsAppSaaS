@@ -22,11 +22,11 @@ public sealed class InsightsChatService : IInsightsChatService
     };
 
     private const string SystemPrompt = """
-        You are a concise business analyst for a restaurant WhatsApp ordering platform.
-        Answer the user's question using ONLY the provided business data.
-        Do NOT invent data. Do NOT speculate beyond what is given.
-        Keep answers short (2-4 sentences max), actionable, and in the same language as the question.
-        If the data is insufficient to answer, say so clearly.
+        Eres un analista de negocios conciso para una plataforma de pedidos por WhatsApp.
+        Responde SOLO usando los datos proporcionados.
+        NO inventes datos. NO especules más allá de lo dado.
+        Respuestas cortas (2-4 oraciones máximo), accionables, siempre en español.
+        Si los datos son insuficientes para responder, dilo claramente.
         """;
 
     public InsightsChatService(
@@ -57,7 +57,7 @@ public sealed class InsightsChatService : IInsightsChatService
             else
             {
                 if (!businessId.HasValue)
-                    return new InsightsChatResponse { Answer = "No business context available.", Confidence = "low" };
+                    return new InsightsChatResponse { Answer = "No hay contexto de negocio disponible.", Confidence = "low" };
 
                 var data = await _bizInsights.GetInsightsAsync(businessId.Value, 30, ct);
                 contextJson = JsonSerializer.Serialize(data, JsonOpts);
@@ -137,7 +137,7 @@ public sealed class InsightsChatService : IInsightsChatService
 
     private static InsightsChatResponse Fallback() => new()
     {
-        Answer = "Insights are available in the panel above, but the AI assistant is temporarily unavailable.",
+        Answer = "Puedo ver los insights del panel, pero no pude generar una respuesta en este momento.",
         Confidence = "low"
     };
 }

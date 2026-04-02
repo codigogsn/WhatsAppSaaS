@@ -1464,6 +1464,22 @@
       padding: 12px 16px; font-size: 13px; color: var(--text); line-height: 1.5; display: none;
     }
     .assist-chat-answer.visible { display: block; }
+    .assist-chat-answer-label {
+      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      letter-spacing: .5px; color: var(--accent, #3b82f6); margin-bottom: 6px;
+    }
+    .assist-suggestions {
+      display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px;
+    }
+    .assist-suggestion {
+      background: rgba(59,130,246,.08); color: var(--accent, #3b82f6);
+      border: 1px solid rgba(59,130,246,.2); border-radius: 16px;
+      padding: 6px 12px; font-size: 12px; cursor: pointer;
+      transition: background .15s, border-color .15s;
+    }
+    .assist-suggestion:hover {
+      background: rgba(59,130,246,.15); border-color: rgba(59,130,246,.4);
+    }
 
     /* Insight cards (shared) */
     .insights-section-title {
@@ -3354,7 +3370,7 @@ var _founderInsightLabels = {
   'weak_retention': 'Baja Retenci\u00f3n Detectada',
   'platform_health': 'Salud de la Plataforma'
 };
-function founderAlertLabel(t) { return _founderAlertLabels[t] || (t ? t.replace(/_/g, ' ') : 'Alert'); }
+function founderAlertLabel(t) { return _founderAlertLabels[t] || (t ? t.replace(/_/g, ' ') : 'Alerta'); }
 function founderInsightLabel(t) { return _founderInsightLabels[t] || (t ? t.replace(/_/g, ' ') : 'Insight'); }
 
 // ── Assistant Dock ──
@@ -3408,21 +3424,65 @@ function initAssistDock() {
   } else {
     launcher.classList.remove('hidden');
   }
+
+  initSuggestions();
 }
 
 // ── Insights Chat ──
+var _bizSuggestions = [
+  '\u00bfQu\u00e9 deber\u00eda mejorar esta semana?',
+  '\u00bfCu\u00e1l es mi mayor riesgo ahora mismo?',
+  '\u00bfCu\u00e1les son mis horas pico?',
+  '\u00bfQu\u00e9 producto deber\u00eda impulsar m\u00e1s?',
+  '\u00bfC\u00f3mo va la recompra de clientes?',
+  '\u00bfQu\u00e9 me recomiendas hacer hoy?'
+];
+var _founderSuggestions = [
+  '\u00bfQu\u00e9 negocio necesita m\u00e1s atenci\u00f3n?',
+  '\u00bfCu\u00e1l negocio est\u00e1 rindiendo mejor?',
+  '\u00bfD\u00f3nde est\u00e1 m\u00e1s d\u00e9bil la conversi\u00f3n?',
+  '\u00bfQu\u00e9 riesgo operativo debo revisar?',
+  '\u00bfQu\u00e9 negocio tiene mejor retenci\u00f3n?',
+  '\u00bfQu\u00e9 patr\u00f3n importante ves esta semana?'
+];
+
+function initSuggestions() {
+  renderSuggestionChips('bizSuggestions', _bizSuggestions, 'business', 'bizChatInput', 'bizChatAnswer', 'bizChatSend');
+  renderSuggestionChips('founderSuggestions', _founderSuggestions, 'founder', 'founderChatInput', 'founderChatAnswer', 'founderChatSend');
+}
+
+function renderSuggestionChips(containerId, questions, scope, inputId, answerId, btnId) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = '';
+  for (var i = 0; i < questions.length; i++) {
+    var chip = document.createElement('button');
+    chip.className = 'assist-suggestion';
+    chip.textContent = questions[i];
+    chip.setAttribute('data-q', questions[i]);
+    chip.onclick = function() {
+      var q = this.getAttribute('data-q');
+      var inp = document.getElementById(inputId);
+      if (inp) inp.value = q;
+      sendInsightsChat(scope, inputId, answerId, btnId);
+    };
+    el.appendChild(chip);
+  }
+}
+
 async function sendInsightsChat(scope, inputId, answerId, btnId) {
   var input = document.getElementById(inputId);
-  var answer = document.getElementById(answerId);
+  var answerBox = document.getElementById(answerId);
+  var answerText = document.getElementById(answerId + 'Text');
   var btn = document.getElementById(btnId);
-  if (!input || !answer || !btn) return;
+  if (!input || !answerBox || !btn) return;
 
   var q = input.value.trim();
   if (!q) return;
 
   btn.disabled = true;
-  answer.className = 'assist-chat-answer visible';
-  answer.textContent = 'Pensando...';
+  answerBox.className = 'assist-chat-answer visible';
+  if (answerText) answerText.textContent = 'Pensando\u2026';
 
   try {
     var res = await fetch('/api/insights/chat', {
@@ -3432,15 +3492,15 @@ async function sendInsightsChat(scope, inputId, answerId, btnId) {
     });
 
     if (!res.ok) {
-      answer.textContent = 'No pude responder en este momento.';
+      if (answerText) answerText.textContent = 'No pude responder en este momento.';
       return;
     }
 
     var data = await res.json();
-    answer.textContent = data.answer || 'Sin respuesta disponible.';
+    if (answerText) answerText.textContent = data.answer || 'Sin respuesta disponible.';
   } catch (e) {
     console.warn('Insights chat error:', e);
-    answer.textContent = 'No pude responder en este momento.';
+    if (answerText) answerText.textContent = 'No pude responder en este momento.';
   } finally {
     btn.disabled = false;
   }
@@ -3550,8 +3610,37 @@ function insightLabel(type, fallback) {
   return type ? type.replace(/_/g, ' ') : 'Insight';
 }
 
+// Spanish normalization for known backend English patterns
+function spanishDetail(msg) {
+  if (!msg || typeof msg !== 'string') return msg || '';
+  return msg
+    .replace(/Highest order volume at (\d{2}):00 with (\d+) orders/g, 'Mayor volumen de pedidos a las $1:00 con $2 pedidos')
+    .replace(/Top seller: (.+?) \((\d+) units\)/g, 'M\u00e1s vendido: $1 ($2 unidades)')
+    .replace(/Lowest seller: (.+?) \((\d+) units\)/g, 'Menos vendido: $1 ($2 unidades)')
+    .replace(/Repeat customer rate is ([\d.]+)% — below 15% threshold/g, 'Tasa de recompra es $1% \u2014 por debajo del 15%')
+    .replace(/Strong repeat customer rate: ([\d.]+)%/g, 'Buena tasa de recompra: $1%')
+    .replace(/Average ticket is \$([\d.]+) — consider upselling or combos/g, 'Ticket promedio es \$$1 \u2014 considera combos o sugerencias')
+    .replace(/(\d+) orders have unverified payment proofs/g, '$1 pedidos tienen comprobantes sin verificar')
+    .replace(/Conversation-to-order conversion is ([\d.]+)% — below 10%/g, 'Conversi\u00f3n de conversaci\u00f3n a pedido es $1% \u2014 por debajo del 10%')
+    .replace(/Action required: (\d+) payment proofs awaiting verification/g, 'Acci\u00f3n requerida: $1 comprobantes pendientes de verificaci\u00f3n')
+    .replace(/Consider promoting or updating '(.+?)' — lowest demand in the last (\d+) days/g, 'Considera impulsar \'$1\' \u2014 menor demanda en los \u00faltimos $2 d\u00edas')
+    .replace(/Consider loyalty incentives or follow-up messages to increase repeat orders/g, 'Considera incentivos de lealtad o mensajes de seguimiento')
+    .replace(/Add combo deals or suggest add-ons to increase average order value/g, 'Agrega combos o sugerencias para aumentar el ticket promedio')
+    .replace(/Review menu pricing and bot greeting to improve conversion from conversations to orders/g, 'Revisa precios del men\u00fa y el saludo del bot para mejorar conversi\u00f3n')
+    .replace(/(.+?) leads with (\d+) orders in 30 days/g, '$1 lidera con $2 pedidos en 30 d\u00edas')
+    .replace(/(.+?) has ([\d.]+)% repeat customer rate/g, '$1 tiene $2% de tasa de recompra')
+    .replace(/(.+?) has only ([\d.]+)% repeat rate/g, '$1 tiene solo $2% de recompra')
+    .replace(/(.+?) has (\d+) unverified payments/g, '$1 tiene $2 pagos sin verificar')
+    .replace(/(.+?) has ([\d.]+)% conversion rate/g, '$1 tiene $2% de conversi\u00f3n')
+    .replace(/Platform averaging ([\d.]+) orders\/business across (\d+) active businesses/g, 'Plataforma promediando $1 pedidos/negocio en $2 negocios activos')
+    .replace(/Help (.+?) set up loyalty incentives or follow-up messages/g, 'Ayuda a $1 a configurar incentivos de lealtad')
+    .replace(/Review (.+?) menu and bot flow — ([\d.]+)% conversion is below threshold/g, 'Revisa men\u00fa y flujo de $1 \u2014 $2% de conversi\u00f3n es bajo')
+    .replace(/(\d+) orders in 30 days/g, '$1 pedidos en 30 d\u00edas');
+}
+
 function insightCard(msgOrObj, severity, label) {
   var msg = typeof msgOrObj === 'string' ? msgOrObj : (msgOrObj.message || String(msgOrObj));
+  msg = spanishDetail(msg);
   var sev = severity || 'info';
   var icon = sev === 'critical' ? '\ud83d\udd34' : sev === 'warning' ? '\ud83d\udfe0' : '\ud83d\udd35';
   return '<div class="insight-card" data-severity="' + esc(sev) + '">' +
@@ -4508,20 +4597,28 @@ async function sendPromotion(){
     <!-- Business chat -->
     <div id="bizChatArea" style="display:none;">
       <div class="assist-chat-label">Pregunta sobre tu negocio</div>
+      <div class="assist-suggestions" id="bizSuggestions"></div>
       <div class="assist-chat-row">
-        <input type="text" id="bizChatInput" placeholder="Ej: &#191;Cu&#225;les son mis horas pico?" maxlength="500">
+        <input type="text" id="bizChatInput" placeholder="Escribe tu pregunta..." maxlength="500">
         <button id="bizChatSend" onclick="sendInsightsChat('business','bizChatInput','bizChatAnswer','bizChatSend')">Preguntar</button>
       </div>
-      <div class="assist-chat-answer" id="bizChatAnswer"></div>
+      <div class="assist-chat-answer" id="bizChatAnswer">
+        <div class="assist-chat-answer-label">Respuesta</div>
+        <div id="bizChatAnswerText"></div>
+      </div>
     </div>
     <!-- Founder chat -->
     <div id="founderChatArea" style="display:none;">
       <div class="assist-chat-label">Pregunta sobre la plataforma</div>
+      <div class="assist-suggestions" id="founderSuggestions"></div>
       <div class="assist-chat-row">
-        <input type="text" id="founderChatInput" placeholder="Ej: &#191;Qu&#233; negocio tiene mejor retenci&#243;n?" maxlength="500">
+        <input type="text" id="founderChatInput" placeholder="Escribe tu pregunta..." maxlength="500">
         <button id="founderChatSend" onclick="sendInsightsChat('founder','founderChatInput','founderChatAnswer','founderChatSend')">Preguntar</button>
       </div>
-      <div class="assist-chat-answer" id="founderChatAnswer"></div>
+      <div class="assist-chat-answer" id="founderChatAnswer">
+        <div class="assist-chat-answer-label">Respuesta</div>
+        <div id="founderChatAnswerText"></div>
+      </div>
     </div>
   </div>
 </div>
