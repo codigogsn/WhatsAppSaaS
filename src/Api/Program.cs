@@ -407,7 +407,7 @@ static string ConvertDatabaseUrlToNpgsql(string databaseUrl)
     var port = uri.Port > 0 ? uri.Port : 5432;
     var database = uri.AbsolutePath.TrimStart('/');
 
-    return $"Host={host};Port={port};Database={database};Username={username};Password={password};Ssl Mode=Require;Trust Server Certificate=true";
+    return $"Host={host};Port={port};Database={database};Username={username};Password={password};Ssl Mode=Require;Trust Server Certificate=true;Maximum Pool Size=25";
 }
 
 namespace WhatsAppSaaS.Api
