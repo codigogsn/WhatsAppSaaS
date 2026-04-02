@@ -368,6 +368,29 @@ try
         });
     });
 
+    // Prometheus-compatible metrics endpoint (plain text)
+    var metricsConnString = npgsqlConnString;
+    app.MapGet("/metrics", async () =>
+    {
+        long queuePending = 0;
+        if (metricsConnString is not null)
+        {
+            try
+            {
+                await using var conn = new Npgsql.NpgsqlConnection(metricsConnString);
+                await conn.OpenAsync();
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = """SELECT COUNT(*) FROM "WebhookQueue" WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" < 5""";
+                queuePending = Convert.ToInt64(await cmd.ExecuteScalarAsync());
+            }
+            catch { }
+        }
+
+        return Results.Text(
+            WhatsAppSaaS.Api.Diagnostics.AppMetrics.RenderPrometheus(queuePending),
+            "text/plain; version=0.0.4");
+    });
+
     if (!EF.IsDesignTime)
     {
         // Start listening FIRST so Render health check passes immediately

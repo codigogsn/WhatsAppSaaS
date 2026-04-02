@@ -193,6 +193,7 @@ public class WebhookController : ControllerBase
         {
             Log.Error(ex, "WEBHOOK ENQUEUE FAILED: accepted request but queue insert failed for businessId={BusinessId} messageId={MessageId}",
                 businessContext.BusinessId, firstMessageId ?? "(none)");
+            WhatsAppSaaS.Api.Diagnostics.AppMetrics.RecordEnqueueFailure();
         }
 
         return Ok();

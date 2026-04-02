@@ -49,10 +49,14 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 using var scope = _scopeFactory.CreateScope();
                 var processor = scope.ServiceProvider.GetRequiredService<IWebhookProcessor>();
 
+                var sw = System.Diagnostics.Stopwatch.StartNew();
                 await processor.ProcessAsync(message.Payload, message.BusinessContext, stoppingToken);
+                sw.Stop();
 
                 if (_queue is WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue pgq)
                     await pgq.CompleteLastAsync(stoppingToken);
+
+                Diagnostics.AppMetrics.RecordProcessed(sw.Elapsed.TotalMilliseconds);
 
                 _logger.LogInformation(
                     "Processed message for business {BusinessId}",
@@ -65,6 +69,7 @@ public sealed class WebhookProcessingWorker : BackgroundService
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error processing queued webhook message");
+                Diagnostics.AppMetrics.RecordFailed();
 
                 if (_queue is WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue pgqFail)
                 {
