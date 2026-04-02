@@ -47,6 +47,10 @@ public static class ConfigValidator
                 Log.Warning("CONFIG: {Variable} not set — password reset emails may not work", v);
         }
 
+        // AI parser (non-critical — fallback regex parser will be used)
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
+            Log.Warning("CONFIG: OPENAI_API_KEY not set — AI parsing disabled, fallback regex parser will handle orders");
+
         // Data Protection keys path (required for persistence)
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH")))
             Log.Error("CONFIG MISSING: DATA_PROTECTION_KEYS_PATH not set — keys will NOT persist across deploys");
