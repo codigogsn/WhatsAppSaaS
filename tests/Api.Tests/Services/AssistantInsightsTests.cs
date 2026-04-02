@@ -45,7 +45,8 @@ public class AssistantInsightsTests : IDisposable
         SeedOrders(20);
         SeedCustomers(10);
 
-        var svc = new BusinessInsightsService(_db, NullLogger<BusinessInsightsService>.Instance);
+        var svc = new BusinessInsightsService(_db, NullLogger<BusinessInsightsService>.Instance,
+            Microsoft.Extensions.Options.Options.Create(new WhatsAppSaaS.Application.Common.BusinessInsightThresholds()));
         var result = await svc.GetInsightsAsync(_bizId, 30, CancellationToken.None);
 
         result.BusinessStateTitle.Should().NotBeNullOrWhiteSpace();
@@ -64,7 +65,8 @@ public class AssistantInsightsTests : IDisposable
     {
         SeedOrders(3);
 
-        var svc = new BusinessInsightsService(_db, NullLogger<BusinessInsightsService>.Instance);
+        var svc = new BusinessInsightsService(_db, NullLogger<BusinessInsightsService>.Instance,
+            Microsoft.Extensions.Options.Options.Create(new WhatsAppSaaS.Application.Common.BusinessInsightThresholds()));
         var result = await svc.GetInsightsAsync(_bizId, 30, CancellationToken.None);
 
         result.Metrics.CompletedOrders.Should().Be(3);
@@ -125,7 +127,8 @@ public class AssistantInsightsTests : IDisposable
     public async Task BusinessInsights_EmptyBusiness_ProducesShortContext()
     {
         // No orders, no customers → context will be very thin
-        var svc = new BusinessInsightsService(_db, NullLogger<BusinessInsightsService>.Instance);
+        var svc = new BusinessInsightsService(_db, NullLogger<BusinessInsightsService>.Instance,
+            Microsoft.Extensions.Options.Options.Create(new WhatsAppSaaS.Application.Common.BusinessInsightThresholds()));
         var result = await svc.GetInsightsAsync(_bizId, 30, CancellationToken.None);
 
         result.Metrics.CompletedOrders.Should().Be(0);

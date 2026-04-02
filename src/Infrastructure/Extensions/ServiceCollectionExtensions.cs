@@ -26,6 +26,10 @@ public static class ServiceCollectionExtensions
         services.AddOptions<AiParserOptions>()
             .Bind(configuration.GetSection(AiParserOptions.SectionName));
 
+        // ── Business insight thresholds ─────────────────
+        services.AddOptions<BusinessInsightThresholds>()
+            .Bind(configuration.GetSection(BusinessInsightThresholds.SectionName));
+
         // ── Payment Mobile options ────────────────────────
         var pmOpts = new PaymentMobileOptions();
         configuration.GetSection(PaymentMobileOptions.SectionName).Bind(pmOpts);

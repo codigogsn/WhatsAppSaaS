@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using WhatsAppSaaS.Application.Common;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -9,11 +11,14 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
 {
     private readonly AppDbContext _db;
     private readonly ILogger<BusinessInsightsService> _logger;
+    private readonly BusinessInsightThresholds _t;
 
-    public BusinessInsightsService(AppDbContext db, ILogger<BusinessInsightsService> logger)
+    public BusinessInsightsService(AppDbContext db, ILogger<BusinessInsightsService> logger,
+        IOptions<BusinessInsightThresholds> thresholds)
     {
         _db = db;
         _logger = logger;
+        _t = thresholds.Value;
     }
 
     public async Task<BusinessInsightsResponse> GetInsightsAsync(Guid businessId, int windowDays, CancellationToken ct)
@@ -108,7 +113,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
 
         // Minimum-data guard: skip generating insights for very new businesses
         // (metrics + top items still returned, only alerts/insights/recs gated)
-        var hasEnoughData = completedOrders >= 5;
+        var hasEnoughData = completedOrders >= _t.MinCompletedOrdersForInsights;
 
         if (hasEnoughData)
         {
@@ -148,17 +153,17 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         }
 
         // Repeat rate insights
-        if (repeatRate < 15m && totalCustomers >= 10)
+        if (repeatRate < _t.RepeatRateLowPercent && totalCustomers >= _t.MinCustomersForRepeatRate)
         {
             insights.Add(new InsightEntry
             {
                 Type = "low_repeat_rate",
-                Message = $"Repeat customer rate is {repeatRate}% — below 15% threshold",
+                Message = $"Repeat customer rate is {repeatRate}% — below {_t.RepeatRateLowPercent}% threshold",
                 Severity = "warning"
             });
             recommendations.Add("Consider loyalty incentives or follow-up messages to increase repeat orders.");
         }
-        else if (repeatRate >= 40m && totalCustomers >= 10)
+        else if (repeatRate >= _t.RepeatRateStrongPercent && totalCustomers >= _t.MinCustomersForRepeatRate)
         {
             insights.Add(new InsightEntry
             {
@@ -169,7 +174,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         }
 
         // Average ticket insight
-        if (avgTicket < 5m && completedOrders >= 10)
+        if (avgTicket < _t.AverageTicketLowUsd && completedOrders >= _t.MinCompletedOrdersForInsights * 2)
         {
             insights.Add(new InsightEntry
             {
@@ -181,7 +186,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         }
 
         // Pending payment risk
-        if (pendingPayments >= 3)
+        if (pendingPayments >= _t.PendingPaymentsWarning)
         {
             insights.Add(new InsightEntry
             {
@@ -193,7 +198,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         }
 
         // Low conversion
-        if (conversionRate < 10m && conversationsStarted >= 20)
+        if (conversionRate < _t.ConversionLowPercent && conversationsStarted >= _t.MinConversationsForConversion)
         {
             insights.Add(new InsightEntry
             {
@@ -248,18 +253,18 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
 
     // ── Deterministic state derivation (no AI) ──
 
-    private static (string title, string summary) DeriveBusinessState(
+    private (string title, string summary) DeriveBusinessState(
         int orders, decimal repeatRate, decimal conversionRate, int pendingPayments, decimal avgTicket, int customers)
     {
         if (orders < 5)
             return ("Negocio en fase inicial", "Pocos pedidos registrados. Los datos se volverán más útiles con más actividad.");
 
-        var hasRisk = pendingPayments >= 3 || conversionRate < 10m;
-        var hasStrength = repeatRate >= 30m && orders >= 20;
-        var hasGrowth = conversionRate >= 15m && orders >= 10;
+        var hasRisk = pendingPayments >= _t.PendingPaymentsWarning || conversionRate < _t.ConversionLowPercent;
+        var hasStrength = repeatRate >= _t.RepeatRateStrongPercent * 0.75m && orders >= 20;
+        var hasGrowth = conversionRate >= _t.ConversionLowPercent * 1.5m && orders >= 10;
 
         if (hasRisk && !hasStrength)
-            return ("Negocio con fricción operativa", $"Hay señales de fricción: {(pendingPayments >= 3 ? $"{pendingPayments} pagos sin verificar" : $"conversión baja ({conversionRate}%)")}. Requiere atención.");
+            return ("Negocio con fricción operativa", $"Hay señales de fricción: {(pendingPayments >= _t.PendingPaymentsWarning ? $"{pendingPayments} pagos sin verificar" : $"conversión baja ({conversionRate}%)")}. Requiere atención.");
 
         if (hasStrength && hasGrowth)
             return ("Negocio fuerte con buena tracción", $"{orders} pedidos, {repeatRate}% recompra, {conversionRate}% conversión. El negocio muestra momento positivo.");
@@ -273,7 +278,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         return ("Negocio en desarrollo", $"{orders} pedidos en el período. Enfócate en construir base de clientes recurrentes.");
     }
 
-    private static string DeriveMainOpportunity(
+    private string DeriveMainOpportunity(
         List<HourVolume> peakHours, List<ItemPerformance> topSelling, decimal repeatRate, decimal conversionRate, int orders)
     {
         if (orders < 5) return "";
@@ -281,10 +286,10 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         if (peakHours.Count > 0 && topSelling.Count > 0)
             return $"Impulsar combos de {topSelling[0].Name} en hora pico ({peakHours[0].Hour:D2}:00) para maximizar ticket promedio.";
 
-        if (repeatRate < 20m)
+        if (repeatRate < _t.RepeatRateLowPercent * 1.3m)
             return "Activar mensajes de seguimiento a clientes recientes para mejorar tasa de recompra.";
 
-        if (conversionRate < 15m)
+        if (conversionRate < _t.ConversionLowPercent * 1.5m)
             return "Optimizar el saludo del bot y la presentación del menú para mejorar conversión.";
 
         return topSelling.Count > 0
@@ -292,24 +297,24 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
             : "Construir base de clientes recurrentes con incentivos de lealtad.";
     }
 
-    private static string DeriveMainRisk(
+    private string DeriveMainRisk(
         int pendingPayments, decimal conversionRate, decimal repeatRate, int orders, int customers)
     {
         if (orders < 5) return "";
 
         if (pendingPayments >= 5)
             return $"{pendingPayments} pagos sin verificar — riesgo de pérdida de ingresos y confianza del cliente.";
-        if (pendingPayments >= 3)
+        if (pendingPayments >= _t.PendingPaymentsWarning)
             return $"{pendingPayments} comprobantes pendientes de verificación.";
-        if (conversionRate < 8m && customers >= 20)
+        if (conversionRate < _t.ConversionLowPercent * 0.8m && customers >= _t.MinConversationsForConversion)
             return $"Conversión muy baja ({conversionRate}%) — la mayoría de conversaciones no generan pedidos.";
-        if (repeatRate < 10m && customers >= 15)
+        if (repeatRate < _t.RepeatRateLowPercent * 0.67m && customers >= (int)(_t.MinCustomersForRepeatRate * 1.5))
             return $"Retención débil ({repeatRate}%) — los clientes no están regresando.";
 
         return "Sin riesgos críticos detectados en este período.";
     }
 
-    private static ActionableRecommendation DerivePrimaryRecommendation(
+    private ActionableRecommendation DerivePrimaryRecommendation(
         int pendingPayments, decimal conversionRate, decimal repeatRate, decimal avgTicket,
         List<HourVolume> peakHours, List<ItemPerformance> topSelling, int orders)
     {
@@ -321,7 +326,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
                 Impact = "Cada nuevo pedido mejora los datos disponibles para optimizar tu operación."
             };
 
-        if (pendingPayments >= 3)
+        if (pendingPayments >= _t.PendingPaymentsWarning)
             return new ActionableRecommendation
             {
                 Title = "Verificar comprobantes pendientes",
@@ -329,15 +334,15 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
                 Impact = "Reduce fricción con clientes y asegura ingresos confirmados."
             };
 
-        if (conversionRate < 10m)
+        if (conversionRate < _t.ConversionLowPercent)
             return new ActionableRecommendation
             {
                 Title = "Mejorar conversión del bot",
                 Action = "Revisa el saludo, el menú y los precios para que más conversaciones se conviertan en pedidos.",
-                Impact = $"Una mejora de {conversionRate}% a 15% podría duplicar tus pedidos sin más tráfico."
+                Impact = $"Una mejora de {conversionRate}% a {_t.ConversionLowPercent * 1.5m}% podría duplicar tus pedidos sin más tráfico."
             };
 
-        if (repeatRate < 15m)
+        if (repeatRate < _t.RepeatRateLowPercent)
             return new ActionableRecommendation
             {
                 Title = "Reactivar clientes recientes",
