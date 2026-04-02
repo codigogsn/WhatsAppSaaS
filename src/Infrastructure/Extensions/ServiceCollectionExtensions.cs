@@ -59,6 +59,9 @@ public static class ServiceCollectionExtensions
         // ── Admin Analytics (✅ FIX runtime 500) ─────────
         services.AddScoped<IAdminAnalyticsService, AdminAnalyticsService>();
 
+        // ── Business Insights (read-only intelligence layer) ──
+        services.AddScoped<IBusinessInsightsService, BusinessInsightsService>();
+
         // ── BCV Exchange Rate ─────────────────────────────
         services.AddHttpClient<IBcvRateService, BcvRateService>(client =>
         {
