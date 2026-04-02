@@ -3427,7 +3427,7 @@ function toggleAssistDock() {
   var launcher = document.getElementById('assistLauncher');
   var isOpen = dock.classList.toggle('open');
   launcher.classList.toggle('hidden', isOpen);
-  localStorage.setItem('assist_dock_open', isOpen ? '1' : '0');
+  localStorage.setItem('assist_dock_open_' + (getBusinessId() || 'global'), isOpen ? '1' : '0');
 }
 
 function initAssistDock() {
@@ -3470,7 +3470,7 @@ function initAssistDock() {
   }
 
   // Restore open/closed state
-  var wasOpen = localStorage.getItem('assist_dock_open') === '1';
+  var wasOpen = localStorage.getItem('assist_dock_open_' + (getBusinessId() || 'global')) === '1';
   if (wasOpen) {
     dock.classList.add('open');
     launcher.classList.add('hidden');
@@ -3672,15 +3672,15 @@ function spanishDetail(msg) {
   if (!msg || typeof msg !== 'string') return msg || '';
   var out = msg
     .replace(/Highest order volume at (\d{2}):00 with (\d+) orders/g, 'Mayor volumen de pedidos a las $1:00 con $2 pedidos')
-    .replace(/Top seller: (.+?) \((\d+) units\)/g, 'M\u00e1s vendido: $1 ($2 unidades)')
-    .replace(/Lowest seller: (.+?) \((\d+) units\)/g, 'Menos vendido: $1 ($2 unidades)')
+    .replace(/Top seller: (.+) \((\d+) units\)/g, 'M\u00e1s vendido: $1 ($2 unidades)')
+    .replace(/Lowest seller: (.+) \((\d+) units\)/g, 'Menos vendido: $1 ($2 unidades)')
     .replace(/Repeat customer rate is ([\d.]+)% — below 15% threshold/g, 'Tasa de recompra es $1% \u2014 por debajo del 15%')
     .replace(/Strong repeat customer rate: ([\d.]+)%/g, 'Buena tasa de recompra: $1%')
     .replace(/Average ticket is \$([\d.]+) — consider upselling or combos/g, 'Ticket promedio es \$$1 \u2014 considera combos o sugerencias')
     .replace(/(\d+) orders have unverified payment proofs/g, '$1 pedidos tienen comprobantes sin verificar')
     .replace(/Conversation-to-order conversion is ([\d.]+)% — below 10%/g, 'Conversi\u00f3n de conversaci\u00f3n a pedido es $1% \u2014 por debajo del 10%')
     .replace(/Action required: (\d+) payment proofs awaiting verification/g, 'Acci\u00f3n requerida: $1 comprobantes pendientes de verificaci\u00f3n')
-    .replace(/Consider promoting or updating '(.+?)' — lowest demand in the last (\d+) days/g, 'Considera impulsar \'$1\' \u2014 menor demanda en los \u00faltimos $2 d\u00edas')
+    .replace(/Consider promoting or updating '(.+)' — lowest demand in the last (\d+) days/g, 'Considera impulsar \'$1\' \u2014 menor demanda en los \u00faltimos $2 d\u00edas')
     .replace(/Consider loyalty incentives or follow-up messages to increase repeat orders/g, 'Considera incentivos de lealtad o mensajes de seguimiento')
     .replace(/Add combo deals or suggest add-ons to increase average order value/g, 'Agrega combos o sugerencias para aumentar el ticket promedio')
     .replace(/Review menu pricing and bot greeting to improve conversion from conversations to orders/g, 'Revisa precios del men\u00fa y el saludo del bot para mejorar conversi\u00f3n')

@@ -106,6 +106,12 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         var recommendations = new List<string>();
         var alerts = new List<string>();
 
+        // Minimum-data guard: skip generating insights for very new businesses
+        // (metrics + top items still returned, only alerts/insights/recs gated)
+        var hasEnoughData = completedOrders >= 5;
+
+        if (hasEnoughData)
+        {
         // Peak hours insight
         if (peakHours.Count > 0)
         {
@@ -197,6 +203,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
             });
             recommendations.Add("Review menu pricing and bot greeting to improve conversion from conversations to orders.");
         }
+        } // end hasEnoughData guard
 
         _logger.LogInformation(
             "INSIGHTS: generated for business {BusinessId} window={WindowDays}d orders={Orders} customers={Customers}",
