@@ -340,11 +340,21 @@ try
     app.MapGet("/health", async (AppDbContext db) =>
     {
         var dbStatus = "Disconnected";
+        int stuckQueueItems = 0;
         try
         {
             var conn = db.Database.GetDbConnection();
             await conn.OpenAsync();
             dbStatus = "Connected";
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT COUNT(*) FROM "WebhookQueue"
+                WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" >= 5
+            """;
+            var result = await cmd.ExecuteScalarAsync();
+            stuckQueueItems = Convert.ToInt32(result);
+
             await conn.CloseAsync();
         }
         catch { }
@@ -353,6 +363,7 @@ try
         {
             status = "Healthy",
             db = dbStatus,
+            stuckQueueItems,
             uptime = (DateTime.UtcNow - startTime).ToString(@"d\.hh\:mm\:ss")
         });
     });
