@@ -368,6 +368,62 @@ try
         });
     });
 
+    // Admin-protected detailed health endpoint
+    app.MapGet("/health/detailed", async (HttpContext ctx, AppDbContext db) =>
+    {
+        // Reuse X-Admin-Key protection
+        var adminKey = Environment.GetEnvironmentVariable("ADMIN_KEY");
+        if (string.IsNullOrWhiteSpace(adminKey))
+            return Results.Json(new { error = "ADMIN_KEY not configured" }, statusCode: 500);
+
+        if (!ctx.Request.Headers.TryGetValue("X-Admin-Key", out var headerKey)
+            || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(headerKey.ToString()),
+                Encoding.UTF8.GetBytes(adminKey)))
+            return Results.Json(new { error = "Missing or invalid X-Admin-Key" }, statusCode: 401);
+
+        var dbStatus = "Disconnected";
+        long queuePending = 0, stuckItems = 0;
+        string? lastProcessed = null;
+        try
+        {
+            var conn = db.Database.GetDbConnection();
+            await conn.OpenAsync();
+            dbStatus = "Connected";
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                SELECT
+                    COUNT(*) FILTER (WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" < 5) AS pending,
+                    COUNT(*) FILTER (WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" >= 5) AS stuck,
+                    MAX("ProcessedAtUtc") AS last_processed
+                FROM "WebhookQueue"
+            """;
+            using var reader = await cmd.ExecuteReaderAsync();
+            if (await reader.ReadAsync())
+            {
+                queuePending = reader.GetInt64(0);
+                stuckItems = reader.GetInt64(1);
+                lastProcessed = reader.IsDBNull(2) ? null : reader.GetDateTime(2).ToString("O");
+            }
+            await conn.CloseAsync();
+        }
+        catch { }
+
+        return Results.Ok(new
+        {
+            status = "Healthy",
+            db = dbStatus,
+            uptime = (DateTime.UtcNow - startTime).ToString(@"d\.hh\:mm\:ss"),
+            queuePendingCount = queuePending,
+            stuckQueueItems = stuckItems,
+            lastProcessedAtUtc = lastProcessed,
+            workerMode = "single-instance",
+            maxPoolSize = 25,
+            openAiConfigured = !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY"))
+        });
+    });
+
     // Prometheus-compatible metrics endpoint (plain text)
     var metricsConnString = npgsqlConnString;
     app.MapGet("/metrics", async () =>
