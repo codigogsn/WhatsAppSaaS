@@ -3431,6 +3431,8 @@ function toggleAssistDock() {
 }
 
 function initAssistDock() {
+  if (window._assistInit) return;
+  window._assistInit = true;
   var role = getAuthRole();
   var launcher = document.getElementById('assistLauncher');
   var dock = document.getElementById('assistDock');
@@ -3521,7 +3523,9 @@ function renderSuggestionChips(containerId, questions, scope, inputId, answerId,
   }
 }
 
+var _chatBusy = false;
 async function sendInsightsChat(scope, inputId, answerId, btnId) {
+  if (_chatBusy) return;
   var input = document.getElementById(inputId);
   var answerBox = document.getElementById(answerId);
   var answerText = document.getElementById(answerId + 'Text');
@@ -3531,6 +3535,7 @@ async function sendInsightsChat(scope, inputId, answerId, btnId) {
   var q = input.value.trim();
   if (!q) return;
 
+  _chatBusy = true;
   btn.disabled = true;
   answerBox.className = 'assist-chat-answer visible';
   if (answerText) answerText.textContent = 'Pensando\u2026';
@@ -3553,6 +3558,7 @@ async function sendInsightsChat(scope, inputId, answerId, btnId) {
     console.warn('Insights chat error:', e);
     if (answerText) answerText.textContent = 'No pude responder en este momento.';
   } finally {
+    _chatBusy = false;
     btn.disabled = false;
   }
 }
@@ -3664,7 +3670,7 @@ function insightLabel(type, fallback) {
 // Spanish normalization for known backend English patterns
 function spanishDetail(msg) {
   if (!msg || typeof msg !== 'string') return msg || '';
-  return msg
+  var out = msg
     .replace(/Highest order volume at (\d{2}):00 with (\d+) orders/g, 'Mayor volumen de pedidos a las $1:00 con $2 pedidos')
     .replace(/Top seller: (.+?) \((\d+) units\)/g, 'M\u00e1s vendido: $1 ($2 unidades)')
     .replace(/Lowest seller: (.+?) \((\d+) units\)/g, 'Menos vendido: $1 ($2 unidades)')
@@ -3687,6 +3693,9 @@ function spanishDetail(msg) {
     .replace(/Help (.+?) set up loyalty incentives or follow-up messages/g, 'Ayuda a $1 a configurar incentivos de lealtad')
     .replace(/Review (.+?) menu and bot flow — ([\d.]+)% conversion is below threshold/g, 'Revisa men\u00fa y flujo de $1 \u2014 $2% de conversi\u00f3n es bajo')
     .replace(/(\d+) orders in 30 days/g, '$1 pedidos en 30 d\u00edas');
+  if (/\b(orders|business|rate|customer|conversion|threshold)\b/i.test(out))
+    console.warn('[spanishDetail] untranslated insight:', out.substring(0, 80));
+  return out;
 }
 
 function insightCard(msgOrObj, severity, label) {
