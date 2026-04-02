@@ -7,11 +7,25 @@ public interface IFounderInsightsService
 
 public sealed class FounderInsightsResponse
 {
+    // Decision-oriented state
+    public string PlatformStateTitle { get; init; } = "";
+    public string PlatformStateSummary { get; init; } = "";
+    public string MainOpportunity { get; init; } = "";
+    public string MainRisk { get; init; } = "";
+    public FounderActionableRecommendation PrimaryRecommendation { get; init; } = new();
+
     public FounderInsightsSummary Summary { get; init; } = new();
     public List<FounderAlert> Alerts { get; init; } = [];
     public List<FounderInsightEntry> Insights { get; init; } = [];
     public List<FounderRecommendation> Recommendations { get; init; } = [];
     public List<FounderBusinessRank> TopBusinesses { get; init; } = [];
+}
+
+public sealed class FounderActionableRecommendation
+{
+    public string Title { get; init; } = "";
+    public string Action { get; init; } = "";
+    public string Impact { get; init; } = "";
 }
 
 public sealed class FounderInsightsSummary

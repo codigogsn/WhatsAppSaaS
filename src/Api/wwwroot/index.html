@@ -1550,6 +1550,30 @@
       line-height: 1.5;
     }
     .insights-empty { color: var(--muted); font-size: 13px; padding: 10px 0; }
+    .insights-state {
+      background: rgba(59,130,246,.04); border: 1px solid rgba(59,130,246,.1);
+      border-radius: 12px; padding: 14px 16px; margin-bottom: 16px;
+    }
+    .insights-state-title {
+      font-size: 14px; font-weight: 700; color: var(--text);
+      margin-bottom: 4px; line-height: 1.3;
+    }
+    .insights-state-summary {
+      font-size: 12px; color: var(--text-secondary, var(--muted));
+      line-height: 1.4; margin-bottom: 10px;
+    }
+    .insights-state-row {
+      display: flex; gap: 8px; align-items: flex-start;
+      font-size: 12px; color: var(--text); margin-bottom: 6px; line-height: 1.35;
+    }
+    .insights-state-row:last-child { margin-bottom: 0; }
+    .insights-state-tag {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; flex-shrink: 0; min-width: 50px;
+    }
+    .insights-state-tag.opp { color: var(--success, #059669); }
+    .insights-state-tag.risk { color: var(--danger, #ef4444); }
+    .insights-state-tag.action { color: var(--accent, #3b82f6); }
     .insights-section { margin-bottom: 20px; }
     .insights-section:last-child { margin-bottom: 0; }
 
@@ -3342,10 +3366,25 @@ async function loadFounderInsights() {
 
     var html = '';
 
+    // 0. Platform state header
+    if (data.platformStateTitle) {
+      html += '<div class="insights-state">';
+      html += '<div class="insights-state-title">' + esc(data.platformStateTitle) + '</div>';
+      if (data.platformStateSummary)
+        html += '<div class="insights-state-summary">' + esc(data.platformStateSummary) + '</div>';
+      if (data.mainOpportunity)
+        html += '<div class="insights-state-row"><span class="insights-state-tag opp">Oportunidad</span><span>' + esc(data.mainOpportunity) + '</span></div>';
+      if (data.mainRisk)
+        html += '<div class="insights-state-row"><span class="insights-state-tag risk">Riesgo</span><span>' + esc(data.mainRisk) + '</span></div>';
+      if (data.primaryRecommendation && data.primaryRecommendation.title)
+        html += '<div class="insights-state-row"><span class="insights-state-tag action">Hacer hoy</span><span><b>' + esc(data.primaryRecommendation.title) + '</b> \u2014 ' + esc(data.primaryRecommendation.action) + '</span></div>';
+      html += '</div>';
+    }
+
     // Summary strip
     if (data.summary) {
       html += '<div class="kpi" style="margin-bottom:16px;">';
-      html += '<div class="card" style="min-height:auto;padding:14px 18px;"><div class="label">Orders (30d)</div><div class="value" style="font-size:22px;">' + esc(String(data.summary.totalOrders)) + '</div></div>';
+      html += '<div class="card" style="min-height:auto;padding:14px 18px;"><div class="label">Pedidos (30d)</div><div class="value" style="font-size:22px;">' + esc(String(data.summary.totalOrders)) + '</div></div>';
       html += '<div class="card" style="min-height:auto;padding:14px 18px;"><div class="label">Revenue (30d)</div><div class="value" style="font-size:22px;">$' + fmtMoney(data.summary.totalRevenue) + '</div></div>';
       html += '<div class="card" style="min-height:auto;padding:14px 18px;"><div class="label">Avg Orders/Biz</div><div class="value" style="font-size:22px;">' + esc(String(data.summary.avgOrdersPerBusiness)) + '</div></div>';
       html += '</div>';
@@ -3603,6 +3642,21 @@ async function loadBusinessInsights() {
     }
 
     var html = '';
+
+    // 0. Business state header
+    if (data.businessStateTitle) {
+      html += '<div class="insights-state">';
+      html += '<div class="insights-state-title">' + esc(data.businessStateTitle) + '</div>';
+      if (data.businessStateSummary)
+        html += '<div class="insights-state-summary">' + esc(data.businessStateSummary) + '</div>';
+      if (data.mainOpportunity)
+        html += '<div class="insights-state-row"><span class="insights-state-tag opp">Oportunidad</span><span>' + esc(data.mainOpportunity) + '</span></div>';
+      if (data.mainRisk)
+        html += '<div class="insights-state-row"><span class="insights-state-tag risk">Riesgo</span><span>' + esc(data.mainRisk) + '</span></div>';
+      if (data.primaryRecommendation && data.primaryRecommendation.title)
+        html += '<div class="insights-state-row"><span class="insights-state-tag action">Hacer hoy</span><span><b>' + esc(data.primaryRecommendation.title) + '</b> — ' + esc(data.primaryRecommendation.action) + '</span></div>';
+      html += '</div>';
+    }
 
     // 1. Alerts (most urgent — red header)
     if (data.alerts && data.alerts.length > 0) {

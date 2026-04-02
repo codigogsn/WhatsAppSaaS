@@ -12,6 +12,14 @@ public sealed class BusinessInsightsResponse
     public Guid BusinessId { get; init; }
     public int WindowDays { get; init; }
     public DateTime GeneratedAtUtc { get; init; }
+
+    // Decision-oriented state
+    public string BusinessStateTitle { get; init; } = "";
+    public string BusinessStateSummary { get; init; } = "";
+    public string MainOpportunity { get; init; } = "";
+    public string MainRisk { get; init; } = "";
+    public ActionableRecommendation PrimaryRecommendation { get; init; } = new();
+
     public InsightsMetrics Metrics { get; init; } = new();
     public List<ItemPerformance> TopSellingItems { get; init; } = [];
     public List<ItemPerformance> LowPerformingItems { get; init; } = [];
@@ -19,6 +27,13 @@ public sealed class BusinessInsightsResponse
     public List<InsightEntry> Insights { get; init; } = [];
     public List<string> Recommendations { get; init; } = [];
     public List<string> Alerts { get; init; } = [];
+}
+
+public sealed class ActionableRecommendation
+{
+    public string Title { get; init; } = "";
+    public string Action { get; init; } = "";
+    public string Impact { get; init; } = "";
 }
 
 public sealed class InsightsMetrics

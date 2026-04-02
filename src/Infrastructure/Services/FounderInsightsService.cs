@@ -196,11 +196,33 @@ public sealed class FounderInsightsService : IFounderInsightsService
             });
         }
 
-        _logger.LogInformation("FOUNDER INSIGHTS: generated — businesses={Biz} orders={Orders} revenue={Revenue}",
-            bizCount, totalOrders, totalRevenue);
+        // ── Derive platform state (deterministic) ──
+        var (platformTitle, platformSummary) = DerivePlatformState(bizCount, totalOrders, avgOrdersPerBiz, alerts.Count);
+        var mainOpp = topBusinesses.Count > 0
+            ? $"Convertir a {topBusinesses[0].Name} en caso de éxito — lidera con {topBusinesses[0].Orders} pedidos."
+            : "Onboardear nuevos negocios para diversificar el portafolio.";
+
+        var mainRisk = alerts.Count > 0
+            ? alerts[0].Message
+            : (worstConv != null && worstConv.Rate < 10
+                ? $"{worstConv.Name} tiene conversión crítica ({worstConv.Rate}%)."
+                : "Sin riesgos críticos detectados en el portafolio.");
+
+        var worstConvTuple = worstConv != null
+            ? ((Guid BusinessId, decimal Rate, string Name)?)(worstConv.BusinessId, worstConv.Rate, worstConv.Name)
+            : null;
+        var primaryRec = DerivePlatformRecommendation(alerts, topBusinesses, worstConvTuple);
+
+        _logger.LogInformation("FOUNDER INSIGHTS: generated — businesses={Biz} orders={Orders} revenue={Revenue} state={State}",
+            bizCount, totalOrders, totalRevenue, platformTitle);
 
         return new FounderInsightsResponse
         {
+            PlatformStateTitle = platformTitle,
+            PlatformStateSummary = platformSummary,
+            MainOpportunity = mainOpp,
+            MainRisk = mainRisk,
+            PrimaryRecommendation = primaryRec,
             Summary = new FounderInsightsSummary
             {
                 TotalOrders = totalOrders,
@@ -211,6 +233,55 @@ public sealed class FounderInsightsService : IFounderInsightsService
             Insights = insights.Take(5).ToList(),
             Recommendations = recommendations.Take(5).ToList(),
             TopBusinesses = topBusinesses
+        };
+    }
+
+    private static (string title, string summary) DerivePlatformState(int bizCount, int totalOrders, decimal avgPerBiz, int alertCount)
+    {
+        if (bizCount == 0)
+            return ("Portafolio vacío", "No hay negocios activos con pedidos en los últimos 30 días.");
+        if (alertCount >= 3)
+            return ("Portafolio con atención requerida", $"{alertCount} alertas activas en {bizCount} negocios. Revisión prioritaria necesaria.");
+        if (bizCount >= 3 && avgPerBiz >= 10)
+            return ("Portafolio saludable con tracción", $"{bizCount} negocios activos promediando {avgPerBiz} pedidos cada uno.");
+        if (bizCount >= 2 && avgPerBiz >= 5)
+            return ("Portafolio estable con oportunidad de expansión", $"{bizCount} negocios generando actividad regular.");
+        return ("Portafolio en desarrollo", $"{bizCount} negocio(s) activo(s) con {totalOrders} pedidos totales.");
+    }
+
+    private static FounderActionableRecommendation DerivePlatformRecommendation(
+        List<FounderAlert> alerts, List<FounderBusinessRank> topBiz,
+        (Guid BusinessId, decimal Rate, string Name)? worstConv)
+    {
+        if (alerts.Count > 0)
+            return new FounderActionableRecommendation
+            {
+                Title = "Atender alerta prioritaria",
+                Action = alerts[0].Message,
+                Impact = "Resolver alertas activas previene pérdida de ingresos y clientes."
+            };
+
+        if (worstConv.HasValue && worstConv.Value.Rate < 10)
+            return new FounderActionableRecommendation
+            {
+                Title = $"Mejorar conversión de {worstConv.Value.Name}",
+                Action = $"Revisar menú y flujo del bot — {worstConv.Value.Rate}% de conversión está debajo del umbral.",
+                Impact = "Duplicar conversión genera más pedidos sin inversión adicional en tráfico."
+            };
+
+        if (topBiz.Count > 0)
+            return new FounderActionableRecommendation
+            {
+                Title = $"Replicar éxito de {topBiz[0].Name}",
+                Action = "Documenta qué hace diferente este negocio y aplícalo a los demás.",
+                Impact = "Escalar las mejores prácticas acelera el crecimiento del portafolio."
+            };
+
+        return new FounderActionableRecommendation
+        {
+            Title = "Expandir portafolio",
+            Action = "Onboardea nuevos restaurantes para diversificar ingresos.",
+            Impact = "Más negocios activos estabiliza la plataforma."
         };
     }
 }

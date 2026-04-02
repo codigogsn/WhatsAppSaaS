@@ -25,11 +25,13 @@ public sealed class InsightsChatService : IInsightsChatService
     private const int MaxContextChars = 2000;
 
     private const string SystemPrompt = """
-        Eres un analista de negocios conciso para una plataforma de pedidos por WhatsApp.
-        Responde SOLO usando los datos proporcionados.
-        NO inventes datos. NO especules más allá de lo dado.
-        Respuestas cortas (2-4 oraciones máximo), accionables, siempre en español.
-        Si los datos son insuficientes para responder, dilo claramente.
+        Eres un copiloto de decisiones de negocio para restaurantes que venden por WhatsApp.
+        Responde SOLO usando los datos proporcionados. NO inventes datos.
+        Estilo: directo, estratégico, accionable. Siempre en español.
+        Formato: máximo 3 oraciones. Empieza con el hallazgo clave, luego la acción.
+        Usa frases como "Tu negocio muestra...", "La oportunidad más clara es...", "La acción recomendada es...".
+        NO seas genérico. NO motives sin sustento. NO repitas métricas sin interpretar.
+        Si los datos son insuficientes, dilo en una oración.
         """;
 
     public InsightsChatService(
@@ -145,6 +147,16 @@ public sealed class InsightsChatService : IInsightsChatService
     {
         var sb = new StringBuilder(1024);
 
+        // State
+        if (!string.IsNullOrWhiteSpace(d.BusinessStateTitle))
+            sb.AppendLine($"ESTADO: {d.BusinessStateTitle}");
+        if (!string.IsNullOrWhiteSpace(d.MainOpportunity))
+            sb.AppendLine($"OPORTUNIDAD: {d.MainOpportunity}");
+        if (!string.IsNullOrWhiteSpace(d.MainRisk))
+            sb.AppendLine($"RIESGO: {d.MainRisk}");
+        if (!string.IsNullOrWhiteSpace(d.PrimaryRecommendation.Title))
+            sb.AppendLine($"ACCIÓN PRINCIPAL: {d.PrimaryRecommendation.Title} — {d.PrimaryRecommendation.Action}");
+
         // Metrics
         var m = d.Metrics;
         sb.AppendLine($"Pedidos completados: {m.CompletedOrders}");
@@ -196,6 +208,16 @@ public sealed class InsightsChatService : IInsightsChatService
     private static string BuildFounderContext(FounderInsightsResponse d)
     {
         var sb = new StringBuilder(1024);
+
+        // State
+        if (!string.IsNullOrWhiteSpace(d.PlatformStateTitle))
+            sb.AppendLine($"ESTADO: {d.PlatformStateTitle}");
+        if (!string.IsNullOrWhiteSpace(d.MainOpportunity))
+            sb.AppendLine($"OPORTUNIDAD: {d.MainOpportunity}");
+        if (!string.IsNullOrWhiteSpace(d.MainRisk))
+            sb.AppendLine($"RIESGO: {d.MainRisk}");
+        if (!string.IsNullOrWhiteSpace(d.PrimaryRecommendation.Title))
+            sb.AppendLine($"ACCIÓN PRINCIPAL: {d.PrimaryRecommendation.Title} — {d.PrimaryRecommendation.Action}");
 
         // Summary
         sb.AppendLine($"Pedidos totales (30d): {d.Summary.TotalOrders}");

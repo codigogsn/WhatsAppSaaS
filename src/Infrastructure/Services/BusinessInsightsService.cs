@@ -205,15 +205,29 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         }
         } // end hasEnoughData guard
 
+        // ── 9. Derive business state (deterministic, no AI) ──
+        var (stateTitle, stateSummary) = DeriveBusinessState(
+            completedOrders, repeatRate, conversionRate, pendingPayments, avgTicket, totalCustomers);
+        var mainOpp = DeriveMainOpportunity(
+            peakHours, topSelling, repeatRate, conversionRate, completedOrders);
+        var mainRisk = DeriveMainRisk(pendingPayments, conversionRate, repeatRate, completedOrders, totalCustomers);
+        var primaryRec = DerivePrimaryRecommendation(
+            pendingPayments, conversionRate, repeatRate, avgTicket, peakHours, topSelling, completedOrders);
+
         _logger.LogInformation(
-            "INSIGHTS: generated for business {BusinessId} window={WindowDays}d orders={Orders} customers={Customers}",
-            businessId, windowDays, completedOrders, totalCustomers);
+            "INSIGHTS: generated for business {BusinessId} window={WindowDays}d orders={Orders} customers={Customers} state={State}",
+            businessId, windowDays, completedOrders, totalCustomers, stateTitle);
 
         return new BusinessInsightsResponse
         {
             BusinessId = businessId,
             WindowDays = windowDays,
             GeneratedAtUtc = now,
+            BusinessStateTitle = stateTitle,
+            BusinessStateSummary = stateSummary,
+            MainOpportunity = mainOpp,
+            MainRisk = mainRisk,
+            PrimaryRecommendation = primaryRec,
             Metrics = new InsightsMetrics
             {
                 CompletedOrders = completedOrders,
@@ -229,6 +243,121 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
             Insights = insights,
             Recommendations = recommendations,
             Alerts = alerts
+        };
+    }
+
+    // ── Deterministic state derivation (no AI) ──
+
+    private static (string title, string summary) DeriveBusinessState(
+        int orders, decimal repeatRate, decimal conversionRate, int pendingPayments, decimal avgTicket, int customers)
+    {
+        if (orders < 5)
+            return ("Negocio en fase inicial", "Pocos pedidos registrados. Los datos se volverán más útiles con más actividad.");
+
+        var hasRisk = pendingPayments >= 3 || conversionRate < 10m;
+        var hasStrength = repeatRate >= 30m && orders >= 20;
+        var hasGrowth = conversionRate >= 15m && orders >= 10;
+
+        if (hasRisk && !hasStrength)
+            return ("Negocio con fricción operativa", $"Hay señales de fricción: {(pendingPayments >= 3 ? $"{pendingPayments} pagos sin verificar" : $"conversión baja ({conversionRate}%)")}. Requiere atención.");
+
+        if (hasStrength && hasGrowth)
+            return ("Negocio fuerte con buena tracción", $"{orders} pedidos, {repeatRate}% recompra, {conversionRate}% conversión. El negocio muestra momento positivo.");
+
+        if (hasStrength)
+            return ("Negocio estable con base sólida", $"Buena lealtad de clientes ({repeatRate}% recompra) con {orders} pedidos completados.");
+
+        if (hasGrowth)
+            return ("Negocio con oportunidad de crecimiento", $"Conversión saludable ({conversionRate}%) con espacio para aumentar ticket y retención.");
+
+        return ("Negocio en desarrollo", $"{orders} pedidos en el período. Enfócate en construir base de clientes recurrentes.");
+    }
+
+    private static string DeriveMainOpportunity(
+        List<HourVolume> peakHours, List<ItemPerformance> topSelling, decimal repeatRate, decimal conversionRate, int orders)
+    {
+        if (orders < 5) return "";
+
+        if (peakHours.Count > 0 && topSelling.Count > 0)
+            return $"Impulsar combos de {topSelling[0].Name} en hora pico ({peakHours[0].Hour:D2}:00) para maximizar ticket promedio.";
+
+        if (repeatRate < 20m)
+            return "Activar mensajes de seguimiento a clientes recientes para mejorar tasa de recompra.";
+
+        if (conversionRate < 15m)
+            return "Optimizar el saludo del bot y la presentación del menú para mejorar conversión.";
+
+        return topSelling.Count > 0
+            ? $"Promocionar {topSelling[0].Name} como producto estrella para atraer nuevos clientes."
+            : "Construir base de clientes recurrentes con incentivos de lealtad.";
+    }
+
+    private static string DeriveMainRisk(
+        int pendingPayments, decimal conversionRate, decimal repeatRate, int orders, int customers)
+    {
+        if (orders < 5) return "";
+
+        if (pendingPayments >= 5)
+            return $"{pendingPayments} pagos sin verificar — riesgo de pérdida de ingresos y confianza del cliente.";
+        if (pendingPayments >= 3)
+            return $"{pendingPayments} comprobantes pendientes de verificación.";
+        if (conversionRate < 8m && customers >= 20)
+            return $"Conversión muy baja ({conversionRate}%) — la mayoría de conversaciones no generan pedidos.";
+        if (repeatRate < 10m && customers >= 15)
+            return $"Retención débil ({repeatRate}%) — los clientes no están regresando.";
+
+        return "Sin riesgos críticos detectados en este período.";
+    }
+
+    private static ActionableRecommendation DerivePrimaryRecommendation(
+        int pendingPayments, decimal conversionRate, decimal repeatRate, decimal avgTicket,
+        List<HourVolume> peakHours, List<ItemPerformance> topSelling, int orders)
+    {
+        if (orders < 5)
+            return new ActionableRecommendation
+            {
+                Title = "Generar primeros pedidos",
+                Action = "Comparte el enlace de WhatsApp con tus clientes más frecuentes para activar el canal.",
+                Impact = "Cada nuevo pedido mejora los datos disponibles para optimizar tu operación."
+            };
+
+        if (pendingPayments >= 3)
+            return new ActionableRecommendation
+            {
+                Title = "Verificar comprobantes pendientes",
+                Action = $"Revisa y verifica los {pendingPayments} comprobantes de pago en el panel de pedidos.",
+                Impact = "Reduce fricción con clientes y asegura ingresos confirmados."
+            };
+
+        if (conversionRate < 10m)
+            return new ActionableRecommendation
+            {
+                Title = "Mejorar conversión del bot",
+                Action = "Revisa el saludo, el menú y los precios para que más conversaciones se conviertan en pedidos.",
+                Impact = $"Una mejora de {conversionRate}% a 15% podría duplicar tus pedidos sin más tráfico."
+            };
+
+        if (repeatRate < 15m)
+            return new ActionableRecommendation
+            {
+                Title = "Reactivar clientes recientes",
+                Action = "Envía un mensaje de seguimiento o promoción a clientes que ordenaron en los últimos 30 días.",
+                Impact = "Aumentar recompra es más rentable que adquirir clientes nuevos."
+            };
+
+        if (peakHours.Count > 0 && topSelling.Count > 0)
+            return new ActionableRecommendation
+            {
+                Title = "Impulsar combos en hora pico",
+                Action = $"Crea un combo con {topSelling[0].Name} para las {peakHours[0].Hour:D2}:00 hrs.",
+                Impact = "Aumenta ticket promedio en el momento de mayor demanda."
+            };
+
+        return new ActionableRecommendation
+        {
+            Title = "Mantener momentum",
+            Action = "Continúa la operación actual y monitorea métricas semanalmente.",
+            Impact = "Consistencia en el servicio construye lealtad a largo plazo."
         };
     }
 }
