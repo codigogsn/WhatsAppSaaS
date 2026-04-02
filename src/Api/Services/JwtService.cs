@@ -26,7 +26,7 @@ public sealed class JwtService
 
         // Safe diagnostic — never log the actual secret
         var source = !string.IsNullOrWhiteSpace(configSecret) ? "Jwt:Secret config" : "JWT_SECRET env";
-        Console.WriteLine($"[JwtService] secret source = {source}, length = {_secret.Length}");
+        Serilog.Log.Debug("JwtService: secret source={Source} length={Length}", source, _secret.Length);
     }
 
     public string GenerateToken(Guid userId, Guid businessId, string role, string email,
