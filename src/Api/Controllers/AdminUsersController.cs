@@ -95,8 +95,8 @@ public sealed class AdminUsersController : ControllerBase
             return BadRequest(new { error = "Name is required" });
         if (string.IsNullOrWhiteSpace(req.Email))
             return BadRequest(new { error = "Email is required" });
-        if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 6)
-            return BadRequest(new { error = "Password must be at least 6 characters" });
+        if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 8)
+            return BadRequest(new { error = "Password must be at least 8 characters" });
 
         var validRoles = new[] { "Owner", "Manager", "Operator" };
         if (!validRoles.Contains(req.Role))
@@ -165,8 +165,8 @@ public sealed class AdminUsersController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(req.Password))
         {
-            if (req.Password.Length < 6)
-                return BadRequest(new { error = "Password must be at least 6 characters" });
+            if (req.Password.Length < 8)
+                return BadRequest(new { error = "Password must be at least 8 characters" });
             user.PasswordHash = AuthController.HashPassword(req.Password);
         }
 
@@ -237,8 +237,8 @@ public sealed class AdminUsersController : ControllerBase
             return BadRequest(new { error = "Name is required" });
         if (string.IsNullOrWhiteSpace(req.Email))
             return BadRequest(new { error = "Email is required" });
-        if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 6)
-            return BadRequest(new { error = "Password must be at least 6 characters" });
+        if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 8)
+            return BadRequest(new { error = "Password must be at least 8 characters" });
         if (req.BusinessIds.Count == 0)
             return BadRequest(new { error = "At least one business must be selected" });
 
@@ -384,8 +384,8 @@ public sealed class AdminUsersController : ControllerBase
             if (req.IsActive.HasValue) u.IsActive = req.IsActive.Value;
             if (!string.IsNullOrWhiteSpace(req.Password))
             {
-                if (req.Password.Length < 6)
-                    return BadRequest(new { error = "Password must be at least 6 characters" });
+                if (req.Password.Length < 8)
+                    return BadRequest(new { error = "Password must be at least 8 characters" });
                 u.PasswordHash = AuthController.HashPassword(req.Password);
             }
         }
@@ -449,8 +449,8 @@ public sealed class AdminUsersController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.Email) || string.IsNullOrWhiteSpace(req.Password) || string.IsNullOrWhiteSpace(req.Name))
             return BadRequest(new { error = "Name, email, and password are required" });
 
-        if (req.Password.Length < 6)
-            return BadRequest(new { error = "Password must be at least 6 characters" });
+        if (req.Password.Length < 8)
+            return BadRequest(new { error = "Password must be at least 8 characters" });
 
         var biz = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == req.BusinessId && b.IsActive, ct);
         if (biz is null)

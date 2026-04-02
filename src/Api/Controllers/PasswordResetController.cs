@@ -155,8 +155,8 @@ public class PasswordResetController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.Token))
             return BadRequest(new { error = "Token is required" });
 
-        if (string.IsNullOrWhiteSpace(req.NewPassword) || req.NewPassword.Length < 6)
-            return BadRequest(new { error = "Password must be at least 6 characters" });
+        if (string.IsNullOrWhiteSpace(req.NewPassword) || req.NewPassword.Length < 8)
+            return BadRequest(new { error = "Password must be at least 8 characters" });
 
         var tokenHash = HashToken(req.Token);
 
