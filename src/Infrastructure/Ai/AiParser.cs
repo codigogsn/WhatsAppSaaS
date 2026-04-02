@@ -1,6 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using WhatsAppSaaS.Application.Common;
@@ -79,8 +80,8 @@ public sealed class AiParser : IAiParser
         var apiKey = _options.ResolveApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
-            _logger.LogError("OPENAI_API_KEY is not configured — returning general fallback");
-            return Fallback("api_key_missing");
+            _logger.LogError("OPENAI_API_KEY is not configured — attempting local fallback");
+            return FallbackWithLocalParse("api_key_missing", message, from);
         }
 
         // ── Build the chat-completion request ───────────
@@ -112,7 +113,7 @@ public sealed class AiParser : IAiParser
                 _logger.LogError(
                     "OpenAI returned {StatusCode}: {Body}",
                     (int)response.StatusCode, errorBody);
-                return Fallback("llm_http_error");
+                return FallbackWithLocalParse("llm_http_error", message, from);
             }
 
             // ── Extract the assistant content ───────────
@@ -122,7 +123,7 @@ public sealed class AiParser : IAiParser
             if (string.IsNullOrWhiteSpace(assistantJson))
             {
                 _logger.LogWarning("Empty assistant content in OpenAI response");
-                return Fallback("empty_response");
+                return FallbackWithLocalParse("empty_response", message, from);
             }
 
             _logger.LogDebug("LLM raw output for {ConversationId}: {Raw}", conversationId, assistantJson);
@@ -133,7 +134,7 @@ public sealed class AiParser : IAiParser
             if (result is null)
             {
                 _logger.LogWarning("Deserialization returned null for conversation {ConversationId}", conversationId);
-                return Fallback("parse_failed");
+                return FallbackWithLocalParse("parse_failed", message, from);
             }
 
             _logger.LogInformation(
@@ -147,17 +148,17 @@ public sealed class AiParser : IAiParser
         catch (JsonException ex)
         {
             _logger.LogError(ex, "Failed to parse LLM JSON for conversation {ConversationId}", conversationId);
-            return Fallback("parse_failed");
+            return FallbackWithLocalParse("parse_failed", message, from);
         }
         catch (HttpRequestException ex)
         {
             _logger.LogError(ex, "HTTP error calling OpenAI for conversation {ConversationId}", conversationId);
-            return Fallback("llm_http_error");
+            return FallbackWithLocalParse("llm_http_error", message, from);
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
             _logger.LogError(ex, "Timeout calling OpenAI for conversation {ConversationId}", conversationId);
-            return Fallback("llm_timeout");
+            return FallbackWithLocalParse("llm_timeout", message, from);
         }
     }
 
@@ -178,7 +179,87 @@ public sealed class AiParser : IAiParser
     }
 
     /// <summary>
-    /// Safe fallback when the LLM call or parse fails.
+    /// Attempts a simple local regex parse before falling back to generic response.
+    /// Matches patterns like "2 hamburguesas", "1 coca cola y 3 tequeños".
+    /// </summary>
+    private AiParseResult FallbackWithLocalParse(string reason, string message, string from)
+    {
+        try
+        {
+            var items = LocalParseItems(message);
+            if (items.Count > 0)
+            {
+                _logger.LogInformation("AI FALLBACK PARSE: recovered simple order for {From} — {Items}",
+                    from, string.Join(", ", items.Select(i => $"{i.Quantity}x {i.Name}")));
+
+                return new AiParseResult
+                {
+                    Intent = RestaurantIntent.OrderCreate,
+                    Confidence = 0.6,
+                    MissingFields = ["delivery_type"],
+                    Args = new ParsedArgs
+                    {
+                        Order = new OrderArgs { Items = items }
+                    }
+                };
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Local fallback parse failed (non-fatal)");
+        }
+
+        return Fallback(reason);
+    }
+
+    /// <summary>
+    /// Extracts quantity+item pairs from simple Spanish order text.
+    /// Matches: "2 hamburguesas", "una coca cola", "3 tequeños y 1 pepsi"
+    /// </summary>
+    private static List<OrderItem> LocalParseItems(string text)
+    {
+        var items = new List<OrderItem>();
+        var normalized = text.Trim().ToLowerInvariant();
+
+        // Split on common separators: "y", ",", "+"
+        var segments = Regex.Split(normalized, @"\s*(?:,|\by\b|\+)\s*");
+
+        // Pattern: optional number/word-number + item name (at least 2 chars)
+        var itemPattern = new Regex(
+            @"^(?:(?<qty>\d{1,2})\s+|(?<word>una?|dos|tres|cuatro|cinco|media)\s+)?(?<name>[a-záéíóúñü][a-záéíóúñü\s]{1,40})$",
+            RegexOptions.Compiled);
+
+        var wordToNum = new Dictionary<string, int>
+        {
+            ["un"] = 1, ["una"] = 1, ["dos"] = 2, ["tres"] = 3,
+            ["cuatro"] = 4, ["cinco"] = 5, ["media"] = 1
+        };
+
+        foreach (var seg in segments)
+        {
+            var s = seg.Trim();
+            if (s.Length < 2) continue;
+
+            var m = itemPattern.Match(s);
+            if (!m.Success) continue;
+
+            var qty = 1;
+            if (m.Groups["qty"].Success)
+                qty = int.Parse(m.Groups["qty"].Value);
+            else if (m.Groups["word"].Success && wordToNum.TryGetValue(m.Groups["word"].Value, out var wn))
+                qty = wn;
+
+            var name = m.Groups["name"].Value.Trim();
+            if (name.Length < 2 || qty < 1 || qty > 20) continue;
+
+            items.Add(new OrderItem { Name = name, Quantity = qty });
+        }
+
+        return items;
+    }
+
+    /// <summary>
+    /// Safe fallback when the LLM call or parse fails and local parse found nothing.
     /// </summary>
     private static AiParseResult Fallback(string reason) => new()
     {
