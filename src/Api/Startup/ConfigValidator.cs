@@ -20,15 +20,23 @@ public static class ConfigValidator
             ["JWT_SECRET"] = "founder login will not work",
         };
 
+        var missing = new List<string>();
+
         // WhatsApp access token can be either name
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN"))
             && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("META_ACCESS_TOKEN")))
+        {
             Log.Error("CONFIG MISSING: No WhatsApp access token set (WHATSAPP_ACCESS_TOKEN / META_ACCESS_TOKEN)");
+            missing.Add("WHATSAPP_ACCESS_TOKEN");
+        }
 
         foreach (var (key, impact) in criticalVars)
         {
             if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(key)))
+            {
                 Log.Error("CONFIG MISSING: {Variable} not set — {Impact}", key, impact);
+                missing.Add(key);
+            }
         }
 
         // SMTP (non-critical but warn)
@@ -44,5 +52,13 @@ public static class ConfigValidator
             Log.Error("CONFIG MISSING: DATA_PROTECTION_KEYS_PATH not set — keys will NOT persist across deploys");
 
         Log.Information("CONFIG CHECK: WhatsApp + SMTP configuration loaded");
+
+        // Fail fast in production if critical vars are missing
+        if (missing.Count > 0)
+        {
+            var msg = $"FATAL: cannot start in Production — missing critical env vars: {string.Join(", ", missing)}";
+            Log.Fatal(msg);
+            throw new InvalidOperationException(msg);
+        }
     }
 }
