@@ -73,9 +73,7 @@ public sealed class AiParser : IAiParser
         string conversationId,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation(
-            "AiParser invoked for conversation {ConversationId} from {From}: {Message}",
-            conversationId, from, message);
+        _logger.LogInformation("AiParser invoked for conversation {ConversationId}", conversationId);
 
         var apiKey = _options.ResolveApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -189,8 +187,8 @@ public sealed class AiParser : IAiParser
             var items = LocalParseItems(message);
             if (items.Count > 0)
             {
-                _logger.LogInformation("AI FALLBACK PARSE: recovered simple order for {From} — {Items}",
-                    from, string.Join(", ", items.Select(i => $"{i.Quantity}x {i.Name}")));
+                _logger.LogInformation("AI FALLBACK PARSE: recovered simple order — {Items}",
+                    string.Join(", ", items.Select(i => $"{i.Quantity}x {i.Name}")));
 
                 return new AiParseResult
                 {

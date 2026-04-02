@@ -85,7 +85,7 @@ public sealed class AuthController : ControllerBase
 
         if (assignments.Count == 0)
         {
-            _logger.LogWarning("Login failed: no user found for {Email}", email);
+            _logger.LogWarning("Login failed: user not found");
             return Unauthorized(new { error = "Invalid credentials" });
         }
 
@@ -93,13 +93,13 @@ public sealed class AuthController : ControllerBase
         var primary = assignments.FirstOrDefault(a => a.UserActive);
         if (primary.UserId == Guid.Empty)
         {
-            _logger.LogWarning("Login failed: user {Email} is inactive", email);
+            _logger.LogWarning("Login failed: user inactive");
             return Unauthorized(new { error = "Invalid credentials" });
         }
 
         if (!VerifyPassword(req.Password, primary.PasswordHash))
         {
-            _logger.LogWarning("Login failed: wrong password for {Email}", email);
+            _logger.LogWarning("Login failed: invalid password");
             return Unauthorized(new { error = "Invalid credentials" });
         }
 
@@ -112,7 +112,7 @@ public sealed class AuthController : ControllerBase
 
         if (activeBizIds.Count == 0)
         {
-            _logger.LogWarning("Login failed: no active businesses for {Email}", email);
+            _logger.LogWarning("Login failed: no active businesses");
             return Unauthorized(new { error = "No active businesses assigned" });
         }
 
@@ -125,8 +125,8 @@ public sealed class AuthController : ControllerBase
 
         var token = _jwt.GenerateToken(primary.UserId, activeBizIds[0], primary.Role, primary.Email, activeBizIds);
 
-        _logger.LogInformation("Login success: {Email} role={Role} businesses={Count}",
-            primary.Email, primary.Role, activeBizIds.Count);
+        _logger.LogInformation("Login success: role={Role} businesses={Count}",
+            primary.Role, activeBizIds.Count);
 
         return Ok(new
         {

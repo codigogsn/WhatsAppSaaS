@@ -102,7 +102,7 @@ public class BackgroundJobTests : IDisposable
         await _db.SaveChangesAsync();
 
         // Run cleanup via store
-        var store = new ConversationStateStore(_db);
+        var store = new ConversationStateStore(_db, Microsoft.Extensions.Logging.Abstractions.NullLogger<ConversationStateStore>.Instance);
         await store.PurgeOldStatesAsync(TimeSpan.FromHours(6));
 
         var remaining = await _db.ConversationStates.ToListAsync();

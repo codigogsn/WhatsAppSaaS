@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Domain.Entities;
 
@@ -11,11 +12,13 @@ namespace WhatsAppSaaS.Infrastructure.Persistence;
 public sealed class ConversationStateStore : IConversationStateStore
 {
     private readonly AppDbContext _db;
+    private readonly ILogger<ConversationStateStore> _logger;
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public ConversationStateStore(AppDbContext db)
+    public ConversationStateStore(AppDbContext db, ILogger<ConversationStateStore> logger)
     {
         _db = db;
+        _logger = logger;
     }
 
     public async Task<ConversationFields> GetOrCreateAsync(string conversationId, Guid? businessId, CancellationToken ct = default)
@@ -50,7 +53,7 @@ public sealed class ConversationStateStore : IConversationStateStore
                 {
                     entity.UpdatedAtUtc = DateTime.UtcNow;
                     try { return JsonSerializer.Deserialize<ConversationFields>(entity.StateJson, JsonOpts) ?? new ConversationFields(); }
-                    catch { return new ConversationFields(); }
+                    catch { _logger.LogWarning("Corrupt StateJson for {ConversationId}", conversationId); return new ConversationFields(); }
                 }
             }
 
@@ -65,6 +68,7 @@ public sealed class ConversationStateStore : IConversationStateStore
         }
         catch
         {
+            _logger.LogWarning("Corrupt StateJson for {ConversationId}", conversationId);
             return new ConversationFields();
         }
     }

@@ -227,7 +227,6 @@ public sealed class AdminUsersController : ControllerBase
 
     // POST /api/admin/users/multi — Create user with multiple business assignments (global admin only)
     [HttpPost("multi")]
-    [AllowAnonymous]
     public async Task<IActionResult> CreateMulti([FromBody] CreateMultiUserRequest req, CancellationToken ct)
     {
         if (!IsGlobalAdmin() && !IsFounderRole())
@@ -299,7 +298,6 @@ public sealed class AdminUsersController : ControllerBase
 
     // GET /api/admin/users/all — List all users across all businesses (global admin only)
     [HttpGet("all")]
-    [AllowAnonymous]
     public async Task<IActionResult> ListAll(CancellationToken ct)
     {
         if (!IsGlobalAdmin() && !IsFounderRole())
@@ -357,7 +355,6 @@ public sealed class AdminUsersController : ControllerBase
 
     // PATCH /api/admin/users/multi/{email} — Update user across all assigned businesses (global admin only)
     [HttpPatch("multi/{email}")]
-    [AllowAnonymous]
     public async Task<IActionResult> UpdateMulti(string email, [FromBody] UpdateMultiUserRequest req, CancellationToken ct)
     {
         if (!IsGlobalAdmin() && !IsFounderRole())
@@ -440,7 +437,6 @@ public sealed class AdminUsersController : ControllerBase
     }
 
     [HttpPost("seed-owner")]
-    [AllowAnonymous]
     public async Task<IActionResult> SeedOwner([FromBody] SeedOwnerRequest req, CancellationToken ct)
     {
         if (!IsGlobalAdmin() && !IsFounderRole())
