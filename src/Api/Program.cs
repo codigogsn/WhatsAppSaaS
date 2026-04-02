@@ -388,7 +388,16 @@ finally
 // ──────────────────────────────────────────
 static string ConvertDatabaseUrlToNpgsql(string databaseUrl)
 {
-    var uri = new Uri(databaseUrl);
+    Uri uri;
+    try
+    {
+        uri = new Uri(databaseUrl);
+    }
+    catch (UriFormatException ex)
+    {
+        Log.Fatal("DATABASE_URL is malformed: {Message}", ex.Message);
+        throw;
+    }
 
     var userInfo = uri.UserInfo.Split(':', 2);
     var username = Uri.UnescapeDataString(userInfo[0]);
