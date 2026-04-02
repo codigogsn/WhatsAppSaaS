@@ -38,6 +38,7 @@ public static class SchemaRepair
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "PasswordResetTokens" ("Id" uuid NOT NULL PRIMARY KEY, "UserId" uuid NOT NULL, "TokenHash" varchar(128) NOT NULL, "ExpiresAtUtc" timestamp NOT NULL, "UsedAtUtc" timestamp, "CreatedAtUtc" timestamp NOT NULL DEFAULT now())""");
         ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_PasswordResetTokens_TokenHash" ON "PasswordResetTokens" ("TokenHash")""");
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "WebhookQueue" ("Id" uuid NOT NULL PRIMARY KEY, "Payload" text NOT NULL, "CreatedAtUtc" timestamp NOT NULL DEFAULT now(), "ClaimedAtUtc" timestamp, "ProcessedAtUtc" timestamp, "AttemptCount" integer NOT NULL DEFAULT 0, "LastError" text)""");
+        ExecSql(conn, """ALTER TABLE "WebhookQueue" ADD COLUMN IF NOT EXISTS "NextRetryAtUtc" timestamp""");
         ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_WebhookQueue_Pending" ON "WebhookQueue" ("CreatedAtUtc") WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" < 5""");
         ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_WebhookQueue_ProcessedAtUtc" ON "WebhookQueue" ("ProcessedAtUtc") WHERE "ProcessedAtUtc" IS NOT NULL""");
         Log.Information("QUEUE SCHEMA: WebhookQueue ensured");

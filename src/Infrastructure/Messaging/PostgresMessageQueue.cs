@@ -63,6 +63,7 @@ public sealed class PostgresMessageQueue : IMessageQueue
                 FROM "WebhookQueue"
                 WHERE "ProcessedAtUtc" IS NULL
                   AND "AttemptCount" < 5
+                  AND ("NextRetryAtUtc" IS NULL OR "NextRetryAtUtc" <= @now)
                 ORDER BY "CreatedAtUtc"
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
@@ -130,16 +131,25 @@ public sealed class PostgresMessageQueue : IMessageQueue
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(ct);
 
+        // Backoff computed in SQL from AttemptCount (already incremented during dequeue):
+        // 1→30s, 2→2min, 3→10min, 4→30min
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             UPDATE "WebhookQueue"
-            SET "LastError" = @err, "ClaimedAtUtc" = NULL
+            SET "LastError" = @err,
+                "ClaimedAtUtc" = NULL,
+                "NextRetryAtUtc" = now() + CASE "AttemptCount"
+                    WHEN 1 THEN interval '30 seconds'
+                    WHEN 2 THEN interval '2 minutes'
+                    WHEN 3 THEN interval '10 minutes'
+                    ELSE interval '30 minutes'
+                END
             WHERE "Id" = @id AND "ProcessedAtUtc" IS NULL
         """;
         cmd.Parameters.AddWithValue("id", itemId);
         cmd.Parameters.AddWithValue("err", error.Length > 2000 ? error[..2000] : error);
         await cmd.ExecuteNonQueryAsync(ct);
-        _logger.LogDebug("QUEUE FAILED: item {Id} returned to queue", itemId);
+        _logger.LogDebug("QUEUE FAILED: item {Id} scheduled for retry with backoff", itemId);
         _lastDequeuedItemId = null;
     }
 
