@@ -65,6 +65,13 @@ public static class ServiceCollectionExtensions
         // ── Founder Insights (global read-only, Founder only) ──
         services.AddScoped<IFounderInsightsService, FounderInsightsService>();
 
+        // ── Insights Chat (uses existing insights services + OpenAI) ──
+        services.AddHttpClient<IInsightsChatService, InsightsChatService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(15);
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+        });
+
         // ── BCV Exchange Rate ─────────────────────────────
         services.AddHttpClient<IBcvRateService, BcvRateService>(client =>
         {

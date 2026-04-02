@@ -1453,6 +1453,35 @@
     }
     .insights-section { margin-bottom: 20px; }
     .insights-section:last-child { margin-bottom: 0; }
+
+    /* ── Insights Chat ── */
+    .insights-chat { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-light); }
+    .insights-chat-title {
+      font-size: 10px; font-weight: 500; text-transform: uppercase;
+      letter-spacing: 1.2px; color: var(--muted); margin-bottom: 10px;
+    }
+    .insights-chat-input {
+      display: flex; gap: 8px;
+    }
+    .insights-chat-input input {
+      flex: 1; background: var(--bg, #0d0d0d); border: 1px solid var(--border-light);
+      border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 13px;
+      outline: none;
+    }
+    .insights-chat-input input:focus { border-color: var(--accent, #3b82f6); }
+    .insights-chat-input input::placeholder { color: var(--muted); }
+    .insights-chat-input button {
+      background: var(--accent, #3b82f6); color: #fff; border: none;
+      border-radius: 8px; padding: 10px 18px; font-size: 13px; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+    }
+    .insights-chat-input button:disabled { opacity: .5; cursor: not-allowed; }
+    .insights-chat-answer {
+      margin-top: 10px; background: var(--bg, #0d0d0d); border-radius: 8px;
+      padding: 12px 16px; font-size: 13px; color: var(--text); line-height: 1.5;
+      display: none;
+    }
+    .insights-chat-answer.visible { display: block; }
   </style>
 </head>
 <body>
@@ -1846,6 +1875,14 @@ Tipo: burger"></textarea>
       <div id="founderInsightsContent">
         <div class="insights-empty">Loading global insights...</div>
       </div>
+      <div class="insights-chat">
+        <div class="insights-chat-title">Ask about the platform</div>
+        <div class="insights-chat-input">
+          <input type="text" id="founderChatInput" placeholder="e.g. Which business has the best retention?" maxlength="500">
+          <button id="founderChatSend" onclick="sendInsightsChat('founder','founderChatInput','founderChatAnswer','founderChatSend')">Ask</button>
+        </div>
+        <div class="insights-chat-answer" id="founderChatAnswer"></div>
+      </div>
     </div>
 
   </div>
@@ -1932,6 +1969,14 @@ Tipo: burger"></textarea>
     </div>
     <div id="insightsContent">
       <div class="insights-empty">Loading business insights...</div>
+    </div>
+    <div class="insights-chat" id="bizInsightsChat">
+      <div class="insights-chat-title">Ask about your business</div>
+      <div class="insights-chat-input">
+        <input type="text" id="bizChatInput" placeholder="e.g. What are my peak hours?" maxlength="500">
+        <button id="bizChatSend" onclick="sendInsightsChat('business','bizChatInput','bizChatAnswer','bizChatSend')">Ask</button>
+      </div>
+      <div class="insights-chat-answer" id="bizChatAnswer"></div>
     </div>
   </div>
 
@@ -3337,6 +3382,49 @@ var _founderInsightLabels = {
 };
 function founderAlertLabel(t) { return _founderAlertLabels[t] || (t ? t.replace(/_/g, ' ') : 'Alert'); }
 function founderInsightLabel(t) { return _founderInsightLabels[t] || (t ? t.replace(/_/g, ' ') : 'Insight'); }
+
+// ── Insights Chat ──
+async function sendInsightsChat(scope, inputId, answerId, btnId) {
+  var input = document.getElementById(inputId);
+  var answer = document.getElementById(answerId);
+  var btn = document.getElementById(btnId);
+  if (!input || !answer || !btn) return;
+
+  var q = input.value.trim();
+  if (!q) return;
+
+  btn.disabled = true;
+  answer.className = 'insights-chat-answer visible';
+  answer.textContent = 'Thinking...';
+
+  try {
+    var res = await fetch('/api/insights/chat', {
+      method: 'POST',
+      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: q, scope: scope })
+    });
+
+    if (!res.ok) {
+      answer.textContent = 'Unable to get a response right now.';
+      return;
+    }
+
+    var data = await res.json();
+    answer.textContent = data.answer || 'No response available.';
+  } catch (e) {
+    console.warn('Insights chat error:', e);
+    answer.textContent = 'Unable to get a response right now.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Allow Enter key to send
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter') return;
+  if (e.target.id === 'bizChatInput') sendInsightsChat('business','bizChatInput','bizChatAnswer','bizChatSend');
+  if (e.target.id === 'founderChatInput') sendInsightsChat('founder','founderChatInput','founderChatAnswer','founderChatSend');
+});
 
 // ── Business Insights ──
 async function loadBusinessInsights() {
