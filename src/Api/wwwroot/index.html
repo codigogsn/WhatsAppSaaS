@@ -1402,21 +1402,70 @@
       .nav-bar { padding: 10px 14px; }
     }
 
-    /* ── Business Insights Panel ── */
-    .insights-panel {
-      background: var(--card-kpi, var(--card)); border-radius: var(--radius);
-      padding: 24px 26px; margin-bottom: 24px;
+    /* ── Assistant Dock ── */
+    .assist-launcher {
+      position: fixed; bottom: 24px; right: 24px; z-index: 900;
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--accent, #3b82f6); color: #fff; border: none;
+      font-size: 22px; cursor: pointer; display: flex; align-items: center;
+      justify-content: center; box-shadow: 0 4px 20px rgba(0,0,0,.4);
+      transition: transform .15s, opacity .15s;
     }
-    .insights-panel-header {
+    .assist-launcher:hover { transform: scale(1.08); }
+    .assist-launcher.hidden { display: none; }
+    .assist-dock {
+      position: fixed; bottom: 24px; right: 24px; z-index: 901;
+      width: 400px; max-height: 75vh;
+      background: var(--card-kpi, var(--card)); border-radius: 16px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.5);
+      display: none; flex-direction: column; overflow: hidden;
+    }
+    .assist-dock.open { display: flex; }
+    .assist-dock-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 16px 20px; border-bottom: 1px solid var(--border-light); flex-shrink: 0;
+    }
+    .assist-dock-title {
       display: flex; align-items: center; gap: 8px;
-      padding-bottom: 16px; margin-bottom: 18px;
-      border-bottom: 1px solid var(--border-light);
+      font-size: 13px; font-weight: 600; color: var(--text);
     }
-    .insights-panel-header-icon { font-size: 15px; }
-    .insights-panel-header-title {
+    .assist-dock-title-icon { font-size: 16px; }
+    .assist-dock-close {
+      background: none; border: none; color: var(--muted); font-size: 18px;
+      cursor: pointer; padding: 4px 8px; border-radius: 6px;
+    }
+    .assist-dock-close:hover { color: var(--text); background: rgba(255,255,255,.05); }
+    .assist-dock-body {
+      flex: 1; overflow-y: auto; padding: 16px 20px;
+      scrollbar-width: thin; scrollbar-color: var(--border-light) transparent;
+    }
+    .assist-dock-chat {
+      padding: 14px 20px; border-top: 1px solid var(--border-light); flex-shrink: 0;
+    }
+    .assist-chat-label {
       font-size: 10px; font-weight: 500; text-transform: uppercase;
-      letter-spacing: 1.2px; color: var(--muted);
+      letter-spacing: 1px; color: var(--muted); margin-bottom: 8px;
     }
+    .assist-chat-row { display: flex; gap: 8px; }
+    .assist-chat-row input {
+      flex: 1; background: var(--bg, #0d0d0d); border: 1px solid var(--border-light);
+      border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 13px; outline: none;
+    }
+    .assist-chat-row input:focus { border-color: var(--accent, #3b82f6); }
+    .assist-chat-row input::placeholder { color: var(--muted); }
+    .assist-chat-row button {
+      background: var(--accent, #3b82f6); color: #fff; border: none;
+      border-radius: 8px; padding: 10px 16px; font-size: 13px; font-weight: 600;
+      cursor: pointer; white-space: nowrap;
+    }
+    .assist-chat-row button:disabled { opacity: .5; cursor: not-allowed; }
+    .assist-chat-answer {
+      margin-top: 10px; background: var(--bg, #0d0d0d); border-radius: 8px;
+      padding: 12px 16px; font-size: 13px; color: var(--text); line-height: 1.5; display: none;
+    }
+    .assist-chat-answer.visible { display: block; }
+
+    /* Insight cards (shared) */
     .insights-section-title {
       font-size: 11px; font-weight: 600; text-transform: uppercase;
       letter-spacing: .6px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
@@ -1429,59 +1478,21 @@
       background: var(--bg, #0d0d0d); border-radius: 8px;
       padding: 12px 16px; display: flex; align-items: flex-start; gap: 12px;
       border-left: 3px solid var(--border-light);
-      transition: background var(--transition, .15s);
     }
-    .insight-card:hover { background: var(--card-hover, rgba(255,255,255,.03)); }
     .insight-card[data-severity="info"] { border-left-color: var(--accent, #3b82f6); }
     .insight-card[data-severity="warning"] { border-left-color: var(--warning, #f59e0b); }
     .insight-card[data-severity="critical"] { border-left-color: var(--danger, #ef4444); }
-    .insight-card-icon {
-      font-size: 14px; flex-shrink: 0; width: 20px; text-align: center;
-      padding-top: 2px; line-height: 1;
-    }
+    .insight-card-icon { font-size: 14px; flex-shrink: 0; width: 20px; text-align: center; padding-top: 2px; }
     .insight-card-body { flex: 1; min-width: 0; }
-    .insight-card-label {
-      font-size: 13px; font-weight: 600; color: var(--text);
-      line-height: 1.3; margin-bottom: 2px;
-    }
-    .insight-card-detail {
-      font-size: 12px; color: var(--text-secondary, var(--muted));
-      line-height: 1.4;
-    }
-    .insights-empty {
-      color: var(--muted); font-size: 13px; padding: 8px 0;
-    }
-    .insights-section { margin-bottom: 20px; }
+    .insight-card-label { font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.3; margin-bottom: 2px; }
+    .insight-card-detail { font-size: 12px; color: var(--text-secondary, var(--muted)); line-height: 1.4; }
+    .insights-empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+    .insights-section { margin-bottom: 16px; }
     .insights-section:last-child { margin-bottom: 0; }
-
-    /* ── Insights Chat ── */
-    .insights-chat { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-light); }
-    .insights-chat-title {
-      font-size: 10px; font-weight: 500; text-transform: uppercase;
-      letter-spacing: 1.2px; color: var(--muted); margin-bottom: 10px;
+    @media (max-width: 500px) {
+      .assist-dock { width: calc(100vw - 32px); right: 16px; bottom: 16px; max-height: 80vh; }
+      .assist-launcher { bottom: 16px; right: 16px; }
     }
-    .insights-chat-input {
-      display: flex; gap: 8px;
-    }
-    .insights-chat-input input {
-      flex: 1; background: var(--bg, #0d0d0d); border: 1px solid var(--border-light);
-      border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 13px;
-      outline: none;
-    }
-    .insights-chat-input input:focus { border-color: var(--accent, #3b82f6); }
-    .insights-chat-input input::placeholder { color: var(--muted); }
-    .insights-chat-input button {
-      background: var(--accent, #3b82f6); color: #fff; border: none;
-      border-radius: 8px; padding: 10px 18px; font-size: 13px; font-weight: 600;
-      cursor: pointer; white-space: nowrap;
-    }
-    .insights-chat-input button:disabled { opacity: .5; cursor: not-allowed; }
-    .insights-chat-answer {
-      margin-top: 10px; background: var(--bg, #0d0d0d); border-radius: 8px;
-      padding: 12px 16px; font-size: 13px; color: var(--text); line-height: 1.5;
-      display: none;
-    }
-    .insights-chat-answer.visible { display: block; }
   </style>
 </head>
 <body>
@@ -1866,25 +1877,6 @@ Tipo: burger"></textarea>
       </tr></thead><tbody id="fdBizTable"></tbody></table>
     </div>
 
-    <!-- Founder Global Insights -->
-    <div id="founderInsights" class="insights-panel" style="margin-top:20px;">
-      <div class="insights-panel-header">
-        <div class="insights-panel-header-icon">&#x1f30e;</div>
-        <div class="insights-panel-header-title">Global Intelligence</div>
-      </div>
-      <div id="founderInsightsContent">
-        <div class="insights-empty">Loading global insights...</div>
-      </div>
-      <div class="insights-chat">
-        <div class="insights-chat-title">Ask about the platform</div>
-        <div class="insights-chat-input">
-          <input type="text" id="founderChatInput" placeholder="e.g. Which business has the best retention?" maxlength="500">
-          <button id="founderChatSend" onclick="sendInsightsChat('founder','founderChatInput','founderChatAnswer','founderChatSend')">Ask</button>
-        </div>
-        <div class="insights-chat-answer" id="founderChatAnswer"></div>
-      </div>
-    </div>
-
   </div>
 
   <!-- Hero KPI Area -->
@@ -1959,25 +1951,6 @@ Tipo: burger"></textarea>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--accent);">En Camino</div><div class="status-chip-value" style="color:var(--accent);" id="kpiOut">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--success);">Completed</div><div class="status-chip-value" style="color:var(--success);" id="kpiCompleted">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--danger);">Cancelled</div><div class="status-chip-value" style="color:var(--danger);" id="kpiCancelled">0</div></div>
-  </div>
-
-  <!-- Business Insights (Owner/Manager only) -->
-  <div id="businessInsights" class="insights-panel" style="display:none;">
-    <div class="insights-panel-header">
-      <div class="insights-panel-header-icon">&#x1f4ca;</div>
-      <div class="insights-panel-header-title">Business Insights</div>
-    </div>
-    <div id="insightsContent">
-      <div class="insights-empty">Loading business insights...</div>
-    </div>
-    <div class="insights-chat" id="bizInsightsChat">
-      <div class="insights-chat-title">Ask about your business</div>
-      <div class="insights-chat-input">
-        <input type="text" id="bizChatInput" placeholder="e.g. What are my peak hours?" maxlength="500">
-        <button id="bizChatSend" onclick="sendInsightsChat('business','bizChatInput','bizChatAnswer','bizChatSend')">Ask</button>
-      </div>
-      <div class="insights-chat-answer" id="bizChatAnswer"></div>
-    </div>
   </div>
 
   <!-- Extended Analytics -->
@@ -3213,7 +3186,7 @@ function applyGlobalModeUI() {
   var founder = isFounderUser();
   var show = global ? 'none' : '';
   // Business-scoped dashboard sections
-  var ids = ['heroKpi','statusStrip','businessInsights','extAnalytics','handoffInbox','ordersFilters','ordersTable','customersPanel'];
+  var ids = ['heroKpi','statusStrip','extAnalytics','handoffInbox','ordersFilters','ordersTable','customersPanel'];
   for (var i = 0; i < ids.length; i++) {
     var el = document.getElementById(ids[i]);
     if (el) el.style.display = show;
@@ -3280,6 +3253,7 @@ async function loadFounderDashboard() {
     }
     // Load founder global insights in parallel (non-blocking)
     loadFounderInsights();
+    initAssistDock();
 
   } catch(e) { console.warn('Founder dashboard error:', e); }
 }
@@ -3291,14 +3265,14 @@ async function loadFounderInsights() {
   try {
     var res = await fetch('/api/founder/insights', { headers: jwtHeaders(), cache: 'no-store' });
     if (res.status === 403) { content.innerHTML = ''; return; }
-    if (!res.ok) { content.innerHTML = '<div class="insights-empty">Unable to load global insights.</div>'; return; }
+    if (!res.ok) { content.innerHTML = '<div class="insights-empty">No se pudieron cargar los insights globales.</div>'; return; }
 
     var data = await res.json();
     var hasData = (data.summary && data.summary.totalOrders > 0) ||
                   (data.alerts && data.alerts.length > 0);
 
     if (!hasData) {
-      content.innerHTML = '<div class="insights-empty">No global data available yet.</div>';
+      content.innerHTML = '<div class="insights-empty">No hay datos globales disponibles a\u00fan.</div>';
       return;
     }
 
@@ -3316,7 +3290,7 @@ async function loadFounderInsights() {
     // Alerts
     if (data.alerts && data.alerts.length > 0) {
       html += '<div class="insights-section">';
-      html += '<div class="insights-section-title" data-kind="alerts">\u26a0\ufe0f Action Required</div>';
+      html += '<div class="insights-section-title" data-kind="alerts">\u26a0\ufe0f Acci\u00f3n Requerida</div>';
       html += '<div class="insights-grid">';
       var alerts = data.alerts.slice(0, 5);
       for (var i = 0; i < alerts.length; i++) {
@@ -3329,7 +3303,7 @@ async function loadFounderInsights() {
     // Insights
     if (data.insights && data.insights.length > 0) {
       html += '<div class="insights-section">';
-      html += '<div class="insights-section-title" data-kind="insights">\ud83d\udcca Platform Insights</div>';
+      html += '<div class="insights-section-title" data-kind="insights">\ud83d\udcca Insights de Plataforma</div>';
       html += '<div class="insights-grid">';
       var ins = data.insights.slice(0, 5);
       for (var i = 0; i < ins.length; i++) {
@@ -3338,14 +3312,14 @@ async function loadFounderInsights() {
       html += '</div></div>';
     }
 
-    // Recommendations
+    // Recomendaciones
     if (data.recommendations && data.recommendations.length > 0) {
       html += '<div class="insights-section">';
-      html += '<div class="insights-section-title" data-kind="recommendations">\ud83d\udca1 Recommendations</div>';
+      html += '<div class="insights-section-title" data-kind="recommendations">\ud83d\udca1 Recomendaciones</div>';
       html += '<div class="insights-grid">';
       var recs = data.recommendations.slice(0, 5);
       for (var i = 0; i < recs.length; i++) {
-        html += insightCard(recs[i].message, 'info', 'Suggested Action');
+        html += insightCard(recs[i].message, 'info', 'Acci\u00f3n Sugerida');
       }
       html += '</div></div>';
     }
@@ -3353,7 +3327,7 @@ async function loadFounderInsights() {
     // Top businesses
     if (data.topBusinesses && data.topBusinesses.length > 0) {
       html += '<div class="insights-section">';
-      html += '<div class="insights-section-title" data-kind="insights">\ud83c\udfc6 Top Businesses</div>';
+      html += '<div class="insights-section-title" data-kind="insights">\ud83c\udfc6 Negocios Destacados</div>';
       html += '<div class="insights-grid">';
       for (var i = 0; i < data.topBusinesses.length; i++) {
         var b = data.topBusinesses[i];
@@ -3366,22 +3340,75 @@ async function loadFounderInsights() {
 
   } catch (e) {
     console.warn('Founder insights error:', e);
-    content.innerHTML = '<div class="insights-empty">Unable to load global insights.</div>';
+    content.innerHTML = '<div class="insights-empty">No se pudieron cargar los insights globales.</div>';
   }
 }
 
 var _founderAlertLabels = {
-  'high_pending_payments': 'Pending Payments Risk',
-  'low_conversion': 'Low Conversion Detected'
+  'high_pending_payments': 'Riesgo de Pagos Pendientes',
+  'low_conversion': 'Baja Conversi\u00f3n Detectada'
 };
 var _founderInsightLabels = {
-  'top_performer': 'Top Performing Business',
-  'strong_retention': 'Strong Customer Loyalty',
-  'weak_retention': 'Weak Retention Detected',
-  'platform_health': 'Platform Health'
+  'top_performer': 'Negocio con Mejor Desempe\u00f1o',
+  'strong_retention': 'Buena Lealtad de Clientes',
+  'weak_retention': 'Baja Retenci\u00f3n Detectada',
+  'platform_health': 'Salud de la Plataforma'
 };
 function founderAlertLabel(t) { return _founderAlertLabels[t] || (t ? t.replace(/_/g, ' ') : 'Alert'); }
 function founderInsightLabel(t) { return _founderInsightLabels[t] || (t ? t.replace(/_/g, ' ') : 'Insight'); }
+
+// ── Assistant Dock ──
+function toggleAssistDock() {
+  var dock = document.getElementById('assistDock');
+  var launcher = document.getElementById('assistLauncher');
+  var isOpen = dock.classList.toggle('open');
+  launcher.classList.toggle('hidden', isOpen);
+  localStorage.setItem('assist_dock_open', isOpen ? '1' : '0');
+}
+
+function initAssistDock() {
+  var role = getAuthRole();
+  var launcher = document.getElementById('assistLauncher');
+  var dock = document.getElementById('assistDock');
+  var titleEl = document.getElementById('assistTitle');
+  var iconEl = document.getElementById('assistIcon');
+
+  // Determine which mode
+  var isFounder = role === 'Founder' && !getBusinessId();
+  var isBizOwner = (role === 'Owner' || role === 'Manager') && !!getBusinessId();
+
+  if (!isFounder && !isBizOwner) {
+    launcher.classList.add('hidden');
+    dock.classList.remove('open');
+    return;
+  }
+
+  // Configure dock for role
+  if (isFounder) {
+    titleEl.textContent = 'Asistente Global';
+    iconEl.textContent = '\ud83c\udf0e';
+    document.getElementById('founderInsights').style.display = '';
+    document.getElementById('founderChatArea').style.display = '';
+    document.getElementById('businessInsights').style.display = 'none';
+    document.getElementById('bizChatArea').style.display = 'none';
+  } else {
+    titleEl.textContent = 'Asistente del Negocio';
+    iconEl.textContent = '\ud83d\udcca';
+    document.getElementById('businessInsights').style.display = '';
+    document.getElementById('bizChatArea').style.display = '';
+    document.getElementById('founderInsights').style.display = 'none';
+    document.getElementById('founderChatArea').style.display = 'none';
+  }
+
+  // Restore open/closed state
+  var wasOpen = localStorage.getItem('assist_dock_open') === '1';
+  if (wasOpen) {
+    dock.classList.add('open');
+    launcher.classList.add('hidden');
+  } else {
+    launcher.classList.remove('hidden');
+  }
+}
 
 // ── Insights Chat ──
 async function sendInsightsChat(scope, inputId, answerId, btnId) {
@@ -3394,8 +3421,8 @@ async function sendInsightsChat(scope, inputId, answerId, btnId) {
   if (!q) return;
 
   btn.disabled = true;
-  answer.className = 'insights-chat-answer visible';
-  answer.textContent = 'Thinking...';
+  answer.className = 'assist-chat-answer visible';
+  answer.textContent = 'Pensando...';
 
   try {
     var res = await fetch('/api/insights/chat', {
@@ -3405,21 +3432,20 @@ async function sendInsightsChat(scope, inputId, answerId, btnId) {
     });
 
     if (!res.ok) {
-      answer.textContent = 'Unable to get a response right now.';
+      answer.textContent = 'No pude responder en este momento.';
       return;
     }
 
     var data = await res.json();
-    answer.textContent = data.answer || 'No response available.';
+    answer.textContent = data.answer || 'Sin respuesta disponible.';
   } catch (e) {
     console.warn('Insights chat error:', e);
-    answer.textContent = 'Unable to get a response right now.';
+    answer.textContent = 'No pude responder en este momento.';
   } finally {
     btn.disabled = false;
   }
 }
 
-// Allow Enter key to send
 document.addEventListener('keydown', function(e) {
   if (e.key !== 'Enter') return;
   if (e.target.id === 'bizChatInput') sendInsightsChat('business','bizChatInput','bizChatAnswer','bizChatSend');
@@ -3440,13 +3466,13 @@ async function loadBusinessInsights() {
   }
 
   panel.style.display = '';
-  content.innerHTML = '<div class="insights-empty">Loading business insights...</div>';
+  content.innerHTML = '<div class="insights-empty">Cargando insights del negocio...</div>';
 
   try {
     var res = await fetch('/api/insights?windowDays=30', { headers: jwtHeaders(), cache: 'no-store' });
 
     if (res.status === 403) { panel.style.display = 'none'; return; }
-    if (!res.ok) { content.innerHTML = '<div class="insights-empty">Unable to load insights right now.</div>'; return; }
+    if (!res.ok) { content.innerHTML = '<div class="insights-empty">No se pudieron cargar los insights.</div>'; return; }
 
     var data = await res.json();
 
@@ -3455,7 +3481,7 @@ async function loadBusinessInsights() {
                   (data.insights && data.insights.length > 0);
 
     if (!hasData) {
-      content.innerHTML = '<div class="insights-empty">Not enough business data yet to generate insights.</div>';
+      content.innerHTML = '<div class="insights-empty">No hay suficientes datos para generar insights.</div>';
       return;
     }
 
@@ -3464,7 +3490,7 @@ async function loadBusinessInsights() {
     // 1. Alerts (most urgent — red header)
     if (data.alerts && data.alerts.length > 0) {
       html += '<div class="insights-section">';
-      html += '<div class="insights-section-title" data-kind="alerts">\u26a0\ufe0f Action Required</div>';
+      html += '<div class="insights-section-title" data-kind="alerts">\u26a0\ufe0f Acci\u00f3n Requerida</div>';
       html += '<div class="insights-grid">';
       var alerts = data.alerts.slice(0, 3);
       for (var i = 0; i < alerts.length; i++) {
@@ -3476,7 +3502,7 @@ async function loadBusinessInsights() {
     // 2. Insights (informational — blue header)
     if (data.insights && data.insights.length > 0) {
       html += '<div class="insights-section">';
-      html += '<div class="insights-section-title" data-kind="insights">\ud83d\udcca Key Insights</div>';
+      html += '<div class="insights-section-title" data-kind="insights">\ud83d\udcca Insights Clave</div>';
       html += '<div class="insights-grid">';
       var ins = data.insights.slice(0, 3);
       for (var i = 0; i < ins.length; i++) {
@@ -3486,36 +3512,36 @@ async function loadBusinessInsights() {
       html += '</div></div>';
     }
 
-    // 3. Recommendations (actionable — green header)
+    // 3. Recomendaciones (actionable — green header)
     if (data.recommendations && data.recommendations.length > 0) {
       html += '<div class="insights-section">';
-      html += '<div class="insights-section-title" data-kind="recommendations">\ud83d\udca1 Recommendations</div>';
+      html += '<div class="insights-section-title" data-kind="recommendations">\ud83d\udca1 Recomendaciones</div>';
       html += '<div class="insights-grid">';
       var recs = data.recommendations.slice(0, 3);
       for (var i = 0; i < recs.length; i++) {
-        html += insightCard(recs[i], 'info', 'Suggested Action');
+        html += insightCard(recs[i], 'info', 'Acci\u00f3n Sugerida');
       }
       html += '</div></div>';
     }
 
-    content.innerHTML = html || '<div class="insights-empty">No insights available.</div>';
+    content.innerHTML = html || '<div class="insights-empty">Sin insights disponibles.</div>';
 
   } catch (e) {
     console.warn('Business insights load error:', e);
-    content.innerHTML = '<div class="insights-empty">Unable to load insights right now.</div>';
+    content.innerHTML = '<div class="insights-empty">No se pudieron cargar los insights.</div>';
   }
 }
 
 // Human-readable label mapping for insight types
 var _insightLabels = {
-  'peak_hours': 'Peak Sales Hours',
-  'dominant_product': 'Top Selling Product',
-  'low_performing_product': 'Low Demand Product',
-  'low_repeat_rate': 'Low Repeat Rate',
-  'strong_repeat_rate': 'Strong Customer Loyalty',
-  'low_average_ticket': 'Low Average Ticket',
-  'pending_payment_risk': 'Pending Payments',
-  'low_conversion_rate': 'Low Conversion Rate'
+  'peak_hours': 'Horas Pico de Ventas',
+  'dominant_product': 'Producto M\u00e1s Vendido',
+  'low_performing_product': 'Producto con Baja Demanda',
+  'low_repeat_rate': 'Baja Tasa de Repetici\u00f3n',
+  'strong_repeat_rate': 'Buena Lealtad de Clientes',
+  'low_average_ticket': 'Ticket Promedio Bajo',
+  'pending_payment_risk': 'Pagos Pendientes',
+  'low_conversion_rate': 'Baja Tasa de Conversi\u00f3n'
 };
 
 function insightLabel(type, fallback) {
@@ -3572,6 +3598,7 @@ async function load() {
 
   document.getElementById('msg').textContent = 'Cargando...';
   await Promise.all([loadSummary(), loadHandoffs(), loadExchangeRate(), loadExtended(), loadBusinessInsights()]);
+  initAssistDock();
 
   const isHandoffFilter = status === 'NeedsHuman';
   const fetchUrl = '/api/orders?' + qs.toString().replace('status=NeedsHuman','');
@@ -4457,6 +4484,48 @@ async function sendPromotion(){
   }
 }
 </script>
+<!-- ── Assistant Dock ── -->
+<button class="assist-launcher hidden" id="assistLauncher" onclick="toggleAssistDock()">&#x1f4ac;</button>
+<div class="assist-dock" id="assistDock">
+  <div class="assist-dock-header">
+    <div class="assist-dock-title">
+      <span class="assist-dock-title-icon" id="assistIcon">&#x1f4ca;</span>
+      <span id="assistTitle">Asistente</span>
+    </div>
+    <button class="assist-dock-close" onclick="toggleAssistDock()">&times;</button>
+  </div>
+  <div class="assist-dock-body">
+    <!-- Business insights content (Owner/Manager) -->
+    <div id="businessInsights" style="display:none;">
+      <div id="insightsContent"><div class="insights-empty">Cargando insights del negocio...</div></div>
+    </div>
+    <!-- Founder insights content -->
+    <div id="founderInsights" style="display:none;">
+      <div id="founderInsightsContent"><div class="insights-empty">Cargando insights globales...</div></div>
+    </div>
+  </div>
+  <div class="assist-dock-chat">
+    <!-- Business chat -->
+    <div id="bizChatArea" style="display:none;">
+      <div class="assist-chat-label">Pregunta sobre tu negocio</div>
+      <div class="assist-chat-row">
+        <input type="text" id="bizChatInput" placeholder="Ej: &#191;Cu&#225;les son mis horas pico?" maxlength="500">
+        <button id="bizChatSend" onclick="sendInsightsChat('business','bizChatInput','bizChatAnswer','bizChatSend')">Preguntar</button>
+      </div>
+      <div class="assist-chat-answer" id="bizChatAnswer"></div>
+    </div>
+    <!-- Founder chat -->
+    <div id="founderChatArea" style="display:none;">
+      <div class="assist-chat-label">Pregunta sobre la plataforma</div>
+      <div class="assist-chat-row">
+        <input type="text" id="founderChatInput" placeholder="Ej: &#191;Qu&#233; negocio tiene mejor retenci&#243;n?" maxlength="500">
+        <button id="founderChatSend" onclick="sendInsightsChat('founder','founderChatInput','founderChatAnswer','founderChatSend')">Preguntar</button>
+      </div>
+      <div class="assist-chat-answer" id="founderChatAnswer"></div>
+    </div>
+  </div>
+</div>
+
 <div id="toastStack" class="toast-stack"></div>
 </body>
 </html>
