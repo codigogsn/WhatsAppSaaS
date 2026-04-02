@@ -152,7 +152,7 @@ public sealed class WhatsAppClient : IWhatsAppClient
                     var delay = retryDelays[attempt];
 
                     // Respect Retry-After header if present
-                    if (response.Headers.RetryAfter?.Delta is { } retryAfter && retryAfter.TotalSeconds is > 0 and <= 10)
+                    if (response.Headers.RetryAfter?.Delta is { } retryAfter && retryAfter.TotalSeconds is > 0 and <= 30)
                         delay = retryAfter;
 
                     _logger.LogWarning("WhatsApp API returned {StatusCode} for {To}, retrying in {Delay}s (attempt {Attempt})",
