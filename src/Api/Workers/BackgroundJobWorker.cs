@@ -22,6 +22,7 @@ public sealed class BackgroundJobWorker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("BackgroundJobWorker started");
+        _logger.LogWarning("BackgroundJobWorker running in single-instance mode. Horizontal scaling requires FOR UPDATE SKIP LOCKED.");
 
         while (!stoppingToken.IsCancellationRequested)
         {
