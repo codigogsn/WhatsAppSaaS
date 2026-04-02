@@ -200,6 +200,27 @@ public sealed class BackgroundJobWorker : BackgroundService
         {
             _logger.LogWarning(ex, "QUEUE CLEANUP: failed to clean WebhookQueue (non-fatal)");
         }
+
+        // Purge abandoned items (exhausted all retries, older than 7 days)
+        try
+        {
+            var conn2 = db.Database.GetDbConnection();
+            if (conn2.State != System.Data.ConnectionState.Open) await conn2.OpenAsync(ct);
+            using var cmd2 = conn2.CreateCommand();
+            cmd2.CommandText = """
+                DELETE FROM "WebhookQueue"
+                WHERE "ProcessedAtUtc" IS NULL
+                  AND "AttemptCount" >= 5
+                  AND "CreatedAtUtc" < now() - interval '7 days'
+            """;
+            var abandoned = await cmd2.ExecuteNonQueryAsync(ct);
+            if (abandoned > 0)
+                _logger.LogInformation("QUEUE CLEANUP: purged {Count} abandoned items", abandoned);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "QUEUE CLEANUP: failed to purge abandoned items (non-fatal)");
+        }
     }
 
     private async Task ExecuteCleanupAbandonedOrdersAsync(IServiceProvider sp, CancellationToken ct)
