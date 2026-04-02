@@ -263,7 +263,23 @@ public sealed class WhatsAppClient : IWhatsAppClient
             }
 
             var contentType = dlRes.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
-            var data = await dlRes.Content.ReadAsByteArrayAsync(cancellationToken);
+
+            // Stream into capped MemoryStream to avoid unbounded memory allocation
+            const int maxSize = 10 * 1024 * 1024; // 10 MB
+            using var ms = new MemoryStream();
+            await using var stream = await dlRes.Content.ReadAsStreamAsync(cancellationToken);
+            var buffer = new byte[8192];
+            int bytesRead;
+            while ((bytesRead = await stream.ReadAsync(buffer, cancellationToken)) > 0)
+            {
+                if (ms.Length + bytesRead > maxSize)
+                {
+                    _logger.LogWarning("GetMediaAsync: download exceeded {MaxMB}MB limit for {MediaId}, truncating", maxSize / (1024 * 1024), mediaId);
+                    break;
+                }
+                ms.Write(buffer, 0, bytesRead);
+            }
+            var data = ms.ToArray();
 
             _logger.LogInformation(
                 "GetMediaAsync: success — downloaded {Bytes} bytes for {MediaId}, contentType={ContentType}",
