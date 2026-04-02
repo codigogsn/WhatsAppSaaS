@@ -50,39 +50,84 @@ public sealed class InsightsChatService : IInsightsChatService
         _logger = logger;
     }
 
+    private const string FounderSystemPrompt = """
+        Eres un copiloto de decisiones a nivel portafolio para una plataforma multi-negocio.
+        Tu trabajo es decir qué está pasando en el portafolio, por qué importa, y qué priorizar.
+        Responde en máximo 3 oraciones: situación, impacto, acción.
+        Usa conceptos de portafolio: "A nivel portafolio...", "El negocio que más atención requiere...", "Prioriza...".
+        NO uses "tu negocio" ni "tu local". Habla como asesor ejecutivo.
+        Si no hay datos suficientes, responde: "No hay suficiente información del portafolio todavía."
+        """;
+
+    private const int MinContextLength = 80;
+
     public async Task<InsightsChatResponse> AskAsync(InsightsChatRequest request, Guid? businessId, CancellationToken ct)
     {
-        // 1. Build compact context from existing insights services (no direct DB access)
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var scope = request.Scope ?? "business";
+        var questionLen = request.Question?.Length ?? 0;
+
+        // 1. Build compact context from existing insights services
         string context;
+        bool hasState = false, hasOpp = false, hasRisk = false, hasAction = false;
         try
         {
-            if (request.Scope == "founder")
+            if (scope == "founder")
             {
                 var data = await _founderInsights.GetInsightsAsync(ct);
                 context = BuildFounderContext(data);
+                hasState = !string.IsNullOrWhiteSpace(data.PlatformStateTitle);
+                hasOpp = !string.IsNullOrWhiteSpace(data.MainOpportunity);
+                hasRisk = !string.IsNullOrWhiteSpace(data.MainRisk);
+                hasAction = !string.IsNullOrWhiteSpace(data.PrimaryRecommendation?.Title);
             }
             else
             {
                 if (!businessId.HasValue)
+                {
+                    LogResult(scope, "skipped_no_biz", sw, 0, questionLen, false, false, false, false);
                     return new InsightsChatResponse { Answer = "No hay contexto de negocio disponible.", Confidence = "low" };
+                }
 
                 var data = await _bizInsights.GetInsightsAsync(businessId.Value, 30, ct);
                 context = BuildBusinessContext(data);
+                hasState = !string.IsNullOrWhiteSpace(data.BusinessStateTitle);
+                hasOpp = !string.IsNullOrWhiteSpace(data.MainOpportunity);
+                hasRisk = !string.IsNullOrWhiteSpace(data.MainRisk);
+                hasAction = !string.IsNullOrWhiteSpace(data.PrimaryRecommendation?.Title);
             }
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "INSIGHTS CHAT: failed to gather context for scope={Scope}", request.Scope);
+            _logger.LogWarning(ex, "INSIGHTS CHAT: failed to gather context for scope={Scope}", scope);
+            LogResult(scope, "fallback_context_error", sw, 0, questionLen, false, false, false, false);
             return Fallback();
         }
 
-        // 2. Call OpenAI with compact context
+        // 2. Low-context short-circuit: don't waste an OpenAI call on empty data
+        if (context.Length < MinContextLength)
+        {
+            LogResult(scope, "skipped_low_context", sw, context.Length, questionLen, hasState, hasOpp, hasRisk, hasAction);
+            return new InsightsChatResponse
+            {
+                Answer = scope == "founder"
+                    ? "No hay suficiente información del portafolio para tomar una decisión todavía."
+                    : "No hay suficiente información del negocio para tomar una decisión todavía.",
+                Confidence = "low"
+            };
+        }
+
+        // 3. Call OpenAI
         var apiKey = _options.ResolveApiKey();
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             _logger.LogWarning("INSIGHTS CHAT: OPENAI_API_KEY not configured");
+            LogResult(scope, "skipped_no_key", sw, context.Length, questionLen, hasState, hasOpp, hasRisk, hasAction);
             return Fallback();
         }
+
+        var systemPrompt = scope == "founder" ? FounderSystemPrompt : SystemPrompt;
+        var contextLabel = scope == "founder" ? "Datos del portafolio" : "Datos del negocio";
 
         try
         {
@@ -96,8 +141,8 @@ public sealed class InsightsChatService : IInsightsChatService
                 max_tokens = 300,
                 messages = new object[]
                 {
-                    new { role = "system", content = SystemPrompt },
-                    new { role = "user", content = $"Datos del negocio:\n{context}\n\nPregunta: {request.Question}" }
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user", content = $"{contextLabel}:\n{context}\n\nPregunta: {request.Question}" }
                 }
             };
 
@@ -111,6 +156,7 @@ public sealed class InsightsChatService : IInsightsChatService
             {
                 var errBody = await res.Content.ReadAsStringAsync(cts.Token);
                 _logger.LogWarning("INSIGHTS CHAT: OpenAI returned {Status}: {Body}", (int)res.StatusCode, errBody);
+                LogResult(scope, "fallback_openai_error", sw, context.Length, questionLen, hasState, hasOpp, hasRisk, hasAction);
                 return Fallback();
             }
 
@@ -122,8 +168,7 @@ public sealed class InsightsChatService : IInsightsChatService
                 .GetProperty("content")
                 .GetString() ?? "";
 
-            _logger.LogInformation("INSIGHTS CHAT: answered for scope={Scope} contextLen={Len}",
-                request.Scope, context.Length);
+            LogResult(scope, "success", sw, context.Length, questionLen, hasState, hasOpp, hasRisk, hasAction);
 
             return new InsightsChatResponse
             {
@@ -134,13 +179,24 @@ public sealed class InsightsChatService : IInsightsChatService
         catch (OperationCanceledException)
         {
             _logger.LogWarning("INSIGHTS CHAT: OpenAI call timed out");
+            LogResult(scope, "fallback_timeout", sw, context.Length, questionLen, hasState, hasOpp, hasRisk, hasAction);
             return Fallback();
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "INSIGHTS CHAT: OpenAI call failed");
+            LogResult(scope, "fallback_error", sw, context.Length, questionLen, hasState, hasOpp, hasRisk, hasAction);
             return Fallback();
         }
+    }
+
+    private void LogResult(string scope, string outcome, System.Diagnostics.Stopwatch sw, int contextLen, int questionLen,
+        bool hasState, bool hasOpp, bool hasRisk, bool hasAction)
+    {
+        sw.Stop();
+        _logger.LogInformation(
+            "ASSISTANT: scope={Scope} outcome={Outcome} durationMs={Ms} contextLen={CtxLen} questionLen={QLen} state={State} opp={Opp} risk={Risk} action={Action}",
+            scope, outcome, sw.ElapsedMilliseconds, contextLen, questionLen, hasState, hasOpp, hasRisk, hasAction);
     }
 
     // ── Compact context builders ──
