@@ -69,6 +69,19 @@ public sealed class CheckoutReminderWorker : BackgroundService
             .Where(c => c.UpdatedAtUtc > cutoff && c.BusinessId != null)
             .ToListAsync(ct);
 
+        // Batch-load access tokens for all businesses in one query (avoids N+1)
+        var bizIds = conversations
+            .Where(c => c.BusinessId.HasValue)
+            .Select(c => c.BusinessId!.Value)
+            .Distinct()
+            .ToList();
+        var tokensByBiz = bizIds.Count > 0
+            ? await db.Businesses
+                .AsNoTracking()
+                .Where(b => bizIds.Contains(b.Id))
+                .ToDictionaryAsync(b => b.Id, b => b.AccessToken, ct)
+            : new Dictionary<Guid, string>();
+
         int scanned = 0, noPending = 0, staleCleared = 0, userReplied = 0,
             notReady = 0, reminder1Sent = 0, reminder2Sent = 0, errors = 0;
 
@@ -76,7 +89,7 @@ public sealed class CheckoutReminderWorker : BackgroundService
         {
             try
             {
-                var result = await ProcessConversationAsync(conv, db, stateStore, ct);
+                var result = await ProcessConversationAsync(conv, db, stateStore, tokensByBiz, ct);
                 scanned++;
                 switch (result)
                 {
@@ -109,7 +122,8 @@ public sealed class CheckoutReminderWorker : BackgroundService
     private enum ProcessResult { NoPending, StaleCleared, UserReplied, NotReady, Reminder1Sent, Reminder2Sent }
 
     private async Task<ProcessResult> ProcessConversationAsync(
-        ConversationState conv, AppDbContext db, IConversationStateStore stateStore, CancellationToken ct)
+        ConversationState conv, AppDbContext db, IConversationStateStore stateStore,
+        Dictionary<Guid, string> tokensByBiz, CancellationToken ct)
     {
         var state = Deserialize(conv.StateJson);
         if (state is null) return ProcessResult.NoPending;
@@ -158,12 +172,10 @@ public sealed class CheckoutReminderWorker : BackgroundService
             return ProcessResult.NoPending;
         }
 
-        // Resolve access token from business
+        // Resolve access token from pre-loaded dictionary
         string? accessToken = null;
         if (conv.BusinessId.HasValue)
-        {
-            accessToken = await GetAccessTokenAsync(db, conv.BusinessId.Value, ct);
-        }
+            tokensByBiz.TryGetValue(conv.BusinessId.Value, out accessToken);
 
         // Reminder 1: after 5 minutes
         if (!state.Reminder1SentAtUtc.HasValue && elapsed >= Reminder1Delay)
@@ -225,31 +237,6 @@ public sealed class CheckoutReminderWorker : BackgroundService
         });
 
         await db.SaveChangesAsync(ct);
-    }
-
-    private async Task<string?> GetAccessTokenAsync(AppDbContext db, Guid businessId, CancellationToken ct)
-    {
-        try
-        {
-            var conn = db.Database.GetDbConnection();
-            if (conn.State != System.Data.ConnectionState.Open)
-                await conn.OpenAsync(ct);
-
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """SELECT "AccessToken" FROM "Businesses" WHERE CAST("Id" AS TEXT) = @id LIMIT 1""";
-            var p = cmd.CreateParameter();
-            p.ParameterName = "id";
-            p.Value = businessId.ToString();
-            cmd.Parameters.Add(p);
-
-            var result = await cmd.ExecuteScalarAsync(ct);
-            return result as string;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "REMINDER: failed to resolve access token for business {BusinessId}", businessId);
-            return null;
-        }
     }
 
     private static ConversationFields? Deserialize(string json)
