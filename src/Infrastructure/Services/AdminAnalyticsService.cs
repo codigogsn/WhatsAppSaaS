@@ -43,12 +43,14 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         }
 
         var orderRows = await orderQ
+            .OrderByDescending(o => o.CreatedAtUtc)
             .Select(o => new { o.CheckoutCompleted, o.TotalAmount, o.CreatedAtUtc, o.PaymentProofMediaId, o.PaymentVerifiedAtUtc })
             .Take(50_000)
             .ToListAsync(ct);
         WarnIfTruncated(orderRows, 50_000, "GetSummary.orders");
 
         var customers = await customerQ
+            .OrderBy(c => c.Id)
             .Select(c => new { c.OrdersCount })
             .Take(50_000)
             .ToListAsync(ct);
@@ -74,6 +76,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         {
             var itemRows = await _db.OrderItems.AsNoTracking()
                 .Where(oi => oi.Order != null && oi.Order.BusinessId == businessId.Value)
+                .OrderBy(oi => oi.Id)
                 .Select(oi => new { oi.Name, oi.Quantity })
                 .Take(50_000)
                 .ToListAsync(ct);
@@ -119,6 +122,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
 
         var rows = await _db.OrderItems
             .AsNoTracking()
+            .OrderBy(oi => oi.Id)
             .Select(oi => new { oi.Name, oi.Quantity, oi.UnitPrice })
             .Take(50_000)
             .ToListAsync(ct);
@@ -180,6 +184,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         var allTimeRows = await _db.Orders
             .AsNoTracking()
             .Where(o => o.BusinessId == businessId && o.CheckoutCompleted)
+            .OrderByDescending(o => o.CreatedAtUtc)
             .Select(o => o.TotalAmount)
             .Take(100_000)
             .ToListAsync(ct);
@@ -231,6 +236,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         var rows = await _db.OrderItems
             .AsNoTracking()
             .Where(oi => oi.Order != null && oi.Order.BusinessId == businessId)
+            .OrderBy(oi => oi.Id)
             .Select(oi => new { oi.Name, oi.Quantity, oi.UnitPrice, oi.OrderId })
             .Take(50_000)
             .ToListAsync(ct);
@@ -292,6 +298,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         var states = await _db.ConversationStates
             .AsNoTracking()
             .Where(cs => cs.BusinessId == businessId)
+            .OrderBy(cs => cs.ConversationId)
             .Select(cs => cs.StateJson)
             .Take(50_000)
             .ToListAsync(ct);
@@ -350,6 +357,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         var orders = await _db.Orders
             .AsNoTracking()
             .Where(o => o.BusinessId == businessId && o.CheckoutCompleted)
+            .OrderByDescending(o => o.CreatedAtUtc)
             .Select(o => new
             {
                 o.CreatedAtUtc,
@@ -429,6 +437,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         var customers = await _db.Customers
             .AsNoTracking()
             .Where(c => c.BusinessId == businessId)
+            .OrderBy(c => c.Id)
             .Select(c => new { c.PhoneE164, c.Name, c.TotalSpent, c.OrdersCount })
             .Take(50_000)
             .ToListAsync(ct);
@@ -459,6 +468,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         var orderPayments = await _db.Orders
             .AsNoTracking()
             .Where(o => o.BusinessId == businessId && o.CheckoutCompleted)
+            .OrderByDescending(o => o.CreatedAtUtc)
             .Select(o => new { o.PaymentMethod, o.TotalAmount })
             .Take(100_000)
             .ToListAsync(ct);
@@ -521,6 +531,7 @@ public sealed class AdminAnalyticsService : IAdminAnalyticsService
         var items = await _db.OrderItems
             .AsNoTracking()
             .Where(oi => oi.Order != null && oi.Order.BusinessId == businessId)
+            .OrderBy(oi => oi.Id)
             .Select(oi => new { oi.Name, oi.Quantity, oi.UnitPrice, oi.OrderId })
             .Take(50_000)
             .ToListAsync(ct);

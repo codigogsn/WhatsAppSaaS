@@ -67,6 +67,7 @@ public sealed class CheckoutReminderWorker : BackgroundService
         var cutoff = DateTime.UtcNow.AddMinutes(-30);
         var conversations = await db.ConversationStates
             .Where(c => c.UpdatedAtUtc > cutoff && c.BusinessId != null)
+            .OrderBy(c => c.UpdatedAtUtc)
             .Take(5000)
             .ToListAsync(ct);
 
