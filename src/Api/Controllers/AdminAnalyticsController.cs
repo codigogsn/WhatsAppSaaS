@@ -241,9 +241,9 @@ public class AdminAnalyticsController : ControllerBase
                 paymentsPendingVerification = paymentsPending
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Analytics summary failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Analytics summary failed: Unexpected server error" });
         }
     }
 
@@ -598,9 +598,9 @@ public class AdminAnalyticsController : ControllerBase
                 topCustomers
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Extended analytics failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Extended analytics failed: Unexpected server error" });
         }
     }
 
@@ -621,9 +621,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetSalesAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Sales analytics failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Sales analytics failed: Unexpected server error" });
         }
     }
 
@@ -638,9 +638,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetProductAnalyticsAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Product analytics failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Product analytics failed: Unexpected server error" });
         }
     }
 
@@ -655,9 +655,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetConversionAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Conversion analytics failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Conversion analytics failed: Unexpected server error" });
         }
     }
 
@@ -672,9 +672,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetOperationalAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Operational analytics failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Operational analytics failed: Unexpected server error" });
         }
     }
 
@@ -689,9 +689,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetBusinessIntelligenceAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Business intelligence failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Business intelligence failed: Unexpected server error" });
         }
     }
 
@@ -706,9 +706,9 @@ public class AdminAnalyticsController : ControllerBase
             var result = await _analytics.GetRestaurantInsightsAsync(businessId, ct);
             return Ok(result);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Restaurant insights failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Restaurant insights failed: Unexpected server error" });
         }
     }
 
@@ -935,9 +935,9 @@ public class AdminAnalyticsController : ControllerBase
                 businesses
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Founder overview failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Founder overview failed: Unexpected server error" });
         }
     }
 

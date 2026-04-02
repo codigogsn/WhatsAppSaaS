@@ -69,7 +69,7 @@ public class AdminPromotionsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to query promotion recipients");
-            return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = "Unexpected server error" });
         }
     }
 
@@ -172,7 +172,7 @@ public class AdminPromotionsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "PROMOTION: unhandled error");
-            return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = "Unexpected server error" });
         }
         finally
         {

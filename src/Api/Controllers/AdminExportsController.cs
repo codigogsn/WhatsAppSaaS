@@ -151,7 +151,7 @@ public class AdminExportsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "CSV orders export failed");
-            return StatusCode(500, new { error = $"Export failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Export failed: Unexpected server error" });
         }
     }
 
@@ -225,7 +225,7 @@ public class AdminExportsController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "CSV customers export failed");
-            return StatusCode(500, new { error = $"Export failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Export failed: Unexpected server error" });
         }
     }
 

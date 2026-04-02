@@ -95,9 +95,9 @@ public sealed class MenuPdfController : ControllerBase
         {
             await _db.SaveChangesAsync(ct);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = "PDF SAVE FAILED: " + (ex.InnerException?.Message ?? ex.Message) });
+            return StatusCode(500, new { error = "Unexpected server error" });
         }
 
         return Ok(new

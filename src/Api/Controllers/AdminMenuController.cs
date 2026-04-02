@@ -141,9 +141,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(cats);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"ListCategories failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"ListCategories failed: Unexpected server error" });
         }
     }
 
@@ -182,10 +182,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { id, name = req.Name.Trim(), sortOrder = req.SortOrder, isActive = req.IsActive });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            var inner = ex.InnerException?.Message ?? ex.Message;
-            return StatusCode(500, new { error = $"CreateCategory failed: {ex.GetType().Name}: {inner}" });
+            return StatusCode(500, new { error = $"CreateCategory failed: Unexpected server error" });
         }
     }
 
@@ -222,9 +221,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { id, name = req.Name?.Trim(), sortOrder = req.SortOrder, isActive = req.IsActive });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"UpdateCategory failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"UpdateCategory failed: Unexpected server error" });
         }
     }
 
@@ -266,9 +265,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { deleted = true });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"DeleteCategory failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"DeleteCategory failed: Unexpected server error" });
         }
     }
 
@@ -389,9 +388,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(items);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"ListItems failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"ListItems failed: Unexpected server error" });
         }
     }
 
@@ -472,10 +471,9 @@ public sealed class AdminMenuController : ControllerBase
                 aliases = aliasResults
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            var inner = ex.InnerException?.Message ?? ex.Message;
-            return StatusCode(500, new { error = $"CreateItem failed: {ex.GetType().Name}: {inner}" });
+            return StatusCode(500, new { error = $"CreateItem failed: Unexpected server error" });
         }
     }
 
@@ -560,9 +558,9 @@ public sealed class AdminMenuController : ControllerBase
                 aliases
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"UpdateItem failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"UpdateItem failed: Unexpected server error" });
         }
     }
 
@@ -600,9 +598,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { deleted = true });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"DeleteItem failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"DeleteItem failed: Unexpected server error" });
         }
     }
 
@@ -638,9 +636,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { id, name = itemName, isAvailable = req.IsAvailable });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"ToggleAvailability failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"ToggleAvailability failed: Unexpected server error" });
         }
     }
 
@@ -687,9 +685,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { id, alias = req.Alias.Trim().ToLowerInvariant(), menuItemId = itemId });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"AddAlias failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"AddAlias failed: Unexpected server error" });
         }
     }
 
@@ -723,9 +721,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(new { deleted = true });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"DeleteAlias failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"DeleteAlias failed: Unexpected server error" });
         }
     }
 
@@ -893,9 +891,9 @@ public sealed class AdminMenuController : ControllerBase
                 warnings
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"BulkImport failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"BulkImport failed: Unexpected server error" });
         }
     }
 
@@ -1112,9 +1110,9 @@ public sealed class AdminMenuController : ControllerBase
 
             return Ok(result);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"PublicMenu failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"PublicMenu failed: Unexpected server error" });
         }
     }
 }

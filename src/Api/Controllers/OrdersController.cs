@@ -127,7 +127,7 @@ public sealed class OrdersController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "GET /api/orders failed");
-            return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = "Unexpected server error" });
         }
     }
 
@@ -180,7 +180,7 @@ public sealed class OrdersController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "GET /api/orders/{Id} failed", id);
-            return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = "Unexpected server error" });
         }
     }
 
@@ -463,7 +463,7 @@ public sealed class OrdersController : ControllerBase
         catch (Exception ex)
         {
             _logger.LogError(ex, "PATCH /api/orders/{Id}/status failed", id);
-            return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = "Unexpected server error" });
         }
     }
 
@@ -665,7 +665,7 @@ public sealed class OrdersController : ControllerBase
                 id, req?.Reference, ex.GetType().Name, ex.Message);
             if (ex.InnerException != null)
                 _logger.LogError("INNER: {Inner}", ex.InnerException.Message);
-            return StatusCode(500, new { error = $"Failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = "Unexpected server error" });
         }
     }
 

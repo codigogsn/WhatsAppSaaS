@@ -267,9 +267,9 @@ public class AdminBusinessesController : ControllerBase
 
             return Ok(items);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"DB query failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"DB query failed: Unexpected server error" });
         }
     }
 
@@ -631,9 +631,9 @@ public class AdminBusinessesController : ControllerBase
                 zelleInstructions = req.ZelleInstructions?.Trim()
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Update failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Update failed: Unexpected server error" });
         }
     }
 
@@ -679,9 +679,9 @@ public class AdminBusinessesController : ControllerBase
 
             return Ok(new { id = id.ToString(), name = bizName, isActive = !currentActive });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Toggle failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Toggle failed: Unexpected server error" });
         }
     }
 
@@ -852,9 +852,9 @@ public class AdminBusinessesController : ControllerBase
 
             return Ok(new { total = results.Count, real = realCount, junk = junkCount, businesses = results });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Audit failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Audit failed: Unexpected server error" });
         }
     }
 
@@ -931,9 +931,9 @@ public class AdminBusinessesController : ControllerBase
                 affected = deactivated
             });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Cleanup failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Cleanup failed: Unexpected server error" });
         }
     }
 

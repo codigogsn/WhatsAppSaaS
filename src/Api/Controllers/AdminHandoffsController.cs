@@ -179,9 +179,9 @@ public class AdminHandoffsController : ControllerBase
 
             return Ok(new { resolved = true, conversationId });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = "Unexpected server error" });
         }
     }
 
@@ -281,9 +281,9 @@ public class AdminHandoffsController : ControllerBase
 
             return Ok(new { returnedToBot = true, conversationId });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = ex.Message });
+            return StatusCode(500, new { error = "Unexpected server error" });
         }
     }
 

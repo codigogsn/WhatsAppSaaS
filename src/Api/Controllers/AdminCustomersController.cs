@@ -143,9 +143,9 @@ public class AdminCustomersController : ControllerBase
 
             return Ok(new { total = customers.Count, customers });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"CRM query failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"CRM query failed: Unexpected server error" });
         }
     }
 
@@ -253,9 +253,9 @@ public class AdminCustomersController : ControllerBase
 
             return Ok(new { customersFixed, ordersFixed });
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            return StatusCode(500, new { error = $"Backfill failed: {ex.GetType().Name}: {ex.Message}" });
+            return StatusCode(500, new { error = $"Backfill failed: Unexpected server error" });
         }
     }
 
