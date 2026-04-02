@@ -184,6 +184,10 @@ public static class MigrationRunner
                         ALTER TABLE "Customers" ALTER COLUMN "TotalSpent" TYPE numeric USING CASE WHEN btrim("TotalSpent")='' THEN NULL ELSE "TotalSpent"::numeric END;
                         fixed := fixed + 1;
                     END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ConversationStates' AND column_name='UpdatedAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "ConversationStates" ALTER COLUMN "UpdatedAtUtc" TYPE timestamp USING CASE WHEN btrim("UpdatedAtUtc")='' THEN now() ELSE "UpdatedAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
                     RAISE NOTICE 'Schema fix: % columns converted', fixed;
                 END $$;
             """;
@@ -246,10 +250,12 @@ public static class MigrationRunner
                     (table_name='Orders' AND column_name='SubtotalAmount' AND data_type='numeric')
                     OR
                     (table_name='Orders' AND column_name='CashChangeRequired' AND data_type='boolean')
+                    OR
+                    (table_name='ConversationStates' AND column_name='UpdatedAtUtc' AND data_type NOT IN ('text'))
                 )
             """;
             var count = Convert.ToInt32(cmd.ExecuteScalar());
-            return count == 2; // Both sentinel columns have correct types
+            return count == 3; // All sentinel columns have correct types
         }
         catch
         {

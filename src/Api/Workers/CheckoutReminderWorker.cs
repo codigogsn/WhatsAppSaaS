@@ -65,11 +65,20 @@ public sealed class CheckoutReminderWorker : BackgroundService
 
         // Load all recently-updated conversations (active within last 30 min)
         var cutoff = DateTime.UtcNow.AddMinutes(-30);
-        var conversations = await db.ConversationStates
-            .Where(c => c.UpdatedAtUtc > cutoff && c.BusinessId != null)
-            .OrderBy(c => c.UpdatedAtUtc)
-            .Take(5000)
-            .ToListAsync(ct);
+        List<ConversationState> conversations;
+        try
+        {
+            conversations = await db.ConversationStates
+                .Where(c => c.UpdatedAtUtc > cutoff && c.BusinessId != null)
+                .OrderBy(c => c.UpdatedAtUtc)
+                .Take(5000)
+                .ToListAsync(ct);
+        }
+        catch (InvalidCastException ex)
+        {
+            _logger.LogWarning(ex, "REMINDER: ConversationStates query failed — likely legacy text column. Skipping this cycle.");
+            return;
+        }
 
         // Batch-load access tokens for all businesses in one query (avoids N+1)
         var bizIds = conversations
