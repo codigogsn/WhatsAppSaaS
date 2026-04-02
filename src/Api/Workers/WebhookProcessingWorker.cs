@@ -31,7 +31,7 @@ public sealed class WebhookProcessingWorker : BackgroundService
 
                 if (message is null)
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken);
                     continue;
                 }
 
