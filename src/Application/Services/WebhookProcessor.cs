@@ -309,6 +309,19 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             }, businessContext.BusinessId, conversationId, cancellationToken);
                         }
 
+                        // Voice note fallback: redirect customer to text ordering
+                        if (message.Type is "audio" or "voice" or "ptt")
+                        {
+                            _logger.LogInformation("BRAIN: voice-note fallback conversation={ConversationId}", conversationId);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "No puedo escuchar notas de voz todav\u00eda \ud83c\udfa4\u274c\nEscr\u00edbeme tu pedido por texto y con gusto te ayudo \ud83d\udcdd"
+                                     + BuildReengagementPrompt(state.Items.Count > 0),
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
+
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
