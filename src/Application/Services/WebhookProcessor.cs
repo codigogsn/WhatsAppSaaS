@@ -384,13 +384,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                         if (matchedItem != null)
                         {
-                            var qReply = $"*{matchedItem.Canonical}* — ${matchedItem.Price:0.00}";
+                            var qReply = $"*{matchedItem.Canonical}* \u2014 ${matchedItem.Price:0.00}";
                             if (!string.IsNullOrWhiteSpace(matchedItem.Category))
                                 qReply += $" ({matchedItem.Category})";
-                            qReply += "\n\n¿Quieres que te lo agregue al pedido? Escribe la cantidad o sigue explorando el menú.";
+                            qReply += BuildReengagementPrompt(state.Items.Count > 0, matchedItem.Canonical);
 
                             _logger.LogInformation("BRAIN: Question resolved via menu match item={Item} price={Price} conversation={ConversationId}",
                                 matchedItem.Canonical, matchedItem.Price, conversationId);
+                            _logger.LogInformation("BRAIN: reengagement appended path=QuestionMatched conversation={ConversationId}", conversationId);
 
                             await SendAsync(new OutgoingMessage
                             {
@@ -401,11 +402,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         else
                         {
                             _logger.LogInformation("BRAIN: Question fallback (no menu match) conversation={ConversationId}", conversationId);
+                            _logger.LogInformation("BRAIN: reengagement appended path=QuestionFallback conversation={ConversationId}", conversationId);
 
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = "Puedo ayudarte con precios y opciones del menú 👍\n\n¿Qué deseas ordenar?",
+                                Body = "Puedo ayudarte con precios y opciones del men\u00fa \ud83d\udc4d" + BuildReengagementPrompt(state.Items.Count > 0),
                                 PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
                         }
@@ -1491,10 +1493,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 {
                                     _logger.LogInformation("BRAIN: intent=Order route=AI confidence={Conf} action=RejectLow conversation={ConversationId}",
                                         conf, conversationId);
+                                    _logger.LogInformation("BRAIN: reengagement appended path=RejectLow conversation={ConversationId}", conversationId);
                                     await SendAsync(new OutgoingMessage
                                     {
                                         To = message.From,
-                                        Body = "No estoy seguro de haber entendido tu pedido. \u00bfPodr\u00edas escribirlo de nuevo con los productos y cantidades?",
+                                        Body = "No estoy seguro de haber entendido tu pedido." + BuildReengagementPrompt(state.Items.Count > 0),
                                         PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
                                     }, businessContext.BusinessId, conversationId, cancellationToken);
                                     state.LastActivityUtc = DateTime.UtcNow;
@@ -2830,6 +2833,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
     }
 
     /// <summary>Find a menu item from a free-text question using existing normalization.</summary>
+    private static string BuildReengagementPrompt(bool hasActiveCart, string? itemName = null)
+    {
+        if (!string.IsNullOrWhiteSpace(itemName))
+            return $"\n\n\u00bfQuieres que te agregue {itemName} al pedido o prefieres otra opci\u00f3n?";
+        if (hasActiveCart)
+            return "\n\n\u00bfQuieres seguir con tu pedido o te ayudo con otra opci\u00f3n del men\u00fa?";
+        return "\n\n\u00bfQu\u00e9 deseas ordenar?";
+    }
+
     private static MenuEntry? FindMenuItemFromQuestion(string normalizedText, MenuEntry[] catalog)
     {
         // Strip question words to isolate the product reference
