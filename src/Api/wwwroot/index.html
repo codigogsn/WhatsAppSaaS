@@ -2325,96 +2325,28 @@ function syncAutoToggleUI() {
 // ── New order notification ──
 const _unreadOrders = new Set(); // persistent unread state until user interaction
 
+// ── Notification sounds (HTML Audio — simple and reliable) ──
+var _orderSound = new Audio('/sounds/order.wav');
+var _handoffSound = new Audio('/sounds/handoff.wav');
+_orderSound.volume = 0.7;
+_handoffSound.volume = 1.0;
+
 function playNewOrderSound() {
   if (!_soundEnabled) return;
-  try {
-    const ctx = getAudioCtx();
-    if (ctx.state === 'suspended') return;
-    const now = ctx.currentTime;
-    // Double-pulse premium chime: first phrase → pause → softer echo phrase
-    function playChime(startAt, vol) {
-      const notes = [
-        { freq: 523, time: 0,    dur: 0.16 },   // C5
-        { freq: 659, time: 0.10, dur: 0.16 },   // E5
-        { freq: 784, time: 0.20, dur: 0.26 },   // G5
-      ];
-      notes.forEach(n => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.value = n.freq;
-        const t = startAt + n.time;
-        gain.gain.setValueAtTime(vol, t);
-        gain.gain.exponentialRampToValueAtTime(0.001, t + n.dur);
-        osc.connect(gain); gain.connect(ctx.destination);
-        osc.start(t); osc.stop(t + n.dur + 0.05);
-        // Soft harmonic overtone
-        const osc2 = ctx.createOscillator();
-        const gain2 = ctx.createGain();
-        osc2.type = 'sine';
-        osc2.frequency.value = n.freq * 2;
-        gain2.gain.setValueAtTime(vol * 0.22, t);
-        gain2.gain.exponentialRampToValueAtTime(0.001, t + n.dur * 0.7);
-        osc2.connect(gain2); gain2.connect(ctx.destination);
-        osc2.start(t); osc2.stop(t + n.dur + 0.05);
-      });
-    }
-    playChime(now, 0.18);            // First pulse — full volume
-    playChime(now + 0.50, 0.10);     // Second pulse — softer echo after 500ms
-  } catch(e) { /* audio not available */ }
+  try { _orderSound.currentTime = 0; _orderSound.play(); } catch(e) {}
 }
-
-// ── Shared AudioContext (unlocked on first user gesture) ──
-var _sharedAudioCtx = null;
-function getAudioCtx() {
-  if (!_sharedAudioCtx) {
-    _sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
-  }
-  if (_sharedAudioCtx.state === 'suspended') _sharedAudioCtx.resume();
-  return _sharedAudioCtx;
-}
-// Unlock on first user interaction (required by Chrome/Safari autoplay policy)
-['click','keydown','pointerdown'].forEach(function(evt) {
-  document.addEventListener(evt, function unlockAudio() {
-    getAudioCtx();
-    document.removeEventListener(evt, unlockAudio);
-  }, { once: true });
-});
-
-// ── Human handoff notification ──
-var _lastHandoffCount = -1; // -1 = first load, skip sound
 
 function playHandoffSound() {
   if (!_soundEnabled) return;
-  try {
-    var ctx = getAudioCtx();
-    if (ctx.state === 'suspended') { console.log('HANDOFF SOUND BLOCKED: AudioContext suspended'); return; }
-    var now = ctx.currentTime;
-    [[440, 0], [880, 0.15], [440, 0.30], [880, 0.45]].forEach(function(n) {
-      var osc = ctx.createOscillator();
-      var gain = ctx.createGain();
-      osc.type = 'square';
-      osc.frequency.value = n[0];
-      var t = now + n[1];
-      gain.gain.setValueAtTime(0.08, t);
-      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
-      osc.connect(gain); gain.connect(ctx.destination);
-      osc.start(t); osc.stop(t + 0.15);
-    });
-    console.log('HANDOFF SOUND PLAY triggered');
-  } catch(e) { console.log('HANDOFF SOUND BLOCKED', e.message); }
+  try { _handoffSound.currentTime = 0; _handoffSound.play(); } catch(e) {}
 }
 
+// ── Human handoff alert tracking ──
+var _lastHandoffCount = -1;
+
 function checkHandoffAlert(count) {
-  console.log('HANDOFF SOUND CHECK prev=' + _lastHandoffCount + ' next=' + count);
-  if (_lastHandoffCount === -1) {
-    // First load — record count but don't play
-    _lastHandoffCount = count;
-    return;
-  }
-  if (count > _lastHandoffCount) {
-    playHandoffSound();
-  }
+  if (_lastHandoffCount === -1) { _lastHandoffCount = count; return; }
+  if (count > _lastHandoffCount) { playHandoffSound(); }
   _lastHandoffCount = count;
 }
 
