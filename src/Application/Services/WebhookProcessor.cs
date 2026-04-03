@@ -150,39 +150,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // 0b) AI brain clarification response handler
-                    if (state.AwaitingBrainClarification)
-                    {
-                        state.AwaitingBrainClarification = false;
-                        var clarifyInput = (message.Text?.Body ?? "").Trim().ToLowerInvariant();
-
-                        if (IsBrainClarificationConfirm(clarifyInput))
-                        {
-                            // Customer confirmed the AI-interpreted order → proceed with staged items
-                            _logger.LogInformation("BRAIN: clarification confirmed for {ConversationId}, items={Items}",
-                                conversationId, state.Items.Count);
-                            var confirmReply = BuildOrderReplyFromState(state, _bcvRate);
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From, Body = confirmReply.Body, Buttons = confirmReply.Buttons,
-                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-                            state.LastActivityUtc = DateTime.UtcNow;
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-                        else
-                        {
-                            // Customer rejected or sent correction → clear staged items, reparse
-                            _logger.LogInformation("BRAIN: clarification corrected for {ConversationId}, clearing {Items} items and reparsing",
-                                conversationId, state.Items.Count);
-                            state.Items.Clear();
-                            state.OrderConfirmed = false;
-                            state.DeliveryType = null;
-                            // Fall through to normal parsing with the new/correction text
-                        }
-                    }
-
                     // 1) Location pin (GPS)
                     if (message.Type == "location")
                     {
@@ -350,6 +317,47 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                     var rawText = message.Text.Body;
                     var t = Normalize(rawText);
+
+                    // ═══ BRAIN DECISION LAYER ═══
+                    var brainIntent = ClassifyBrainIntent(t, rawText, message.Type, state);
+                    _logger.LogInformation("BRAIN: intent={Intent} conversation={ConversationId}",
+                        brainIntent, conversationId);
+
+                    // Handle clarification responses (STOP — do not fall through)
+                    if (brainIntent == BrainIntent.ClarificationConfirm)
+                    {
+                        state.AwaitingBrainClarification = false;
+                        _logger.LogInformation("BRAIN: intent=ClarificationConfirm action=ResumeStagedOrder conversation={ConversationId} items={Items}",
+                            conversationId, state.Items.Count);
+                        var confirmReply = BuildOrderReplyFromState(state, _bcvRate);
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From, Body = confirmReply.Body, Buttons = confirmReply.Buttons,
+                            PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+                        state.LastActivityUtc = DateTime.UtcNow;
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
+                    if (brainIntent == BrainIntent.ClarificationCorrect)
+                    {
+                        state.AwaitingBrainClarification = false;
+                        _logger.LogInformation("BRAIN: intent=ClarificationCorrect action=Reparse conversation={ConversationId} clearing={Items}",
+                            conversationId, state.Items.Count);
+                        state.Items.Clear();
+                        state.OrderConfirmed = false;
+                        state.DeliveryType = null;
+                        // Fall through to normal parsing with correction text
+                    }
+
+                    // Clear stale clarification if customer sends greeting after gap
+                    if (state.AwaitingBrainClarification && brainIntent == BrainIntent.Greeting)
+                    {
+                        state.AwaitingBrainClarification = false;
+                        state.Items.Clear();
+                        _logger.LogInformation("BRAIN: stale clarification cleared on greeting for {ConversationId}", conversationId);
+                    }
 
                     // ═══ GLOBAL COMMAND OVERRIDE ═══
                     // These commands must work from ANY conversation state (observation,
@@ -1418,18 +1426,33 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             var brainResult = await _aiParser.ParseAsync(rawText, message.From, conversationId, cancellationToken);
                             var brainItems = brainResult.Args?.Order?.Items ?? [];
 
-                            if (brainResult.Intent == RestaurantIntent.OrderCreate
-                                && brainItems.Count > 0
-                                && brainResult.Confidence >= 0.5)
+                            if (brainResult.Intent == RestaurantIntent.OrderCreate && brainItems.Count > 0)
                             {
-                                _logger.LogInformation("BRAIN: AI parsed {Count} items confidence={Conf} for {ConversationId}",
-                                    brainItems.Count, brainResult.Confidence, conversationId);
+                                var conf = brainResult.Confidence;
+
+                                // ── STOP: confidence too low → don't stage risky items ──
+                                if (conf < BrainConfidenceLow)
+                                {
+                                    _logger.LogInformation("BRAIN: intent=Order route=AI confidence={Conf} action=RejectLow conversation={ConversationId}",
+                                        conf, conversationId);
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = "No estoy seguro de haber entendido tu pedido. \u00bfPodr\u00edas escribirlo de nuevo con los productos y cantidades?",
+                                        PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                    state.LastActivityUtc = DateTime.UtcNow;
+                                    await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                    continue;
+                                }
+
+                                _logger.LogInformation("BRAIN: intent=Order route=AI confidence={Conf} items={Count} conversation={ConversationId}",
+                                    conf, brainItems.Count, conversationId);
 
                                 foreach (var item in brainItems)
                                 {
                                     if (!string.IsNullOrWhiteSpace(item.Name) && item.Quantity > 0)
                                     {
-                                        // Normalize AI name through the same fuzzy matcher as quick-parse
                                         var aiRaw = item.Name.Trim();
                                         var canonical = NormalizeMenuItemName(aiRaw);
                                         if (canonical != null)
@@ -1441,11 +1464,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 if (!string.IsNullOrWhiteSpace(brainResult.Args?.Order?.DeliveryType))
                                     state.DeliveryType = NormalizeDeliveryType(brainResult.Args.Order.DeliveryType);
 
-                                // Low confidence → ask clarification before confirming
-                                if (brainResult.Confidence < 0.7 && state.Items.Count > 0)
+                                // ── STOP: medium confidence → clarification required ──
+                                if (conf < BrainConfidenceHigh && state.Items.Count > 0)
                                 {
                                     var itemList = string.Join(", ", state.Items.Select(i => $"{i.Quantity}x {i.Name}"));
-                                    var clarifyMsg = $"Para confirmar tu pedido:\n{itemList}\n\n¿Es correcto? Responde *sí* para confirmar o escribe los cambios.";
+                                    var clarifyMsg = $"Para confirmar tu pedido:\n{itemList}\n\n\u00bfEs correcto? Responde *s\u00ed* para confirmar o escribe los cambios.";
                                     await SendAsync(new OutgoingMessage
                                     {
                                         To = message.From, Body = clarifyMsg,
@@ -1453,12 +1476,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     }, businessContext.BusinessId, conversationId, cancellationToken);
 
                                     state.AwaitingBrainClarification = true;
-                                    _logger.LogInformation("BRAIN: clarification requested for {ConversationId} (confidence={Conf})",
-                                        conversationId, brainResult.Confidence);
+                                    _logger.LogInformation("BRAIN: intent=Order route=AI confidence={Conf} action=Clarification conversation={ConversationId}",
+                                        conf, conversationId);
                                     state.LastActivityUtc = DateTime.UtcNow;
                                     await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                                     continue;
                                 }
+
+                                // ── High confidence → proceed ──
+                                _logger.LogInformation("BRAIN: intent=Order route=AI confidence={Conf} action=Proceed conversation={ConversationId}",
+                                    conf, conversationId);
 
                                 // High confidence → proceed to normal order flow
                                 var brainReply = BuildOrderReplyFromState(state, _bcvRate);
@@ -2611,6 +2638,66 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     private static bool IsConfirmCommand(string t)
         => t == "confirmar" || t == "confirmado" || t == "listo";
+
+    // ── Brain Decision Layer ──
+
+    private const double BrainConfidenceHigh = 0.75;
+    private const double BrainConfidenceLow = 0.50;
+
+    internal enum BrainIntent
+    {
+        Greeting,
+        Order,
+        ClarificationConfirm,
+        ClarificationCorrect,
+        HumanRequest,
+        PaymentProof,
+        Question,
+        Unknown
+    }
+
+    internal static BrainIntent ClassifyBrainIntent(string t, string rawText, string messageType, ConversationFields state)
+    {
+        // Clarification responses take highest priority when awaited
+        if (state.AwaitingBrainClarification)
+        {
+            return IsBrainClarificationConfirm(t)
+                ? BrainIntent.ClarificationConfirm
+                : BrainIntent.ClarificationCorrect;
+        }
+
+        // Human handoff request
+        if (IsHumanHandoffRequest(t))
+            return BrainIntent.HumanRequest;
+
+        // Payment proof (media during proof stage)
+        if (messageType is "image" or "document" && !state.PaymentEvidenceReceived
+            && (state.PaymentEvidenceRequested
+                || (state.Items.Count > 0 && state.PaymentMethod is "pago_movil" or "divisas" or "zelle")
+                || state.AwaitingPostConfirmProof))
+            return BrainIntent.PaymentProof;
+
+        // Greeting (no ordering intent)
+        if (IsGreeting(t) && !IsOrderingIntent(t) && !System.Text.RegularExpressions.Regex.IsMatch(rawText, @"\d"))
+            return BrainIntent.Greeting;
+
+        // Order-like text
+        if (IsOrderingIntent(t) || System.Text.RegularExpressions.Regex.IsMatch(rawText, @"\b\d{1,2}\s+\p{L}"))
+            return BrainIntent.Order;
+
+        // Question patterns (no ordering signal)
+        var s = StripAccents(t);
+        if (s.StartsWith("como ") || s.StartsWith("que ") || s.StartsWith("cual ")
+            || s.StartsWith("cuanto ") || s.StartsWith("cuando ")
+            || s.StartsWith("donde ") || s.StartsWith("tienen ") || s.StartsWith("hay "))
+            return BrainIntent.Question;
+
+        // Fallback: if customer has items and text looks like a modification, treat as Order
+        if (state.Items.Count > 0)
+            return BrainIntent.Order;
+
+        return BrainIntent.Unknown;
+    }
 
     private static bool IsBrainClarificationConfirm(string t)
         => t is "si" or "sí" or "s" or "ok" or "dale" or "correcto" or "es correcto"
