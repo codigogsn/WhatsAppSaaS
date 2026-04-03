@@ -1372,6 +1372,75 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.PendingAmbiguousItems = null;
                     }
 
+                    // E-brain) Complex order → AI-first interpretation
+                    if (IsComplexOrderMessage(rawText))
+                    {
+                        _logger.LogInformation("BRAIN: complex order detected for {ConversationId}, routing to AI. Text={Text}",
+                            conversationId, rawText.Length > 120 ? rawText[..120] : rawText);
+
+                        try
+                        {
+                            var brainResult = await _aiParser.ParseAsync(rawText, message.From, conversationId, cancellationToken);
+                            var brainItems = brainResult.Args?.Order?.Items ?? [];
+
+                            if (brainResult.Intent == RestaurantIntent.OrderCreate
+                                && brainItems.Count > 0
+                                && brainResult.Confidence >= 0.5)
+                            {
+                                _logger.LogInformation("BRAIN: AI parsed {Count} items confidence={Conf} for {ConversationId}",
+                                    brainItems.Count, brainResult.Confidence, conversationId);
+
+                                foreach (var item in brainItems)
+                                {
+                                    if (!string.IsNullOrWhiteSpace(item.Name) && item.Quantity > 0)
+                                        AddOrIncreaseItem(state, item.Name.Trim(), item.Quantity);
+                                }
+
+                                if (!string.IsNullOrWhiteSpace(brainResult.Args?.Order?.DeliveryType))
+                                    state.DeliveryType = NormalizeDeliveryType(brainResult.Args.Order.DeliveryType);
+
+                                // Low confidence → ask clarification before confirming
+                                if (brainResult.Confidence < 0.7 && state.Items.Count > 0)
+                                {
+                                    var itemList = string.Join(", ", state.Items.Select(i => $"{i.Quantity}x {i.Name}"));
+                                    var clarifyMsg = $"Para confirmar tu pedido:\n{itemList}\n\n¿Es correcto? Responde *sí* para confirmar o escribe los cambios.";
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From, Body = clarifyMsg,
+                                        PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                                    _logger.LogInformation("BRAIN: clarification requested for {ConversationId} (confidence={Conf})",
+                                        conversationId, brainResult.Confidence);
+                                    state.LastActivityUtc = DateTime.UtcNow;
+                                    await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                    continue;
+                                }
+
+                                // High confidence → proceed to normal order flow
+                                var brainReply = BuildOrderReplyFromState(state, _bcvRate);
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From, Body = brainReply.Body, Buttons = brainReply.Buttons,
+                                    PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                                state.LastActivityUtc = DateTime.UtcNow;
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+                            else
+                            {
+                                _logger.LogInformation("BRAIN: AI result not usable (intent={Intent} items={Items} conf={Conf}), falling back to quick-parse",
+                                    brainResult.Intent, brainItems.Count, brainResult.Confidence);
+                            }
+                        }
+                        catch (Exception brainEx)
+                        {
+                            _logger.LogWarning(brainEx, "BRAIN: AI parse failed for {ConversationId}, falling back to quick-parse", conversationId);
+                        }
+                    }
+
                     // E0) Quick parse (no AI)
                     if (TryParseQuickOrder(rawText, out var quickItems, out var quickDelivery, out var quickObs))
                     {
@@ -2459,6 +2528,35 @@ public sealed class WebhookProcessor : IWebhookProcessor
             || s.Contains("me gustaria pedir") || s.Contains("deseo pedir")
             || s.Contains("nuevo pedido") || s.Contains("empezar de nuevo")
             || s.Contains("reiniciar pedido");
+    }
+
+    /// <summary>
+    /// Detects whether a message is a complex multi-item order that benefits from AI interpretation.
+    /// Simple single-item orders ("2 hamburguesas") stay on the fast quick-parse path.
+    /// </summary>
+    internal static bool IsComplexOrderMessage(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw) || raw.Length < 15) return false;
+        var t = raw.Trim().ToLowerInvariant();
+
+        // Count distinct quantity mentions (digit sequences)
+        var digitMatches = System.Text.RegularExpressions.Regex.Matches(t, @"\b\d{1,2}\b");
+        if (digitMatches.Count >= 3) return true;
+
+        // Count Spanish quantity words
+        var qtyWords = new[] { "una ", "unas ", "unos ", "un ", "dos ", "tres ", "cuatro ", "cinco ", "media " };
+        var qtyCount = qtyWords.Count(w => t.Contains(w));
+        if (digitMatches.Count + qtyCount >= 3) return true;
+
+        // Long message with ordering intent + conjunctions
+        if (t.Length >= 40)
+        {
+            var conjunctions = new[] { " y ", " con ", " sin ", " extra ", " mas ", " también ", " tambien ", " ademas " };
+            var conjCount = conjunctions.Count(c => t.Contains(c));
+            if (conjCount >= 2 && (digitMatches.Count > 0 || qtyCount > 0)) return true;
+        }
+
+        return false;
     }
 
     private static bool IsConfirmCommand(string t)
