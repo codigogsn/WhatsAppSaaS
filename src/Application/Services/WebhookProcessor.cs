@@ -2802,23 +2802,32 @@ public sealed class WebhookProcessor : IWebhookProcessor
             m.Canonical.Equals(name, StringComparison.OrdinalIgnoreCase));
         var unitPrice = entry?.Price ?? 0m;
 
+        // Use canonical name for customer-facing display (not raw user input)
+        var displayName = entry?.Canonical ?? name;
+
         // If active catalog returned no price or a suspiciously low price,
         // check the demo catalog as fallback (handles corrupted DB menu data)
         if (unitPrice < 0.10m && ActiveCatalog != null)
         {
-            _staticLogger?.LogInformation("PRICE FALLBACK start item={Item} dbPrice={DbPrice}", name, unitPrice);
+            _staticLogger?.LogInformation("PRICE FALLBACK start item={Item} dbPrice={DbPrice}", displayName, unitPrice);
             var demoEntry = FindDemoPriceFallback(name);
             if (demoEntry != null && demoEntry.Price > unitPrice)
+            {
                 unitPrice = demoEntry.Price;
+                if (displayName == name) displayName = demoEntry.Canonical ?? name;
+            }
         }
 
-        var existing = state.Items.FirstOrDefault(x => x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+        var existing = state.Items.FirstOrDefault(x => x.Name.Equals(displayName, StringComparison.OrdinalIgnoreCase)
+                                                     || x.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
         if (existing != null)
         {
+            // Upgrade name to canonical if we now have a better match
+            if (entry != null && !existing.Name.Equals(entry.Canonical, StringComparison.OrdinalIgnoreCase))
+                existing.Name = displayName;
             existing.Quantity += qty;
             if (existing.UnitPrice == 0m && unitPrice > 0m)
                 existing.UnitPrice = unitPrice;
-            // Merge modifiers if new ones provided
             if (!string.IsNullOrWhiteSpace(modifiers))
             {
                 existing.Modifiers = string.IsNullOrWhiteSpace(existing.Modifiers)
@@ -2828,7 +2837,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
         else
         {
-            state.Items.Add(new ConversationItemEntry { Name = name, Quantity = qty, Modifiers = modifiers, UnitPrice = unitPrice });
+            state.Items.Add(new ConversationItemEntry { Name = displayName, Quantity = qty, Modifiers = modifiers, UnitPrice = unitPrice });
         }
     }
 
