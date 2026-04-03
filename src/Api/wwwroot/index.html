@@ -2082,7 +2082,7 @@ Tipo: burger"></textarea>
         <div class="label">Pagos Pendientes</div>
         <div class="value" id="kpiPaymentsPending">0</div>
       </div>
-      <div class="hero-stat hero-alert-danger" style="cursor:pointer;" onclick="document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
+      <div class="hero-stat hero-alert-danger" style="cursor:pointer;" onclick="acknowledgeHandoff('hero_stat');document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
         <div class="label">Necesitan Humano</div>
         <div class="value" id="kpiHandoffs">0</div>
       </div>
@@ -2090,7 +2090,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Human Handoff Alert Banner -->
-  <div id="handoffAlertBanner" class="handoff-alert-banner" onclick="document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
+  <div id="handoffAlertBanner" class="handoff-alert-banner" onclick="acknowledgeHandoff('banner');document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
     <div class="handoff-alert-icon">&#x1f6a8;</div>
     <div class="handoff-alert-body">
       <div class="handoff-alert-title">Atenci&#243;n humana requerida</div>
@@ -2173,7 +2173,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Human Handoff Inbox -->
-  <details id="handoffInbox" class="section-panel handoff-panel">
+  <details id="handoffInbox" class="section-panel handoff-panel" ontoggle="if(this.open)acknowledgeHandoff('inbox_open')">
     <summary>
       Atencion Humana <span id="handoffBadge" class="section-badge section-badge-danger">0</span>
     </summary>
@@ -2369,12 +2369,51 @@ function playHandoffSound() {
   }
 }
 
-// ── Human handoff alert tracking ──
+// ── Human handoff alert tracking + reminder loop ──
 var _lastHandoffCount = -1;
+var _handoffLoopId = null;
+var _handoffAcknowledged = false;
+
+function startHandoffLoop() {
+  if (_handoffLoopId) return; // prevent duplicates
+  _handoffAcknowledged = false;
+  _handoffLoopId = setInterval(function() {
+    if (_handoffAcknowledged || _lastHandoffCount <= 0) {
+      stopHandoffLoop('no_longer_needed');
+      return;
+    }
+    console.log('HANDOFF LOOP TICK');
+    playHandoffSound();
+  }, 10000);
+  console.log('HANDOFF LOOP START');
+}
+
+function stopHandoffLoop(reason) {
+  if (!_handoffLoopId) return;
+  clearInterval(_handoffLoopId);
+  _handoffLoopId = null;
+  console.log('HANDOFF LOOP STOP reason=' + reason);
+}
+
+function acknowledgeHandoff(source) {
+  _handoffAcknowledged = true;
+  stopHandoffLoop('acknowledged');
+  console.log('HANDOFF ACKNOWLEDGED source=' + source);
+}
 
 function checkHandoffAlert(count) {
   if (_lastHandoffCount === -1) { _lastHandoffCount = count; return; }
-  if (count > _lastHandoffCount) { playHandoffSound(); }
+
+  if (count === 0) {
+    stopHandoffLoop('resolved');
+    _handoffAcknowledged = false; // reset for next cycle
+  } else if (count > _lastHandoffCount) {
+    // Genuinely new handoff
+    _handoffAcknowledged = false;
+    playHandoffSound();
+    startHandoffLoop();
+  }
+
   _lastHandoffCount = count;
 }
 
@@ -3344,6 +3383,7 @@ async function sendHandoffReply(conversationId){
       return;
     }
     input.value = '';
+    acknowledgeHandoff('reply_sent');
     await loadHandoffs();
   } catch(e) { showToast('Network error: ' + e.message, 'error'); }
   finally { input.disabled = false; input.focus(); }
