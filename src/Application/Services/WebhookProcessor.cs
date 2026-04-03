@@ -1471,13 +1471,31 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     if (!string.IsNullOrWhiteSpace(item.Name) && item.Quantity > 0)
                                     {
                                         var aiRaw = item.Name.Trim();
-                                        // Try direct normalization first
                                         var canonical = NormalizeMenuItemName(aiRaw);
                                         string? aiModifier = null;
 
-                                        // If direct match fails, try splitting modifier from item name
-                                        if (canonical == null)
+                                        if (canonical != null)
                                         {
+                                            // Check if parenthetical match extracted a size modifier
+                                            // e.g. raw="combo familiar grande" → canonical="Combo Familiar (Grande)"
+                                            // Extract "grande" as modifier if raw didn't have parentheses
+                                            if (canonical.Contains('(') && !aiRaw.Contains('('))
+                                            {
+                                                var pIdx = canonical.IndexOf('(');
+                                                var parenMod = canonical[(pIdx + 1)..].TrimEnd(')').Trim();
+                                                aiModifier = parenMod.ToLowerInvariant();
+                                                canonical = canonical[..pIdx].Trim();
+                                                _logger.LogInformation("BRAIN: parenthetical match raw='{Raw}' canonical='{Canonical}' modifier='{Modifier}'",
+                                                    aiRaw, canonical, aiModifier);
+                                            }
+                                            else
+                                            {
+                                                _logger.LogInformation("BRAIN: AI item normalized {Raw} -> {Canonical}", aiRaw, canonical);
+                                            }
+                                        }
+                                        else
+                                        {
+                                            // Try splitting embedded modifier from item name
                                             var (baseName, mod) = SplitAiItemModifier(aiRaw);
                                             if (baseName != null)
                                             {
@@ -1489,10 +1507,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                                     _logger.LogInformation("BRAIN: AI item split {Raw} -> {Canonical} + modifier={Mod}", aiRaw, canonical, mod);
                                                 }
                                             }
-                                        }
-                                        else
-                                        {
-                                            _logger.LogInformation("BRAIN: AI item normalized {Raw} -> {Canonical}", aiRaw, canonical);
                                         }
 
                                         AddOrIncreaseItem(state, canonical ?? aiRaw, item.Quantity, aiModifier);
@@ -4189,6 +4203,39 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (a.Length >= 4 && LevenshteinDistance(t, a) <= maxDist)
                         return entry.Canonical;
                 }
+            }
+        }
+
+        // Pass 3: parenthetical match — strip "(Grande)", "(Mediana)" etc. from canonical
+        // Handles AI returning "combo familiar grande" when menu has "Combo Familiar (Grande)"
+        foreach (var entry in catalog)
+        {
+            var canonLower = StripAccents(entry.Canonical.ToLowerInvariant());
+            var parenIdx = canonLower.IndexOf('(');
+            if (parenIdx <= 0) continue; // no parenthetical content
+
+            var baseName = canonLower[..parenIdx].Trim();
+            var parenContent = canonLower[(parenIdx + 1)..].TrimEnd(')').Trim();
+
+            // Check if input starts with the base name and ends with the parenthetical content
+            // e.g. "combo familiar grande" starts with "combo familiar" and ends with "grande"
+            if (t.StartsWith(baseName) && t.Length > baseName.Length)
+            {
+                var remainder = t[baseName.Length..].Trim();
+                var remainderNorm = StripAccents(remainder);
+                if (remainderNorm == parenContent
+                    || (parenContent.Length >= 4 && LevenshteinDistance(remainderNorm, parenContent) <= 2))
+                {
+                    return entry.Canonical;
+                }
+            }
+
+            // Also try singularized input against base
+            if (tSingularized.StartsWith(baseName) && tSingularized.Length > baseName.Length)
+            {
+                var remainder = tSingularized[baseName.Length..].Trim();
+                if (StripAccents(remainder) == parenContent)
+                    return entry.Canonical;
             }
         }
 
