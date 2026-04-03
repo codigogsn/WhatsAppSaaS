@@ -849,6 +849,22 @@
     }
     .hero-alert-warning .label { color: var(--warning) !important; opacity: 1 !important; }
     .hero-alert-warning .value { color: var(--warning) !important; }
+    .handoff-alert-banner {
+      display: none; cursor: pointer; margin-bottom: 16px;
+      background: rgba(239,68,68,.06); border: 1px solid rgba(239,68,68,.25);
+      border-left: 4px solid var(--danger, #ef4444); border-radius: 12px;
+      padding: 14px 20px; transition: background .12s;
+    }
+    .handoff-alert-banner:hover { background: rgba(239,68,68,.1); }
+    .handoff-alert-banner.visible { display: flex; align-items: center; gap: 14px; }
+    .handoff-alert-icon { font-size: 22px; flex-shrink: 0; }
+    .handoff-alert-body { flex: 1; }
+    .handoff-alert-title {
+      font-size: 12px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: .6px; color: var(--danger, #ef4444); margin-bottom: 2px;
+    }
+    .handoff-alert-msg { font-size: 13px; color: var(--text); line-height: 1.35; }
+    .handoff-alert-arrow { color: var(--danger, #ef4444); font-size: 18px; flex-shrink: 0; }
     .hero-alert-danger {
       padding: 14px 16px; border-radius: var(--radius-sm);
       background: rgba(255,59,48,.06); border: 1px solid rgba(255,59,48,.08);
@@ -2073,6 +2089,16 @@ Tipo: burger"></textarea>
     </div>
   </div>
 
+  <!-- Human Handoff Alert Banner -->
+  <div id="handoffAlertBanner" class="handoff-alert-banner" onclick="document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
+    <div class="handoff-alert-icon">&#x1f6a8;</div>
+    <div class="handoff-alert-body">
+      <div class="handoff-alert-title">Atenci&#243;n humana requerida</div>
+      <div class="handoff-alert-msg" id="handoffAlertMsg">1 cliente esperando respuesta</div>
+    </div>
+    <div class="handoff-alert-arrow">&#x276f;</div>
+  </div>
+
   <!-- Order Status Strip -->
   <div id="statusStrip" class="status-strip">
     <div class="status-chip"><div class="status-chip-label">Cargados</div><div class="status-chip-value" id="kpiTotal">0</div></div>
@@ -3188,6 +3214,20 @@ async function loadHandoffs(){
     document.getElementById('kpiHandoffs').textContent = list.length;
     const badge = document.getElementById('handoffBadge');
     if (badge) badge.textContent = list.length;
+
+    // Update handoff alert banner
+    var banner = document.getElementById('handoffAlertBanner');
+    var bannerMsg = document.getElementById('handoffAlertMsg');
+    if (banner) {
+      if (list.length > 0) {
+        banner.classList.add('visible');
+        if (bannerMsg) bannerMsg.textContent = list.length === 1
+          ? '1 cliente esperando respuesta'
+          : list.length + ' clientes esperando respuesta';
+      } else {
+        banner.classList.remove('visible');
+      }
+    }
 
     // Build handoff phone lookup for order cards
     for (const h of list) {
