@@ -2325,11 +2325,34 @@ function syncAutoToggleUI() {
 // ── New order notification ──
 const _unreadOrders = new Set(); // persistent unread state until user interaction
 
-// ── Notification sounds (HTML Audio — simple and reliable) ──
+// ── Notification sounds (HTML Audio) ──
 var _orderSound = new Audio('/sounds/order.wav');
 var _handoffSound = new Audio('/sounds/handoff.wav');
 _orderSound.volume = 0.7;
 _handoffSound.volume = 1.0;
+var _handoffSoundPrimed = false;
+
+// Prime handoff audio on first user interaction (browser autoplay policy)
+function _primeHandoffAudio() {
+  if (_handoffSoundPrimed) return;
+  _handoffSound.volume = 0.01;
+  var p = _handoffSound.play();
+  if (p && p.then) {
+    p.then(function() {
+      _handoffSound.pause();
+      _handoffSound.currentTime = 0;
+      _handoffSound.volume = 1.0;
+      _handoffSoundPrimed = true;
+      console.log('HANDOFF SOUND PRIMED');
+    }).catch(function(e) { console.log('HANDOFF PRIME FAILED:', e.message); });
+  }
+}
+['click','pointerdown','keydown'].forEach(function(evt) {
+  document.addEventListener(evt, function _onPrime() {
+    _primeHandoffAudio();
+    document.removeEventListener(evt, _onPrime);
+  }, { once: true });
+});
 
 function playNewOrderSound() {
   if (!_soundEnabled) return;
@@ -2338,7 +2361,12 @@ function playNewOrderSound() {
 
 function playHandoffSound() {
   if (!_soundEnabled) return;
-  try { _handoffSound.currentTime = 0; _handoffSound.play(); } catch(e) {}
+  _handoffSound.currentTime = 0;
+  var p = _handoffSound.play();
+  if (p && p.then) {
+    p.then(function() { console.log('HANDOFF PLAY OK'); })
+     .catch(function(e) { console.log('HANDOFF PLAY REJECTED:', e.message); });
+  }
 }
 
 // ── Human handoff alert tracking ──
