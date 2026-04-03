@@ -2328,7 +2328,8 @@ const _unreadOrders = new Set(); // persistent unread state until user interacti
 function playNewOrderSound() {
   if (!_soundEnabled) return;
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = getAudioCtx();
+    if (ctx.state === 'suspended') return;
     const now = ctx.currentTime;
     // Double-pulse premium chime: first phrase → pause → softer echo phrase
     function playChime(startAt, vol) {
@@ -2363,15 +2364,32 @@ function playNewOrderSound() {
   } catch(e) { /* audio not available */ }
 }
 
+// ── Shared AudioContext (unlocked on first user gesture) ──
+var _sharedAudioCtx = null;
+function getAudioCtx() {
+  if (!_sharedAudioCtx) {
+    _sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (_sharedAudioCtx.state === 'suspended') _sharedAudioCtx.resume();
+  return _sharedAudioCtx;
+}
+// Unlock on first user interaction (required by Chrome/Safari autoplay policy)
+['click','keydown','pointerdown'].forEach(function(evt) {
+  document.addEventListener(evt, function unlockAudio() {
+    getAudioCtx();
+    document.removeEventListener(evt, unlockAudio);
+  }, { once: true });
+});
+
 // ── Human handoff notification ──
-var _lastHandoffCount = 0;
+var _lastHandoffCount = -1; // -1 = first load, skip sound
 
 function playHandoffSound() {
   if (!_soundEnabled) return;
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    const now = ctx.currentTime;
-    // Urgent dual-tone alert (distinct from order chime)
+    var ctx = getAudioCtx();
+    if (ctx.state === 'suspended') { console.log('HANDOFF SOUND BLOCKED: AudioContext suspended'); return; }
+    var now = ctx.currentTime;
     [[440, 0], [880, 0.15], [440, 0.30], [880, 0.45]].forEach(function(n) {
       var osc = ctx.createOscillator();
       var gain = ctx.createGain();
@@ -2383,13 +2401,19 @@ function playHandoffSound() {
       osc.connect(gain); gain.connect(ctx.destination);
       osc.start(t); osc.stop(t + 0.15);
     });
-  } catch(e) { /* audio not available */ }
+    console.log('HANDOFF SOUND PLAY triggered');
+  } catch(e) { console.log('HANDOFF SOUND BLOCKED', e.message); }
 }
 
 function checkHandoffAlert(count) {
-  if (count > _lastHandoffCount && _lastHandoffCount >= 0) {
+  console.log('HANDOFF SOUND CHECK prev=' + _lastHandoffCount + ' next=' + count);
+  if (_lastHandoffCount === -1) {
+    // First load — record count but don't play
+    _lastHandoffCount = count;
+    return;
+  }
+  if (count > _lastHandoffCount) {
     playHandoffSound();
-    console.log('HANDOFF ALERT: count=' + count);
   }
   _lastHandoffCount = count;
 }
