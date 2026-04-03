@@ -319,9 +319,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     var t = Normalize(rawText);
 
                     // ═══ BRAIN DECISION LAYER ═══
-                    var brainIntent = ClassifyBrainIntent(t, rawText, message.Type, state);
-                    _logger.LogInformation("BRAIN: intent={Intent} conversation={ConversationId}",
-                        brainIntent, conversationId);
+                    var (brainIntent, brainReason) = ClassifyBrainIntent(t, rawText, message.Type, state);
+                    _logger.LogInformation("BRAIN: dominantIntent={Intent} reason={Reason} conversation={ConversationId}",
+                        brainIntent, brainReason, conversationId);
 
                     // Handle clarification responses (STOP — do not fall through)
                     if (brainIntent == BrainIntent.ClarificationConfirm)
@@ -2656,47 +2656,59 @@ public sealed class WebhookProcessor : IWebhookProcessor
         Unknown
     }
 
-    internal static BrainIntent ClassifyBrainIntent(string t, string rawText, string messageType, ConversationFields state)
+    internal static (BrainIntent Intent, string Reason) ClassifyBrainIntent(string t, string rawText, string messageType, ConversationFields state)
     {
-        // Clarification responses take highest priority when awaited
+        // ── Priority 1: Clarification state (absolute override) ──
         if (state.AwaitingBrainClarification)
         {
             return IsBrainClarificationConfirm(t)
-                ? BrainIntent.ClarificationConfirm
-                : BrainIntent.ClarificationCorrect;
+                ? (BrainIntent.ClarificationConfirm, "AwaitingClarification+ConfirmInput")
+                : (BrainIntent.ClarificationCorrect, "AwaitingClarification+CorrectionInput");
         }
 
-        // Human handoff request
-        if (IsHumanHandoffRequest(t))
-            return BrainIntent.HumanRequest;
+        // ── Collect candidate signals ──
+        var hasGreeting = IsGreeting(t);
+        var hasOrder = IsOrderingIntent(t)
+                       || System.Text.RegularExpressions.Regex.IsMatch(rawText, @"\b\d{1,2}\s+\p{L}");
+        var hasHuman = IsHumanHandoffRequest(t);
+        var hasPaymentProof = messageType is "image" or "document"
+                              && !state.PaymentEvidenceReceived
+                              && (state.PaymentEvidenceRequested
+                                  || (state.Items.Count > 0 && state.PaymentMethod is "pago_movil" or "divisas" or "zelle")
+                                  || state.AwaitingPostConfirmProof);
+        var sPlain = StripAccents(t);
+        var hasQuestion = sPlain.StartsWith("como ") || sPlain.StartsWith("que ")
+                          || sPlain.StartsWith("cual ") || sPlain.StartsWith("cuanto ")
+                          || sPlain.StartsWith("cuando ") || sPlain.StartsWith("donde ")
+                          || sPlain.StartsWith("tienen ") || sPlain.StartsWith("hay ")
+                          || t.Contains("cuanto cuesta") || t.Contains("cuanto vale")
+                          || t.Contains("precio de") || t.Contains("que tienen");
 
-        // Payment proof (media during proof stage)
-        if (messageType is "image" or "document" && !state.PaymentEvidenceReceived
-            && (state.PaymentEvidenceRequested
-                || (state.Items.Count > 0 && state.PaymentMethod is "pago_movil" or "divisas" or "zelle")
-                || state.AwaitingPostConfirmProof))
-            return BrainIntent.PaymentProof;
+        // ── Priority 2: Payment proof (system is waiting + media present) ──
+        if (hasPaymentProof)
+            return (BrainIntent.PaymentProof, "PaymentProofMedia");
 
-        // Greeting (no ordering intent)
-        if (IsGreeting(t) && !IsOrderingIntent(t) && !System.Text.RegularExpressions.Regex.IsMatch(rawText, @"\d"))
-            return BrainIntent.Greeting;
+        // ── Priority 3: Human request wins over greeting/order ──
+        if (hasHuman)
+            return (BrainIntent.HumanRequest, hasGreeting ? "HumanOverridesGreeting" : hasOrder ? "HumanOverridesOrder" : "HumanDirect");
 
-        // Order-like text
-        if (IsOrderingIntent(t) || System.Text.RegularExpressions.Regex.IsMatch(rawText, @"\b\d{1,2}\s+\p{L}"))
-            return BrainIntent.Order;
+        // ── Priority 4: Order wins over greeting when ordering signal exists ──
+        if (hasOrder)
+            return (BrainIntent.Order, hasGreeting ? "OrderOverridesGreeting" : "OrderDirect");
 
-        // Question patterns (no ordering signal)
-        var s = StripAccents(t);
-        if (s.StartsWith("como ") || s.StartsWith("que ") || s.StartsWith("cual ")
-            || s.StartsWith("cuanto ") || s.StartsWith("cuando ")
-            || s.StartsWith("donde ") || s.StartsWith("tienen ") || s.StartsWith("hay "))
-            return BrainIntent.Question;
+        // ── Priority 5: Question wins over greeting ──
+        if (hasQuestion && !hasOrder)
+            return (BrainIntent.Question, hasGreeting ? "QuestionOverridesGreeting" : "QuestionDirect");
 
-        // Fallback: if customer has items and text looks like a modification, treat as Order
+        // ── Priority 6: Pure greeting ──
+        if (hasGreeting)
+            return (BrainIntent.Greeting, "GreetingOnly");
+
+        // ── Fallback: active cart → treat as order modification ──
         if (state.Items.Count > 0)
-            return BrainIntent.Order;
+            return (BrainIntent.Order, "ActiveCartModification");
 
-        return BrainIntent.Unknown;
+        return (BrainIntent.Unknown, "NoSignalDetected");
     }
 
     private static bool IsBrainClarificationConfirm(string t)
@@ -2753,7 +2765,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
             || s.Contains("hablar con una persona") || s.Contains("ayuda humana")
             || s.Contains("necesito ayuda") || s.Contains("quiero hablar con")
             || s.Contains("atencion humana") || s.Contains("agente humano")
-            || s.Contains("operador humano") || s.Contains("soporte humano");
+            || s.Contains("operador humano") || s.Contains("soporte humano")
+            || s.StartsWith("humano ") || s.StartsWith("agente ")
+            || s.StartsWith("asesor ") || s.StartsWith("soporte ");
     }
 
     internal static bool IsNoObservation(string t)
