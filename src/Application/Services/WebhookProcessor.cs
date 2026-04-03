@@ -376,6 +376,45 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         _logger.LogInformation("BRAIN: stale clarification cleared on greeting for {ConversationId}", conversationId);
                     }
 
+                    // ═══ QUESTION INTENT HANDLER (deterministic, no AI) ═══
+                    if (brainIntent == BrainIntent.Question)
+                    {
+                        var catalog = _activeMenu ?? MenuCatalog;
+                        var matchedItem = FindMenuItemFromQuestion(t, catalog);
+
+                        if (matchedItem != null)
+                        {
+                            var qReply = $"*{matchedItem.Canonical}* — ${matchedItem.Price:0.00}";
+                            if (!string.IsNullOrWhiteSpace(matchedItem.Category))
+                                qReply += $" ({matchedItem.Category})";
+                            qReply += "\n\n¿Quieres que te lo agregue al pedido? Escribe la cantidad o sigue explorando el menú.";
+
+                            _logger.LogInformation("BRAIN: Question resolved via menu match item={Item} price={Price} conversation={ConversationId}",
+                                matchedItem.Canonical, matchedItem.Price, conversationId);
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From, Body = qReply,
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
+                        else
+                        {
+                            _logger.LogInformation("BRAIN: Question fallback (no menu match) conversation={ConversationId}", conversationId);
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "Puedo ayudarte con precios y opciones del menú 👍\n\n¿Qué deseas ordenar?",
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
+
+                        state.LastActivityUtc = DateTime.UtcNow;
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
                     // ═══ GLOBAL COMMAND OVERRIDE ═══
                     // These commands must work from ANY conversation state (observation,
                     // checkout, cash flow, payment proof, etc.) to prevent the bot from
@@ -2788,6 +2827,41 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return (BrainIntent.Order, "ActiveCartModification");
 
         return (BrainIntent.Unknown, "NoSignalDetected");
+    }
+
+    /// <summary>Find a menu item from a free-text question using existing normalization.</summary>
+    private static MenuEntry? FindMenuItemFromQuestion(string normalizedText, MenuEntry[] catalog)
+    {
+        // Strip question words to isolate the product reference
+        var cleaned = normalizedText;
+        foreach (var prefix in new[] {
+            "cuanto cuesta ", "cuanto vale ", "que trae ", "que tiene ",
+            "precio de ", "precio del ", "tienen ", "hay ",
+            "me puedes dar ", "me das ", "como es ",
+            "que es ", "que incluye " })
+        {
+            if (cleaned.StartsWith(prefix))
+            {
+                cleaned = cleaned[prefix.Length..].Trim();
+                break;
+            }
+        }
+
+        // Also strip trailing question marks and common filler
+        cleaned = cleaned.TrimEnd('?', ' ', '.').Trim();
+        foreach (var suffix in new[] { " por favor", " porfavor", " porfa" })
+        {
+            if (cleaned.EndsWith(suffix))
+                cleaned = cleaned[..^suffix.Length].Trim();
+        }
+
+        if (string.IsNullOrWhiteSpace(cleaned) || cleaned.Length < 3) return null;
+
+        // Use existing NormalizeMenuItemName which has accent stripping + fuzzy + parenthetical
+        var canonical = NormalizeMenuItemName(cleaned, catalog);
+        if (canonical == null) return null;
+
+        return catalog.FirstOrDefault(e => e.Canonical == canonical);
     }
 
     private static bool IsBrainClarificationConfirm(string t)
