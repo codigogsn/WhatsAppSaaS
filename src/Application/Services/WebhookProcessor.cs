@@ -150,6 +150,39 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // 0b) AI brain clarification response handler
+                    if (state.AwaitingBrainClarification)
+                    {
+                        state.AwaitingBrainClarification = false;
+                        var clarifyInput = (message.Text?.Body ?? "").Trim().ToLowerInvariant();
+
+                        if (IsBrainClarificationConfirm(clarifyInput))
+                        {
+                            // Customer confirmed the AI-interpreted order → proceed with staged items
+                            _logger.LogInformation("BRAIN: clarification confirmed for {ConversationId}, items={Items}",
+                                conversationId, state.Items.Count);
+                            var confirmReply = BuildOrderReplyFromState(state, _bcvRate);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From, Body = confirmReply.Body, Buttons = confirmReply.Buttons,
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                        else
+                        {
+                            // Customer rejected or sent correction → clear staged items, reparse
+                            _logger.LogInformation("BRAIN: clarification corrected for {ConversationId}, clearing {Items} items and reparsing",
+                                conversationId, state.Items.Count);
+                            state.Items.Clear();
+                            state.OrderConfirmed = false;
+                            state.DeliveryType = null;
+                            // Fall through to normal parsing with the new/correction text
+                        }
+                    }
+
                     // 1) Location pin (GPS)
                     if (message.Type == "location")
                     {
@@ -1395,7 +1428,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 foreach (var item in brainItems)
                                 {
                                     if (!string.IsNullOrWhiteSpace(item.Name) && item.Quantity > 0)
-                                        AddOrIncreaseItem(state, item.Name.Trim(), item.Quantity);
+                                    {
+                                        // Normalize AI name through the same fuzzy matcher as quick-parse
+                                        var aiRaw = item.Name.Trim();
+                                        var canonical = NormalizeMenuItemName(aiRaw);
+                                        if (canonical != null)
+                                            _logger.LogInformation("BRAIN: AI item normalized {Raw} -> {Canonical}", aiRaw, canonical);
+                                        AddOrIncreaseItem(state, canonical ?? aiRaw, item.Quantity);
+                                    }
                                 }
 
                                 if (!string.IsNullOrWhiteSpace(brainResult.Args?.Order?.DeliveryType))
@@ -1412,6 +1452,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                         PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
                                     }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                                    state.AwaitingBrainClarification = true;
                                     _logger.LogInformation("BRAIN: clarification requested for {ConversationId} (confidence={Conf})",
                                         conversationId, brainResult.Confidence);
                                     state.LastActivityUtc = DateTime.UtcNow;
@@ -2570,6 +2611,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     private static bool IsConfirmCommand(string t)
         => t == "confirmar" || t == "confirmado" || t == "listo";
+
+    private static bool IsBrainClarificationConfirm(string t)
+        => t is "si" or "sí" or "s" or "ok" or "dale" or "correcto" or "es correcto"
+           or "esta bien" or "está bien" or "eso" or "eso es" or "confirmar" or "confirmado"
+           or "listo" or "va" or "perfecto";
 
     internal static bool IsEditCommand(string t)
         => t is "editar" or "modificar" or "cambiar pedido" or "cambiar mi pedido";

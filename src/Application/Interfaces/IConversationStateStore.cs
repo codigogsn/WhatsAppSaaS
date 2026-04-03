@@ -61,6 +61,9 @@ public sealed class ConversationFields
     // Chat log for human handoff transcript (capped at 50 entries)
     public List<HumanChatEntry> HumanChatLog { get; set; } = new();
 
+    // AI brain clarification: items staged, waiting for customer confirm/correct
+    public bool AwaitingBrainClarification { get; set; }
+
     public bool UpsellSent { get; set; }
     public bool ComboSuggestionSent { get; set; }
     public bool SuggestionDeclined { get; set; }
