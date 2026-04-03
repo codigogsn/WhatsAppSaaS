@@ -2712,7 +2712,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private static (string? BaseName, string? Modifier) SplitAiItemModifier(string aiName)
     {
         var modPattern = System.Text.RegularExpressions.Regex.Match(aiName,
-            @"\s+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|bien\s+\w+|termino\s+[\w/]+|al\s+carb[oó]n|al\s+punto|doble\s+\w+)$",
+            @"\s+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|bien\s+(?:cocid[oa]?|tostad[oa]?|hech[oa]?|asad[oa]?|jugos[oa]?|crujiente|dorad[oa]?)|termino\s+[\w/]+|al\s+carb[oó]n|al\s+punto|doble\s+\w+)$",
             System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         if (!modPattern.Success) return (null, null);
         var baseName = aiName[..modPattern.Index].Trim();
@@ -5036,7 +5036,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Check for modifier phrases (supports both "item extra X" and "item: extra X")
         var modMatch = Regex.Match(t,
-            @"[\s:]+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|mitad\s+.+|bien\s+\w+|al\s+punto|al\s+carb[oó]n|termino\s+[\w/]+|doble\s+\w+)$",
+            @"[\s:]+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|mitad\s+.+|bien\s+(?:cocid[oa]?|tostad[oa]?|hech[oa]?|asad[oa]?|jugos[oa]?|crujiente|dorad[oa]?)|al\s+punto|al\s+carb[oó]n|termino\s+[\w/]+|doble\s+\w+)$",
             RegexOptions.IgnoreCase);
         if (modMatch.Success)
         {
