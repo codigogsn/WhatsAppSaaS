@@ -2363,6 +2363,37 @@ function playNewOrderSound() {
   } catch(e) { /* audio not available */ }
 }
 
+// ── Human handoff notification ──
+var _lastHandoffCount = 0;
+
+function playHandoffSound() {
+  if (!_soundEnabled) return;
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const now = ctx.currentTime;
+    // Urgent dual-tone alert (distinct from order chime)
+    [[440, 0], [880, 0.15], [440, 0.30], [880, 0.45]].forEach(function(n) {
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = n[0];
+      var t = now + n[1];
+      gain.gain.setValueAtTime(0.08, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + 0.12);
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.start(t); osc.stop(t + 0.15);
+    });
+  } catch(e) { /* audio not available */ }
+}
+
+function checkHandoffAlert(count) {
+  if (count > _lastHandoffCount && _lastHandoffCount >= 0) {
+    playHandoffSound();
+    console.log('HANDOFF ALERT: count=' + count);
+  }
+  _lastHandoffCount = count;
+}
+
 function showOrderToast(order) {
   const stack = document.getElementById('toastStack');
   if (!stack) return;
@@ -3214,6 +3245,9 @@ async function loadHandoffs(){
     document.getElementById('kpiHandoffs').textContent = list.length;
     const badge = document.getElementById('handoffBadge');
     if (badge) badge.textContent = list.length;
+
+    // Check for new handoffs and trigger alert sound
+    checkHandoffAlert(list.length);
 
     // Update handoff alert banner
     var banner = document.getElementById('handoffAlertBanner');

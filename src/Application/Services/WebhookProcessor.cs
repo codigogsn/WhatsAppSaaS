@@ -399,6 +399,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.HumanHandoffRequested = true;
                         state.HumanHandoffAtUtc = DateTime.UtcNow;
                         state.HumanHandoffNotifiedCount = 1;
+                        // Start fresh transcript for this handoff session (preserves order state)
+                        state.HumanChatLog.Clear();
 
                         await SendAsync(new OutgoingMessage
                         {

@@ -285,14 +285,51 @@ public class AdminHandoffsController : ControllerBase
 
             dict["humanOverride"] = false;
             dict["humanOverrideAtUtc"] = null;
-            // Also clear customer-initiated handoff if present
             dict["humanHandoffRequested"] = false;
             dict["humanHandoffAtUtc"] = null;
             dict["humanHandoffNotifiedCount"] = 0;
+            // Clear visible transcript only — structured state (items, cart, etc.) preserved
+            dict["humanChatLog"] = new List<object>();
 
             entity.StateJson = JsonSerializer.Serialize(dict);
             entity.UpdatedAtUtc = DateTime.UtcNow;
             await _db.SaveChangesAsync(ct);
+
+            // Log preserved state
+            var itemCount = 0;
+            if (dict.TryGetValue("items", out var itemsObj) && itemsObj is JsonElement itemsEl && itemsEl.ValueKind == JsonValueKind.Array)
+                itemCount = itemsEl.GetArrayLength();
+            _logger.LogInformation("HANDOFF SESSION RESET: conversation={ConversationId} statePreserved=true items={Items}",
+                conversationId, itemCount);
+
+            // Send WhatsApp notification to customer
+            var parts = conversationId.Split(':');
+            if (parts.Length >= 2)
+            {
+                var customerPhone = parts[0];
+                var phoneNumberId = parts[1];
+                var accessToken = await _db.Businesses.AsNoTracking()
+                    .Where(b => b.PhoneNumberId == phoneNumberId)
+                    .Select(b => b.AccessToken)
+                    .FirstOrDefaultAsync(ct)
+                    ?? Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN");
+
+                try
+                {
+                    await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
+                    {
+                        To = customerPhone,
+                        PhoneNumberId = phoneNumberId,
+                        AccessToken = accessToken,
+                        Body = "Tu conversaci\u00f3n fue devuelta al asistente autom\u00e1tico \ud83e\udd16. Puedes seguir escribiendo por aqu\u00ed y con gusto te ayudo."
+                    }, ct);
+                    _logger.LogInformation("RETURN TO BOT: outbound message sent to {Phone}", customerPhone);
+                }
+                catch (Exception msgEx)
+                {
+                    _logger.LogWarning(msgEx, "RETURN TO BOT: failed to send WhatsApp notification to {Phone}", customerPhone);
+                }
+            }
 
             return Ok(new { returnedToBot = true, conversationId });
         }
