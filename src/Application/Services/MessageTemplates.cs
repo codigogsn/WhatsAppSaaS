@@ -448,7 +448,9 @@ internal static class Msg
         string address,
         string paymentText,
         string deliveryType,
-        ResolvedRate? bcvRate = null)
+        ResolvedRate? bcvRate = null,
+        string? paymentMethod = null,
+        bool paymentProofReceived = false)
     {
         var sb = new StringBuilder();
         sb.AppendLine("\u2705 *PEDIDO CONFIRMADO*");
@@ -519,12 +521,27 @@ internal static class Msg
             sb.AppendLine("Cuando env\u00edes el comprobante tu pedido entrar\u00e1 en preparaci\u00f3n.");
         sb.AppendLine($"\ud83d\ude97 {FormatDeliveryType(deliveryType)}");
 
+        // Dynamic status based on payment state
         sb.AppendLine();
-        sb.AppendLine("Tu pedido est\u00e1 siendo preparado \ud83d\udc68\u200d\ud83c\udf73");
-        if (deliveryType == "pickup")
-            sb.Append("Te avisaremos cuando est\u00e9 listo para retirar \ud83c\udfea");
+        var needsProof = paymentMethod is "pago_movil" or "zelle" or "divisas";
+        if (needsProof && !paymentProofReceived)
+        {
+            sb.AppendLine("\u23f3 Estado: esperando tu comprobante de pago");
+            sb.AppendLine("Env\u00eda la captura o foto del pago para que tu pedido entre en preparaci\u00f3n.");
+        }
+        else if (needsProof && paymentProofReceived)
+        {
+            sb.AppendLine("\ud83d\udd0d Estado: pago en verificaci\u00f3n");
+            sb.AppendLine("Recibimos tu comprobante. Te confirmaremos en breve.");
+        }
         else
-            sb.Append("Te avisaremos cuando salga para delivery \ud83d\ude97");
+        {
+            sb.AppendLine("\ud83d\udc68\u200d\ud83c\udf73 Estado: en preparaci\u00f3n");
+            if (deliveryType == "pickup")
+                sb.AppendLine("Te avisaremos cuando est\u00e9 listo para retirar \ud83c\udfea");
+            else
+                sb.AppendLine("Te avisaremos cuando salga para delivery \ud83d\ude97");
+        }
 
         return sb.ToString();
     }

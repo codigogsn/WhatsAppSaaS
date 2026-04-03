@@ -2036,7 +2036,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
             state.Address!,
             Msg.PaymentMethodText(state.PaymentMethod),
             state.DeliveryType!,
-            _bcvRate);
+            _bcvRate,
+            paymentMethod: state.PaymentMethod,
+            paymentProofReceived: state.PaymentEvidenceReceived);
+
+        _logger.LogInformation("ORDER STATUS RENDERED: {OrderId} status={StatusType}",
+            order.Id, state.PaymentMethod is "pago_movil" or "zelle" or "divisas"
+                ? (state.PaymentEvidenceReceived ? "verifying_payment" : "waiting_proof")
+                : "preparing");
 
         state.ResetAfterConfirm();
         return receipt;
