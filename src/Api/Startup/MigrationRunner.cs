@@ -188,6 +188,51 @@ public static class MigrationRunner
                         ALTER TABLE "ConversationStates" ALTER COLUMN "UpdatedAtUtc" TYPE timestamp USING CASE WHEN btrim("UpdatedAtUtc")='' THEN now() ELSE "UpdatedAtUtc"::timestamp END;
                         fixed := fixed + 1;
                     END IF;
+                    -- Comprehensive timestamp fixes for all legacy text→timestamp columns
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Businesses' AND column_name='CreatedAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "Businesses" ALTER COLUMN "CreatedAtUtc" TYPE timestamp USING CASE WHEN btrim("CreatedAtUtc")='' THEN now() ELSE "CreatedAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='BusinessUsers' AND column_name='CreatedAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "BusinessUsers" ALTER COLUMN "CreatedAtUtc" TYPE timestamp USING CASE WHEN btrim("CreatedAtUtc")='' THEN now() ELSE "CreatedAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Customers' AND column_name='FirstSeenAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "Customers" ALTER COLUMN "FirstSeenAtUtc" TYPE timestamp USING CASE WHEN btrim("FirstSeenAtUtc")='' THEN now() ELSE "FirstSeenAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Customers' AND column_name='LastSeenAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "Customers" ALTER COLUMN "LastSeenAtUtc" TYPE timestamp USING CASE WHEN btrim("LastSeenAtUtc")='' THEN NULL ELSE "LastSeenAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Customers' AND column_name='LastPurchaseAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "Customers" ALTER COLUMN "LastPurchaseAtUtc" TYPE timestamp USING CASE WHEN btrim("LastPurchaseAtUtc")='' THEN NULL ELSE "LastPurchaseAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='BackgroundJobs' AND column_name='ScheduledAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "BackgroundJobs" ALTER COLUMN "ScheduledAtUtc" TYPE timestamp USING CASE WHEN btrim("ScheduledAtUtc")='' THEN now() ELSE "ScheduledAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='BackgroundJobs' AND column_name='LockedAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "BackgroundJobs" ALTER COLUMN "LockedAtUtc" TYPE timestamp USING CASE WHEN btrim("LockedAtUtc")='' THEN NULL ELSE "LockedAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='BackgroundJobs' AND column_name='CompletedAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "BackgroundJobs" ALTER COLUMN "CompletedAtUtc" TYPE timestamp USING CASE WHEN btrim("CompletedAtUtc")='' THEN NULL ELSE "CompletedAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='ProcessedMessages' AND column_name='CreatedAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "ProcessedMessages" ALTER COLUMN "CreatedAtUtc" TYPE timestamp USING CASE WHEN btrim("CreatedAtUtc")='' THEN now() ELSE "CreatedAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='MenuCategories' AND column_name='CreatedAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "MenuCategories" ALTER COLUMN "CreatedAtUtc" TYPE timestamp USING CASE WHEN btrim("CreatedAtUtc")='' THEN now() ELSE "CreatedAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='MenuItems' AND column_name='CreatedAtUtc' AND data_type='text') THEN
+                        ALTER TABLE "MenuItems" ALTER COLUMN "CreatedAtUtc" TYPE timestamp USING CASE WHEN btrim("CreatedAtUtc")='' THEN now() ELSE "CreatedAtUtc"::timestamp END;
+                        fixed := fixed + 1;
+                    END IF;
                     RAISE NOTICE 'Schema fix: % columns converted', fixed;
                 END $$;
             """;
@@ -252,10 +297,12 @@ public static class MigrationRunner
                     (table_name='Orders' AND column_name='CashChangeRequired' AND data_type='boolean')
                     OR
                     (table_name='ConversationStates' AND column_name='UpdatedAtUtc' AND data_type NOT IN ('text'))
+                    OR
+                    (table_name='Businesses' AND column_name='CreatedAtUtc' AND data_type NOT IN ('text'))
                 )
             """;
             var count = Convert.ToInt32(cmd.ExecuteScalar());
-            return count == 3; // All sentinel columns have correct types
+            return count == 4; // All sentinel columns have correct types
         }
         catch
         {

@@ -86,12 +86,22 @@ public sealed class CheckoutReminderWorker : BackgroundService
             .Select(c => c.BusinessId!.Value)
             .Distinct()
             .ToList();
-        var tokensByBiz = bizIds.Count > 0
-            ? await db.Businesses
-                .AsNoTracking()
-                .Where(b => bizIds.Contains(b.Id))
-                .ToDictionaryAsync(b => b.Id, b => b.AccessToken, ct)
-            : new Dictionary<Guid, string>();
+        Dictionary<Guid, string> tokensByBiz;
+        try
+        {
+            tokensByBiz = bizIds.Count > 0
+                ? await db.Businesses
+                    .AsNoTracking()
+                    .Where(b => bizIds.Contains(b.Id))
+                    .Select(b => new { b.Id, b.AccessToken })
+                    .ToDictionaryAsync(b => b.Id, b => b.AccessToken, ct)
+                : new Dictionary<Guid, string>();
+        }
+        catch (InvalidCastException ex)
+        {
+            _logger.LogWarning(ex, "REMINDER: Businesses query failed — likely legacy text column. Skipping this cycle.");
+            return;
+        }
 
         int scanned = 0, noPending = 0, staleCleared = 0, userReplied = 0,
             notReady = 0, reminder1Sent = 0, reminder2Sent = 0, errors = 0;
