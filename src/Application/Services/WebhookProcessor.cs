@@ -2738,7 +2738,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (digitMatches.Count >= 3) return true;
 
         // Count Spanish quantity words
-        var qtyWords = new[] { "una ", "unas ", "unos ", "un ", "dos ", "tres ", "cuatro ", "cinco ", "media " };
+        var qtyWords = new[] { "una ", "unas ", "unos ", "un ", "dos ", "tres ", "cuatro ", "cinco ", "seis ", "siete ", "ocho ", "nueve ", "diez ", "media " };
         var qtyCount = qtyWords.Count(w => t.Contains(w));
         if (digitMatches.Count + qtyCount >= 3) return true;
 
