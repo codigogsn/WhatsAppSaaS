@@ -323,6 +323,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     _logger.LogInformation("BRAIN: dominantIntent={Intent} reason={Reason} conversation={ConversationId}",
                         brainIntent, brainReason, conversationId);
 
+                    // Stale item TTL: clear old cart if idle too long
+                    if (state.Items.Count > 0
+                        && state.LastActivityUtc.HasValue
+                        && (DateTime.UtcNow - state.LastActivityUtc.Value).TotalMinutes > StaleItemTtlMinutes
+                        && brainIntent is BrainIntent.Greeting or BrainIntent.Order or BrainIntent.Unknown)
+                    {
+                        _logger.LogInformation("BRAIN: stale cart cleared ({Items} items, idle {Min}min) for {ConversationId}",
+                            state.Items.Count, (int)(DateTime.UtcNow - state.LastActivityUtc.Value).TotalMinutes, conversationId);
+                        state.Items.Clear();
+                        state.OrderConfirmed = false;
+                        state.CheckoutFormSent = false;
+                        state.DeliveryType = null;
+                        state.DeliveryDataConfirmed = false;
+                        state.ObservationAnswered = false;
+                        state.ExtrasOffered = false;
+                    }
+
                     // Handle clarification responses (STOP — do not fall through)
                     if (brainIntent == BrainIntent.ClarificationConfirm)
                     {
@@ -1454,11 +1471,42 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     if (!string.IsNullOrWhiteSpace(item.Name) && item.Quantity > 0)
                                     {
                                         var aiRaw = item.Name.Trim();
+                                        // Try direct normalization first
                                         var canonical = NormalizeMenuItemName(aiRaw);
-                                        if (canonical != null)
+                                        string? aiModifier = null;
+
+                                        // If direct match fails, try splitting modifier from item name
+                                        if (canonical == null)
+                                        {
+                                            var (baseName, mod) = SplitAiItemModifier(aiRaw);
+                                            if (baseName != null)
+                                            {
+                                                var baseCanonical = NormalizeMenuItemName(baseName);
+                                                if (baseCanonical != null)
+                                                {
+                                                    canonical = baseCanonical;
+                                                    aiModifier = mod;
+                                                    _logger.LogInformation("BRAIN: AI item split {Raw} -> {Canonical} + modifier={Mod}", aiRaw, canonical, mod);
+                                                }
+                                            }
+                                        }
+                                        else
+                                        {
                                             _logger.LogInformation("BRAIN: AI item normalized {Raw} -> {Canonical}", aiRaw, canonical);
-                                        AddOrIncreaseItem(state, canonical ?? aiRaw, item.Quantity);
+                                        }
+
+                                        AddOrIncreaseItem(state, canonical ?? aiRaw, item.Quantity, aiModifier);
                                     }
+                                }
+
+                                // Early zero-price check: warn about unresolved AI items
+                                var zeroPriceAiItems = state.Items.Where(i => i.UnitPrice <= 0m).ToList();
+                                if (zeroPriceAiItems.Count > 0)
+                                {
+                                    _logger.LogWarning("BRAIN: {Count} AI items at $0 after normalization: [{Items}] conversation={ConversationId}",
+                                        zeroPriceAiItems.Count,
+                                        string.Join(", ", zeroPriceAiItems.Select(i => i.Name)),
+                                        conversationId);
                                 }
 
                                 if (!string.IsNullOrWhiteSpace(brainResult.Args?.Order?.DeliveryType))
@@ -2625,12 +2673,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var qtyCount = qtyWords.Count(w => t.Contains(w));
         if (digitMatches.Count + qtyCount >= 3) return true;
 
-        // Long message with ordering intent + conjunctions
-        if (t.Length >= 40)
+        // Medium+ message with ordering intent + conjunctions
+        if (t.Length >= 30)
         {
             var conjunctions = new[] { " y ", " con ", " sin ", " extra ", " mas ", " también ", " tambien ", " ademas " };
             var conjCount = conjunctions.Count(c => t.Contains(c));
             if (conjCount >= 2 && (digitMatches.Count > 0 || qtyCount > 0)) return true;
+            // Single conjunction + 2 quantities = also complex enough
+            if (conjCount >= 1 && digitMatches.Count >= 2) return true;
         }
 
         return false;
@@ -2642,6 +2692,19 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // ── Brain Decision Layer ──
 
     private const double BrainConfidenceHigh = 0.75;
+    private const int StaleItemTtlMinutes = 30;
+
+    /// <summary>Split AI-returned item name from embedded modifier (e.g. "hamburguesa clasica sin cebolla").</summary>
+    private static (string? BaseName, string? Modifier) SplitAiItemModifier(string aiName)
+    {
+        var modPattern = System.Text.RegularExpressions.Regex.Match(aiName,
+            @"\s+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|bien\s+\w+|termino\s+[\w/]+|al\s+carb[oó]n|al\s+punto|doble\s+\w+)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!modPattern.Success) return (null, null);
+        var baseName = aiName[..modPattern.Index].Trim();
+        var modifier = modPattern.Groups[1].Value.Trim();
+        return string.IsNullOrWhiteSpace(baseName) ? (null, null) : (baseName, modifier);
+    }
     private const double BrainConfidenceLow = 0.50;
 
     internal enum BrainIntent
@@ -2682,7 +2745,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
                           || sPlain.StartsWith("cuando ") || sPlain.StartsWith("donde ")
                           || sPlain.StartsWith("tienen ") || sPlain.StartsWith("hay ")
                           || t.Contains("cuanto cuesta") || t.Contains("cuanto vale")
-                          || t.Contains("precio de") || t.Contains("que tienen");
+                          || t.Contains("precio de") || t.Contains("que tienen")
+                          || sPlain.StartsWith("me puedes ") || sPlain.StartsWith("podrias ")
+                          || (t.Contains("?") && !hasOrder);
 
         // ── Priority 2: Payment proof (system is waiting + media present) ──
         if (hasPaymentProof)
@@ -4924,7 +4989,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Check for modifier phrases (supports both "item extra X" and "item: extra X")
         var modMatch = Regex.Match(t,
-            @"[\s:]+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|mitad\s+.+|bien\s+(?:cocid|asad|hech|tostad).+|al\s+punto|termino\s+\w+|doble\s+\w+)$",
+            @"[\s:]+(sin\s+.+|extra\s+.+|con\s+extra\s+.+|con\s+todo|mitad\s+.+|bien\s+\w+|al\s+punto|al\s+carb[oó]n|termino\s+[\w/]+|doble\s+\w+)$",
             RegexOptions.IgnoreCase);
         if (modMatch.Success)
         {
