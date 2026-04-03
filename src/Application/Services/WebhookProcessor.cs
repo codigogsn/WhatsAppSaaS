@@ -142,6 +142,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (state.HumanOverride)
                     {
                         state.LastActivityUtc = DateTime.UtcNow;
+                        // Log customer message to chat transcript for operator visibility
+                        var msgText = message.Text?.Body ?? $"[{message.Type}]";
+                        state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = msgText, At = DateTime.UtcNow });
+                        if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }

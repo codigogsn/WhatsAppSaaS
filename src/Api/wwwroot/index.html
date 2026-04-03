@@ -905,6 +905,14 @@
     .section-badge-danger { background: var(--danger); }
     .handoff-panel summary { color: var(--danger); }
 
+    /* Handoff chat transcript */
+    .hf-chat { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; padding: 8px 4px; scrollbar-width: thin; }
+    .hf-bubble { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.4; word-break: break-word; }
+    .hf-bubble.customer { align-self: flex-start; background: var(--bg, #1a1a1a); border: 1px solid var(--border-light); border-bottom-left-radius: 4px; }
+    .hf-bubble.operator { align-self: flex-end; background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.2); border-bottom-right-radius: 4px; }
+    .hf-bubble-time { font-size: 10px; color: var(--muted); margin-top: 2px; }
+    .hf-empty { font-size: 12px; color: var(--muted); padding: 12px 0; text-align: center; }
+
     @media (max-width: 1024px) {
       .hero-kpi { grid-template-columns: 1fr 1fr; }
       .hero-alerts { grid-column: 1 / -1; flex-direction: row; }
@@ -3215,28 +3223,49 @@ function renderHandoffInbox(list){
     const isOverride = h.humanOverride;
     const since = h.humanHandoffAtUtc || h.humanOverrideAtUtc;
     const sinceStr = since ? new Date(since).toLocaleString('es-VE') : '-';
-    const lastMsg = h.lastMessageAt ? new Date(h.lastMessageAt).toLocaleString('es-VE') : '-';
     const statusLabel = isOverride
       ? '<span style="color:#1565c0;font-weight:600;">HUMANO ACTIVO</span>'
       : '<span style="color:#c62828;font-weight:600;">ESPERANDO RESPUESTA</span>';
+
+    // Build chat transcript
+    var chatHtml = '';
+    var log = h.chatLog || [];
+    if (log.length > 0) {
+      chatHtml = '<div class="hf-chat">';
+      for (var i = 0; i < log.length; i++) {
+        var m = log[i];
+        var cls = m.sender === 'operator' ? 'operator' : 'customer';
+        var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
+        chatHtml += '<div class="hf-bubble ' + cls + '">' + esc(m.text || '')
+          + (timeStr ? '<div class="hf-bubble-time">' + timeStr + '</div>' : '')
+          + '</div>';
+      }
+      chatHtml += '</div>';
+    } else {
+      chatHtml = '<div class="hf-empty">Sin mensajes en esta sesion aun</div>';
+    }
+
     return `
       <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;${isOverride ? 'border-left:3px solid var(--info);' : 'border-left:3px solid var(--danger);'}">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
           <div>
             <b>${name}</b> &mdash; <span class="muted">${phone}</span><br/>
-            <span class="small muted">Desde: ${sinceStr} &middot; Ultimo: ${lastMsg}</span><br/>
-            ${statusLabel}
+            <span class="small muted">Desde: ${sinceStr}</span> &middot; ${statusLabel}
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button onclick="event.stopPropagation();returnToBot('${cid}')" style="background:var(--success);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">Devolver al Bot</button>
           </div>
         </div>
+        ${chatHtml}
         <div style="margin-top:8px;display:flex;gap:6px;align-items:center;">
-          <input type="text" id="reply-${cid}" placeholder="Escribe tu respuesta..." style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:13px;background:var(--input-bg);color:var(--text);" onkeydown="if(event.key==='Enter'){event.preventDefault();sendHandoffReply('${cid}')}" />
-          <button onclick="event.stopPropagation();sendHandoffReply('${cid}')" style="background:var(--accent);color:#fff;border:none;border-radius:4px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Enviar</button>
+          <input type="text" id="reply-${cid}" placeholder="Escribe tu respuesta..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--input-bg);color:var(--text);" onkeydown="if(event.key==='Enter'){event.preventDefault();sendHandoffReply('${cid}')}" />
+          <button onclick="event.stopPropagation();sendHandoffReply('${cid}')" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Enviar</button>
         </div>
       </div>`;
   }).join('');
+
+  // Auto-scroll chat areas to bottom
+  document.querySelectorAll('.hf-chat').forEach(function(el) { el.scrollTop = el.scrollHeight; });
 }
 
 async function sendHandoffReply(conversationId){

@@ -243,6 +243,18 @@ public class AdminHandoffsController : ControllerBase
         dict["humanOverride"] = true;
         dict["humanOverrideAtUtc"] = DateTime.UtcNow;
 
+        // Append to chat log for transcript display
+        var chatLog = new List<object>();
+        if (dict.TryGetValue("humanChatLog", out var existing) && existing is JsonElement el && el.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in el.EnumerateArray())
+                chatLog.Add(item);
+        }
+        chatLog.Add(new { sender = "operator", text = req.Message, at = DateTime.UtcNow });
+        // Cap at 50 messages to prevent state bloat
+        if (chatLog.Count > 50) chatLog = chatLog.Skip(chatLog.Count - 50).ToList();
+        dict["humanChatLog"] = chatLog;
+
         entity.StateJson = JsonSerializer.Serialize(dict);
         entity.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
@@ -347,6 +359,22 @@ public class AdminHandoffsController : ControllerBase
                 if (root.TryGetProperty("humanHandoffAtUtc", out var haProp) && haProp.ValueKind == JsonValueKind.String)
                     handoffAt = DateTime.TryParse(haProp.GetString(), out var dt2) ? dt2 : null;
 
+                // Extract chat log for transcript
+                var chatLog = new List<object>();
+                if (root.TryGetProperty("humanChatLog", out var clProp) && clProp.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var entry in clProp.EnumerateArray())
+                    {
+                        chatLog.Add(new
+                        {
+                            sender = entry.TryGetProperty("sender", out var sp) ? sp.GetString() : "unknown",
+                            text = entry.TryGetProperty("text", out var tp) ? tp.GetString() : "",
+                            at = entry.TryGetProperty("at", out var ap) && ap.ValueKind == JsonValueKind.String
+                                ? ap.GetString() : null
+                        });
+                    }
+                }
+
                 conversations.Add(new
                 {
                     conversationId = s.ConversationId,
@@ -358,7 +386,8 @@ public class AdminHandoffsController : ControllerBase
                     humanOverrideAtUtc = overrideAt,
                     humanHandoffRequested = isHandoffRequested,
                     humanHandoffAtUtc = handoffAt,
-                    lastMessageAt = s.UpdatedAtUtc
+                    lastMessageAt = s.UpdatedAtUtc,
+                    chatLog
                 });
             }
             catch { /* skip malformed JSON */ }

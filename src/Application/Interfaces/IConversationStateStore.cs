@@ -58,6 +58,9 @@ public sealed class ConversationFields
     public bool HumanOverride { get; set; }
     public DateTime? HumanOverrideAtUtc { get; set; }
 
+    // Chat log for human handoff transcript (capped at 50 entries)
+    public List<HumanChatEntry> HumanChatLog { get; set; } = new();
+
     public bool UpsellSent { get; set; }
     public bool ComboSuggestionSent { get; set; }
     public bool SuggestionDeclined { get; set; }
@@ -172,4 +175,11 @@ public interface IConversationStateStore
     /// <summary>Returns true if newly marked; false if already processed (duplicate).</summary>
     Task<bool> MarkMessageProcessedAsync(string conversationId, string messageId, CancellationToken ct = default);
     Task PurgeOldStatesAsync(TimeSpan ttl, CancellationToken ct = default);
+}
+
+public sealed class HumanChatEntry
+{
+    public string Sender { get; set; } = ""; // "customer" or "operator"
+    public string Text { get; set; } = "";
+    public DateTime? At { get; set; }
 }
