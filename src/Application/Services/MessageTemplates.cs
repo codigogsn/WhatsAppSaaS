@@ -320,10 +320,7 @@ internal static class Msg
 
     private static int CategoryPriority(string itemName)
     {
-        var catalog = WebhookProcessor.ActiveCatalog ?? WebhookProcessor.MenuCatalog;
-        var entry = catalog.FirstOrDefault(e =>
-            e.Canonical.Equals(itemName, StringComparison.OrdinalIgnoreCase));
-        var cat = entry?.Category?.ToLowerInvariant() ?? "";
+        var cat = ResolveCategoryKey(itemName);
         return cat switch
         {
             "hamburguesas" => 1,
@@ -336,6 +333,48 @@ internal static class Msg
         };
     }
 
+    private static string ResolveCategoryKey(string itemName)
+    {
+        var catalog = WebhookProcessor.ActiveCatalog ?? WebhookProcessor.MenuCatalog;
+        var entry = catalog.FirstOrDefault(e =>
+            e.Canonical.Equals(itemName, StringComparison.OrdinalIgnoreCase));
+        var cat = entry?.Category?.ToLowerInvariant() ?? "";
+        if (!string.IsNullOrWhiteSpace(cat)) return cat;
+
+        // Fallback: infer from item name keywords
+        var n = itemName.ToLowerInvariant();
+        if (n.Contains("hamburguesa") || n.Contains("burger")) return "hamburguesas";
+        if (n.Contains("perro") || n.Contains("hot dog")) return "perros calientes";
+        if (n.Contains("papa") || n.Contains("fries")) return "papas";
+        if (n.Contains("combo")) return "combos";
+        if (n.Contains("salsa")) return "salsas";
+        if (n.Contains("coca") || n.Contains("refresco") || n.Contains("bebida") || n.Contains("jugo")
+            || n.Contains("agua") || n.Contains("pepsi") || n.Contains("malta") || n.Contains("te ")) return "bebidas";
+        return "";
+    }
+
+    private static string CategoryEmoji(string catKey) => catKey switch
+    {
+        "hamburguesas" => "\ud83c\udf54",
+        "perros calientes" => "\ud83c\udf2d",
+        "papas" => "\ud83c\udf5f",
+        "combos" => "\ud83c\udf71",
+        "salsas" => "\ud83e\udecb",
+        "bebidas" => "\ud83e\udd64",
+        _ => "\ud83e\uddfe"
+    };
+
+    private static string CategoryDisplayName(string catKey) => catKey switch
+    {
+        "hamburguesas" => "Hamburguesas",
+        "perros calientes" => "Perros Calientes",
+        "papas" => "Papas",
+        "combos" => "Combos",
+        "salsas" => "Salsas",
+        "bebidas" => "Bebidas",
+        _ => "Otros"
+    };
+
     private static IReadOnlyList<ConversationItemEntry> SortByCategory(IReadOnlyList<ConversationItemEntry> items)
         => items.OrderBy(i => CategoryPriority(i.Name)).ToList();
 
@@ -346,20 +385,33 @@ internal static class Msg
     internal static string OrderSummaryWithTotal(IReadOnlyList<ConversationItemEntry> items, ResolvedRate? bcvRate = null, string? deliveryType = null)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("\ud83e\uddfe *RESUMEN DE TU PEDIDO*");
+        sb.AppendLine("\ud83e\uddfe *As\u00ed va tu pedido*");
+        sb.AppendLine("Rev\u00edsalo antes de confirmar \ud83d\udc47");
         sb.AppendLine();
 
         decimal subtotal = 0m;
-        foreach (var item in SortByCategory(items))
+        var sorted = SortByCategory(items);
+
+        // Group items by category for visual hierarchy
+        string? lastCat = null;
+        foreach (var item in sorted)
         {
             var lineTotal = item.UnitPrice * item.Quantity;
             subtotal += lineTotal;
+
+            var catKey = ResolveCategoryKey(item.Name);
+            if (catKey != lastCat)
+            {
+                if (lastCat != null) sb.AppendLine(); // blank line between groups
+                sb.AppendLine($"{CategoryEmoji(catKey)} *{CategoryDisplayName(catKey)}*");
+                lastCat = catKey;
+            }
 
             var line = $"  {item.Quantity}x {item.Name}";
             if (!string.IsNullOrWhiteSpace(item.Modifiers))
                 line += $" ({item.Modifiers})";
             if (item.UnitPrice > 0)
-                line += $"  ${item.UnitPrice:0.00} c/u = ${lineTotal:0.00}";
+                line += $" \u2014 ${lineTotal:0.00}";
             sb.AppendLine(line);
         }
 
@@ -369,21 +421,16 @@ internal static class Msg
             var fee = deliveryType == "delivery" ? DeliveryFeeUsd : 0m;
             var total = subtotal + fee;
 
+            sb.AppendLine($"Subtotal: ${subtotal:0.00}");
             if (fee > 0)
-            {
-                sb.AppendLine($"Subtotal: ${subtotal:0.00}");
                 sb.AppendLine($"\ud83d\ude97 Delivery: ${fee:0.00}");
-                sb.AppendLine($"*TOTAL: ${total:0.00}*");
-            }
-            else
-            {
-                sb.AppendLine($"*TOTAL: ${subtotal:0.00}*");
-            }
+            sb.AppendLine($"*TOTAL: ${total:0.00}*");
 
             if (bcvRate is not null && bcvRate.Rate > 0)
             {
                 var bsTotal = total * bcvRate.Rate;
                 var staleTag = bcvRate.IsStale ? " (tasa anterior)" : "";
+                sb.AppendLine();
                 sb.AppendLine($"\ud83c\uddfb\ud83c\uddea Ref. BCV {bcvRate.CurrencyLabel}: Bs. {bsTotal:N2}{staleTag}");
             }
         }
