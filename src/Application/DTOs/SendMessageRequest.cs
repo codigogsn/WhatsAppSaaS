@@ -106,6 +106,74 @@ public sealed class SendLocationRequestAction
     public string Name { get; init; } = "send_location";
 }
 
+// ── Interactive list message DTOs ──
+
+public sealed class SendInteractiveListPayload
+{
+    [JsonPropertyName("type")]
+    public string Type { get; init; } = "list";
+
+    [JsonPropertyName("header")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SendInteractiveListHeader? Header { get; init; }
+
+    [JsonPropertyName("body")]
+    public required SendInteractiveBody Body { get; init; }
+
+    [JsonPropertyName("footer")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SendInteractiveListFooter? Footer { get; init; }
+
+    [JsonPropertyName("action")]
+    public required SendInteractiveListAction Action { get; init; }
+}
+
+public sealed class SendInteractiveListHeader
+{
+    [JsonPropertyName("type")]
+    public string Type { get; init; } = "text";
+
+    [JsonPropertyName("text")]
+    public required string Text { get; init; }
+}
+
+public sealed class SendInteractiveListFooter
+{
+    [JsonPropertyName("text")]
+    public required string Text { get; init; }
+}
+
+public sealed class SendInteractiveListAction
+{
+    [JsonPropertyName("button")]
+    public required string Button { get; init; }
+
+    [JsonPropertyName("sections")]
+    public required List<SendInteractiveListSection> Sections { get; init; }
+}
+
+public sealed class SendInteractiveListSection
+{
+    [JsonPropertyName("title")]
+    public required string Title { get; init; }
+
+    [JsonPropertyName("rows")]
+    public required List<SendInteractiveListRow> Rows { get; init; }
+}
+
+public sealed class SendInteractiveListRow
+{
+    [JsonPropertyName("id")]
+    public required string Id { get; init; }
+
+    [JsonPropertyName("title")]
+    public required string Title { get; init; }
+
+    [JsonPropertyName("description")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Description { get; init; }
+}
+
 // ── Document message DTO ──
 
 public sealed class SendDocumentPayload

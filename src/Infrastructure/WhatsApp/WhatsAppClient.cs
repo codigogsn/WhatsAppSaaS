@@ -91,6 +91,38 @@ public sealed class WhatsAppClient : IWhatsAppClient
                 }
             };
         }
+        else if (message.ListMessage is { } listMsg)
+        {
+            request = new SendMessageRequest
+            {
+                To = message.To,
+                Type = "interactive",
+                Interactive = new SendInteractiveListPayload
+                {
+                    Header = listMsg.HeaderText is not null
+                        ? new SendInteractiveListHeader { Text = listMsg.HeaderText }
+                        : null,
+                    Body = new SendInteractiveBody { Text = message.Body },
+                    Footer = listMsg.FooterText is not null
+                        ? new SendInteractiveListFooter { Text = listMsg.FooterText }
+                        : null,
+                    Action = new SendInteractiveListAction
+                    {
+                        Button = listMsg.ButtonText,
+                        Sections = listMsg.Sections.Select(s => new SendInteractiveListSection
+                        {
+                            Title = s.Title,
+                            Rows = s.Rows.Select(r => new SendInteractiveListRow
+                            {
+                                Id = r.Id,
+                                Title = r.Title,
+                                Description = r.Description
+                            }).ToList()
+                        }).ToList()
+                    }
+                }
+            };
+        }
         else if (message.Buttons is { Count: > 0 })
         {
             request = new SendMessageRequest

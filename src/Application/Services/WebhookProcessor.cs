@@ -269,6 +269,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         }
                     }
 
+                    // 2a-list) Handle interactive list replies — menu browsing
+                    if (message.Type == "interactive"
+                        && message.Interactive?.ListReply is { } listReply
+                        && businessContext.InteractiveMenuEnabled)
+                    {
+                        var handled = await HandleInteractiveMenuReplyAsync(
+                            listReply.Id, listReply.Title,
+                            message.From, phoneNumberId, businessContext,
+                            conversationId, state, cancellationToken);
+                        if (handled)
+                        {
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                        // Not a menu browsing reply — normalize to text like buttons
+                        message.Text ??= new WebhookText();
+                        message.Text.Body = listReply.Title;
+                        message.Type = "text";
+                    }
+
                     // 2b) Media: payment evidence
                     //    Accept proof image when: explicitly requested, OR payment method
                     //    is pago_movil/divisas and we have items (even if not formally requested),
@@ -1822,14 +1842,32 @@ public sealed class WebhookProcessor : IWebhookProcessor
             await Task.Delay(1500, ct);
         }
 
-        // Message 3: Prompt (always sent, even if PDF was missing)
-        await SendAsync(new OutgoingMessage
+        // Message 3: Prompt — interactive category list OR classic text prompt
+        if (biz.InteractiveMenuEnabled && _menuRepository is not null)
         {
-            To = to,
-            Body = Msg.MenuPdfPrompt,
-            PhoneNumberId = phoneNumberId,
-            AccessToken = biz.AccessToken
-        }, biz.BusinessId, conversationId, ct);
+            var sent = await TrySendCategoryListAsync(to, phoneNumberId, biz, conversationId, ct);
+            if (!sent)
+            {
+                // Fallback to classic prompt if no categories
+                await SendAsync(new OutgoingMessage
+                {
+                    To = to,
+                    Body = Msg.MenuPdfPrompt,
+                    PhoneNumberId = phoneNumberId,
+                    AccessToken = biz.AccessToken
+                }, biz.BusinessId, conversationId, ct);
+            }
+        }
+        else
+        {
+            await SendAsync(new OutgoingMessage
+            {
+                To = to,
+                Body = Msg.MenuPdfPrompt,
+                PhoneNumberId = phoneNumberId,
+                AccessToken = biz.AccessToken
+            }, biz.BusinessId, conversationId, ct);
+        }
     }
 
     private string BuildMenuMessage()
@@ -1841,6 +1879,215 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         return Msg.BuildMenu(catalog);
     }
+
+    // ──────────────────────────────────────────
+    // Interactive menu browsing (feature-flagged)
+    // ──────────────────────────────────────────
+
+    /// <summary>
+    /// Sends a WhatsApp interactive list with menu categories.
+    /// Returns false if there are no categories (caller should fall back to text).
+    /// </summary>
+    private async Task<bool> TrySendCategoryListAsync(
+        string to, string phoneNumberId, BusinessContext biz, string conversationId, CancellationToken ct)
+    {
+        if (_menuRepository is null) return false;
+
+        List<MenuCategory> categories;
+        try
+        {
+            categories = await _menuRepository.GetCategoriesAsync(biz.BusinessId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "InteractiveMenu: failed to load categories for {BusinessId}", biz.BusinessId);
+            return false;
+        }
+
+        if (categories.Count == 0) return false;
+
+        // WhatsApp list rows max: 10 per section, max 10 sections
+        var rows = categories
+            .Where(c => c.IsActive)
+            .Take(10)
+            .Select(c => new ListRow
+            {
+                Id = $"cat_{c.Id}",
+                Title = Truncate(c.Name, 24),
+                Description = c.Items.Count > 0 ? $"{c.Items.Count} productos" : null
+            })
+            .ToList();
+
+        if (rows.Count == 0) return false;
+
+        await SendAsync(new OutgoingMessage
+        {
+            To = to,
+            Body = "¿Qué deseas ordenar? Elige una categoría para ver los productos, o escríbeme tu pedido directamente 👇",
+            PhoneNumberId = phoneNumberId,
+            AccessToken = biz.AccessToken,
+            ListMessage = new ListMessageData
+            {
+                ButtonText = "📋 Ver Menú",
+                HeaderText = $"Menú de {biz.BusinessName}",
+                Sections = new List<ListSection>
+                {
+                    new()
+                    {
+                        Title = "Categorías",
+                        Rows = rows
+                    }
+                }
+            }
+        }, biz.BusinessId, conversationId, ct);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Sends a WhatsApp interactive list with products from a specific category.
+    /// </summary>
+    private async Task SendProductListAsync(
+        string to, string phoneNumberId, BusinessContext biz, string conversationId,
+        Guid categoryId, string categoryName, ConversationFields state, CancellationToken ct)
+    {
+        if (_menuRepository is null) return;
+
+        List<MenuItem> items;
+        try
+        {
+            items = await _menuRepository.GetAvailableItemsByCategoryAsync(categoryId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "InteractiveMenu: failed to load items for category {CategoryId}", categoryId);
+            return;
+        }
+
+        if (items.Count == 0)
+        {
+            await SendAsync(new OutgoingMessage
+            {
+                To = to,
+                Body = $"No hay productos disponibles en *{categoryName}* en este momento.",
+                PhoneNumberId = phoneNumberId,
+                AccessToken = biz.AccessToken
+            }, biz.BusinessId, conversationId, ct);
+            return;
+        }
+
+        // WhatsApp allows max 10 rows per section
+        var rows = items
+            .Take(10)
+            .Select(i => new ListRow
+            {
+                Id = $"prod_{i.Id}",
+                Title = Truncate(i.Name, 24),
+                Description = i.Price > 0 ? $"${i.Price:F2}" : null
+            })
+            .ToList();
+
+        // Add "← Volver a categorías" row
+        rows.Add(new ListRow
+        {
+            Id = "menu_back",
+            Title = "← Volver",
+            Description = "Ver todas las categorías"
+        });
+
+        state.BrowsingMenu = true;
+        state.CurrentMenuCategoryId = categoryId;
+        state.CurrentMenuCategoryName = categoryName;
+
+        await SendAsync(new OutgoingMessage
+        {
+            To = to,
+            Body = $"*{categoryName}*\nElige un producto para agregarlo a tu orden, o escríbeme directamente:",
+            PhoneNumberId = phoneNumberId,
+            AccessToken = biz.AccessToken,
+            ListMessage = new ListMessageData
+            {
+                ButtonText = "🍽️ Ver Productos",
+                Sections = new List<ListSection>
+                {
+                    new()
+                    {
+                        Title = categoryName,
+                        Rows = rows
+                    }
+                }
+            }
+        }, biz.BusinessId, conversationId, ct);
+    }
+
+    /// <summary>
+    /// Handles a list_reply from interactive menu browsing.
+    /// Returns true if the reply was handled (category/product selection), false otherwise.
+    /// </summary>
+    private async Task<bool> HandleInteractiveMenuReplyAsync(
+        string replyId, string replyTitle,
+        string from, string phoneNumberId, BusinessContext biz,
+        string conversationId, ConversationFields state, CancellationToken ct)
+    {
+        // Category selection: "cat_{guid}"
+        if (replyId.StartsWith("cat_") && Guid.TryParse(replyId[4..], out var catId))
+        {
+            _logger.LogInformation("InteractiveMenu: category selected id={CatId} title={Title} conv={Conv}",
+                catId, replyTitle, conversationId);
+            await SendProductListAsync(from, phoneNumberId, biz, conversationId, catId, replyTitle, state, ct);
+            return true;
+        }
+
+        // Back to categories
+        if (replyId == "menu_back")
+        {
+            _logger.LogInformation("InteractiveMenu: back to categories conv={Conv}", conversationId);
+            state.BrowsingMenu = false;
+            state.CurrentMenuCategoryId = null;
+            state.CurrentMenuCategoryName = null;
+            await TrySendCategoryListAsync(from, phoneNumberId, biz, conversationId, ct);
+            return true;
+        }
+
+        // Product selection: "prod_{guid}"
+        if (replyId.StartsWith("prod_") && Guid.TryParse(replyId[5..], out var prodId))
+        {
+            _logger.LogInformation("InteractiveMenu: product selected id={ProdId} title={Title} conv={Conv}",
+                prodId, replyTitle, conversationId);
+
+            // Add the product to the cart using existing AddOrIncreaseItem
+            var canonicalName = NormalizeMenuItemName(replyTitle) ?? replyTitle;
+            AddOrIncreaseItem(state, canonicalName, 1);
+            state.BrowsingMenu = false;
+            state.CurrentMenuCategoryId = null;
+            state.CurrentMenuCategoryName = null;
+            state.LastActivityUtc = DateTime.UtcNow;
+
+            var currentSummary = string.Join("\n", state.Items.Select(i => $"  • {i.Quantity}x {i.Name}" + (i.UnitPrice > 0 ? $" (${i.UnitPrice:F2})" : "")));
+            var total = state.Items.Sum(i => i.UnitPrice * i.Quantity);
+            var totalText = total > 0 ? $"\n\n*Total: ${total:F2}*" : "";
+
+            await SendAsync(new OutgoingMessage
+            {
+                To = from,
+                Body = $"✅ *{replyTitle}* agregado a tu orden.\n\n📝 *Tu pedido actual:*\n{currentSummary}{totalText}\n\n_Puedes seguir agregando productos, escribir tu pedido, o decir *\"listo\"* para continuar._",
+                PhoneNumberId = phoneNumberId,
+                AccessToken = biz.AccessToken,
+                Buttons = new List<ReplyButton>
+                {
+                    new("btn_menu_browse", "📋 Ver Menú"),
+                    new("btn_confirmar", "✅ Listo")
+                }
+            }, biz.BusinessId, conversationId, ct);
+
+            return true;
+        }
+
+        return false;
+    }
+
+    private static string Truncate(string text, int maxLength)
+        => text.Length <= maxLength ? text : text[..(maxLength - 1)] + "…";
 
     // ──────────────────────────────────────────
     // Pago Móvil: 2 messages (details + proof request)
@@ -3087,6 +3334,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             "btn_cash_eur"     => "cash_eur",
             "btn_cash_bs"      => "cash_bs",
             "btn_editar_payout" => "editar payout",
+            "btn_menu_browse"  => "ver menu",
             _ => null
         };
 

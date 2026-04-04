@@ -127,6 +127,9 @@ public sealed class WebhookInteractive
 
     [JsonPropertyName("button_reply")]
     public WebhookButtonReply? ButtonReply { get; set; }
+
+    [JsonPropertyName("list_reply")]
+    public WebhookListReply? ListReply { get; set; }
 }
 
 public sealed class WebhookButtonReply
@@ -136,6 +139,18 @@ public sealed class WebhookButtonReply
 
     [JsonPropertyName("title")]
     public string Title { get; set; } = string.Empty;
+}
+
+public sealed class WebhookListReply
+{
+    [JsonPropertyName("id")]
+    public string Id { get; set; } = string.Empty;
+
+    [JsonPropertyName("title")]
+    public string Title { get; set; } = string.Empty;
+
+    [JsonPropertyName("description")]
+    public string? Description { get; set; }
 }
 
 public sealed class WebhookMedia

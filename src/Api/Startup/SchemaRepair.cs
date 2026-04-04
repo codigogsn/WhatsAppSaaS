@@ -42,6 +42,7 @@ public static class SchemaRepair
         ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_WebhookQueue_Pending" ON "WebhookQueue" ("CreatedAtUtc") WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" < 5""");
         ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_WebhookQueue_ProcessedAtUtc" ON "WebhookQueue" ("ProcessedAtUtc") WHERE "ProcessedAtUtc" IS NOT NULL""");
         Log.Information("QUEUE SCHEMA: WebhookQueue ensured");
+        ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "InteractiveMenuEnabled" boolean NOT NULL DEFAULT false""");
     }
 
     /// <summary>

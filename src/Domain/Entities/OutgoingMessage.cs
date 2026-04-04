@@ -30,6 +30,35 @@ public sealed class OutgoingMessage
     /// Filename shown to the recipient when DocumentUrl is set.
     /// </summary>
     public string? DocumentFilename { get; init; }
+
+    /// <summary>
+    /// Optional WhatsApp interactive list message. When set, sent as type:"list".
+    /// </summary>
+    public ListMessageData? ListMessage { get; init; }
+}
+
+/// <summary>
+/// Data for a WhatsApp interactive list message.
+/// </summary>
+public sealed class ListMessageData
+{
+    public required string ButtonText { get; init; }
+    public string? HeaderText { get; init; }
+    public string? FooterText { get; init; }
+    public required List<ListSection> Sections { get; init; }
+}
+
+public sealed class ListSection
+{
+    public required string Title { get; init; }
+    public required List<ListRow> Rows { get; init; }
+}
+
+public sealed class ListRow
+{
+    public required string Id { get; init; }
+    public required string Title { get; init; }
+    public string? Description { get; init; }
 }
 
 /// <summary>

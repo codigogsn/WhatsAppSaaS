@@ -70,6 +70,11 @@ public sealed class ConversationFields
     public string? LastSuggestedItem { get; set; }
     public bool AddonSuggestionSent { get; set; }
 
+    // Interactive menu browsing state
+    public bool BrowsingMenu { get; set; }
+    public Guid? CurrentMenuCategoryId { get; set; }
+    public string? CurrentMenuCategoryName { get; set; }
+
     // Analytics counters (lightweight, per-order)
     public int UpsellSuggestedCount { get; set; }
     public int UpsellAcceptedCount { get; set; }
@@ -150,6 +155,9 @@ public sealed class ConversationFields
         AwaitingCashAmount = false;
         AwaitingCashPayout = false;
         CashFlowCompleted = false;
+        BrowsingMenu = false;
+        CurrentMenuCategoryId = null;
+        CurrentMenuCategoryName = null;
         LastActivityUtc = null;
     }
 }

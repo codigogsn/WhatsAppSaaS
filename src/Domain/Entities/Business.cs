@@ -46,6 +46,9 @@ public class Business
     // Per-business menu PDF URL (set when PDF is uploaded; null = use global fallback)
     public string? MenuPdfUrl { get; set; }
 
+    // Feature flag: interactive WhatsApp list-based menu browsing (default OFF)
+    public bool InteractiveMenuEnabled { get; set; } = false;
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

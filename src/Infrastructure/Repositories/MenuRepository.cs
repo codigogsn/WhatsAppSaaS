@@ -269,4 +269,45 @@ public sealed class MenuRepository : IMenuRepository
 
         return items;
     }
+
+    public async Task<List<MenuItem>> GetAvailableItemsByCategoryAsync(Guid categoryId, CancellationToken ct = default)
+    {
+        var conn = _db.Database.GetDbConnection();
+        if (conn.State != System.Data.ConnectionState.Open)
+            await conn.OpenAsync(ct);
+
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT "Id", "CategoryId", "Name", "Price", "Description",
+                   "IsAvailable", "SortOrder", "CreatedAtUtc"
+            FROM "MenuItems"
+            WHERE "CategoryId" = @cid
+              AND "IsAvailable"::boolean = true
+            ORDER BY "SortOrder"
+        """;
+        var p = cmd.CreateParameter();
+        p.ParameterName = "cid";
+        p.Value = categoryId;
+        cmd.Parameters.Add(p);
+
+        var items = new List<MenuItem>();
+        using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            var descOrd = reader.GetOrdinal("Description");
+            items.Add(new MenuItem
+            {
+                Id = reader.GetGuid(reader.GetOrdinal("Id")),
+                CategoryId = reader.GetGuid(reader.GetOrdinal("CategoryId")),
+                Name = reader.GetString(reader.GetOrdinal("Name")),
+                Price = SafeGetDecimal(reader, reader.GetOrdinal("Price")),
+                Description = reader.IsDBNull(descOrd) ? null : reader.GetString(descOrd),
+                IsAvailable = ParseBool(reader["IsAvailable"]),
+                SortOrder = reader.GetInt32(reader.GetOrdinal("SortOrder")),
+                CreatedAtUtc = SafeGetDateTime(reader, reader.GetOrdinal("CreatedAtUtc"))
+            });
+        }
+
+        return items;
+    }
 }
