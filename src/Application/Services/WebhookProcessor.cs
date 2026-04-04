@@ -309,14 +309,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             }, businessContext.BusinessId, conversationId, cancellationToken);
                         }
 
-                        // Voice note fallback: redirect customer to text ordering
+                        // Voice note fallback
                         if (message.Type is "audio" or "voice" or "ptt")
                         {
-                            _logger.LogInformation("BRAIN: voice-note fallback conversation={ConversationId}", conversationId);
+                            _logger.LogInformation("BRAIN: non-text fallback type={Type} conversation={ConversationId}", message.Type, conversationId);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
                                 Body = "No puedo escuchar notas de voz todav\u00eda \ud83c\udfa4\u274c\nEscr\u00edbeme tu pedido por texto y con gusto te ayudo \ud83d\udcdd"
+                                     + BuildReengagementPrompt(state.Items.Count > 0),
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
+                        // Sticker / video / contact fallback
+                        else if (message.Type is "sticker" or "video" or "contacts" or "contact")
+                        {
+                            _logger.LogInformation("BRAIN: non-text fallback type={Type} conversation={ConversationId}", message.Type, conversationId);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "No puedo procesar ese tipo de mensaje todav\u00eda \ud83d\udce9\nEscr\u00edbeme tu pedido por texto y con gusto te ayudo \ud83d\udcdd"
                                      + BuildReengagementPrompt(state.Items.Count > 0),
                                 PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -393,18 +405,34 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (brainIntent == BrainIntent.Question)
                     {
                         var catalog = _activeMenu ?? MenuCatalog;
-                        var matchedItem = FindMenuItemFromQuestion(t, catalog);
+                        var matchedItems = FindMenuItemsFromQuestion(t, catalog);
 
-                        if (matchedItem != null)
+                        if (matchedItems.Count == 1)
                         {
-                            var qReply = $"*{matchedItem.Canonical}* \u2014 ${matchedItem.Price:0.00}";
-                            if (!string.IsNullOrWhiteSpace(matchedItem.Category))
-                                qReply += $" ({matchedItem.Category})";
-                            qReply += BuildReengagementPrompt(state.Items.Count > 0, matchedItem.Canonical);
+                            var mi = matchedItems[0];
+                            var qReply = $"*{mi.Canonical}* \u2014 ${mi.Price:0.00}";
+                            if (!string.IsNullOrWhiteSpace(mi.Category))
+                                qReply += $" ({mi.Category})";
+                            qReply += BuildReengagementPrompt(state.Items.Count > 0, mi.Canonical);
 
-                            _logger.LogInformation("BRAIN: Question resolved via menu match item={Item} price={Price} conversation={ConversationId}",
-                                matchedItem.Canonical, matchedItem.Price, conversationId);
-                            _logger.LogInformation("BRAIN: reengagement appended path=QuestionMatched conversation={ConversationId}", conversationId);
+                            _logger.LogInformation("BRAIN: Question resolved single item={Item} price={Price} conversation={ConversationId}",
+                                mi.Canonical, mi.Price, conversationId);
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From, Body = qReply,
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                        }
+                        else if (matchedItems.Count > 1)
+                        {
+                            var lines = string.Join("\n", matchedItems.Select(mi =>
+                                $"  \u2022 *{mi.Canonical}* \u2014 ${mi.Price:0.00}"));
+                            var qReply = $"Esto es lo que encontr\u00e9:\n{lines}"
+                                       + BuildReengagementPrompt(state.Items.Count > 0);
+
+                            _logger.LogInformation("BRAIN: Question resolved multi items={Count} conversation={ConversationId}",
+                                matchedItems.Count, conversationId);
 
                             await SendAsync(new OutgoingMessage
                             {
@@ -415,7 +443,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         else
                         {
                             _logger.LogInformation("BRAIN: Question fallback (no menu match) conversation={ConversationId}", conversationId);
-                            _logger.LogInformation("BRAIN: reengagement appended path=QuestionFallback conversation={ConversationId}", conversationId);
 
                             await SendAsync(new OutgoingMessage
                             {
@@ -2855,12 +2882,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return "\n\n\u00bfQu\u00e9 deseas ordenar?";
     }
 
-    private static MenuEntry? FindMenuItemFromQuestion(string normalizedText, MenuEntry[] catalog)
+    private static string CleanQuestionText(string normalizedText)
     {
-        // Strip question words to isolate the product reference
         var cleaned = normalizedText;
         foreach (var prefix in new[] {
-            "cuanto cuesta ", "cuanto vale ", "que trae ", "que tiene ",
+            "cuanto cuestan ", "cuanto cuesta ", "cuanto vale ", "cuanto valen ",
+            "que trae ", "que tiene ", "que traen ", "que tienen ",
+            "que precio tiene ", "que precio tienen ",
             "precio de ", "precio del ", "tienen ", "hay ",
             "me puedes dar ", "me das ", "como es ",
             "que es ", "que incluye " })
@@ -2871,22 +2899,51 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 break;
             }
         }
-
-        // Also strip trailing question marks and common filler
         cleaned = cleaned.TrimEnd('?', ' ', '.').Trim();
         foreach (var suffix in new[] { " por favor", " porfavor", " porfa" })
         {
             if (cleaned.EndsWith(suffix))
                 cleaned = cleaned[..^suffix.Length].Trim();
         }
+        return cleaned;
+    }
 
-        if (string.IsNullOrWhiteSpace(cleaned) || cleaned.Length < 3) return null;
+    private static MenuEntry? LookupSingleItem(string text, MenuEntry[] catalog)
+    {
+        if (string.IsNullOrWhiteSpace(text) || text.Length < 3) return null;
+        var canonical = NormalizeMenuItemName(text, catalog);
+        return canonical != null ? catalog.FirstOrDefault(e => e.Canonical == canonical) : null;
+    }
 
-        // Use existing NormalizeMenuItemName which has accent stripping + fuzzy + parenthetical
-        var canonical = NormalizeMenuItemName(cleaned, catalog);
-        if (canonical == null) return null;
+    private static List<MenuEntry> FindMenuItemsFromQuestion(string normalizedText, MenuEntry[] catalog)
+    {
+        var cleaned = CleanQuestionText(normalizedText);
+        _staticLogger?.LogDebug("BRAIN: question cleaned raw='{Raw}' cleaned='{Cleaned}'", normalizedText, cleaned);
 
-        return catalog.FirstOrDefault(e => e.Canonical == canonical);
+        if (string.IsNullOrWhiteSpace(cleaned) || cleaned.Length < 3)
+            return new List<MenuEntry>();
+
+        // Try full text as single item first
+        var single = LookupSingleItem(cleaned, catalog);
+        if (single != null) return new List<MenuEntry> { single };
+
+        // Try splitting on " y " and commas for multi-item questions
+        var segments = System.Text.RegularExpressions.Regex.Split(cleaned, @"\s+y\s+|,\s*")
+            .Select(s => s.Trim())
+            .Where(s => s.Length >= 3)
+            .ToArray();
+
+        if (segments.Length < 2) return new List<MenuEntry>();
+
+        var results = new List<MenuEntry>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var seg in segments)
+        {
+            var item = LookupSingleItem(seg, catalog);
+            if (item != null && seen.Add(item.Canonical))
+                results.Add(item);
+        }
+        return results;
     }
 
     private static bool IsBrainClarificationConfirm(string t)
