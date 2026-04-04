@@ -404,6 +404,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // ═══ QUESTION INTENT HANDLER (deterministic, no AI) ═══
                     if (brainIntent == BrainIntent.Question)
                     {
+                        var inCheckout = state.CheckoutFormSent || state.OrderConfirmed
+                                         || !string.IsNullOrWhiteSpace(state.PaymentMethod);
+                        if (inCheckout || state.Items.Count > 0)
+                            _logger.LogInformation("BRAIN: Question interrupted active flow inCheckout={InCheckout} items={Items} conversation={ConversationId}",
+                                inCheckout, state.Items.Count, conversationId);
+
                         var catalog = _activeMenu ?? MenuCatalog;
                         var matchedItems = FindMenuItemsFromQuestion(t, catalog);
 
@@ -413,7 +419,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             var qReply = $"*{mi.Canonical}* \u2014 ${mi.Price:0.00}";
                             if (!string.IsNullOrWhiteSpace(mi.Category))
                                 qReply += $" ({mi.Category})";
-                            qReply += BuildReengagementPrompt(state.Items.Count > 0, mi.Canonical);
+                            qReply += BuildReengagementPrompt(state.Items.Count > 0, inCheckout ? null : mi.Canonical, inCheckout);
 
                             _logger.LogInformation("BRAIN: Question resolved single item={Item} price={Price} conversation={ConversationId}",
                                 mi.Canonical, mi.Price, conversationId);
@@ -429,7 +435,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             var lines = string.Join("\n", matchedItems.Select(mi =>
                                 $"  \u2022 *{mi.Canonical}* \u2014 ${mi.Price:0.00}"));
                             var qReply = $"Esto es lo que encontr\u00e9:\n{lines}"
-                                       + BuildReengagementPrompt(state.Items.Count > 0);
+                                       + BuildReengagementPrompt(state.Items.Count > 0, inCheckout: inCheckout);
 
                             _logger.LogInformation("BRAIN: Question resolved multi items={Count} conversation={ConversationId}",
                                 matchedItems.Count, conversationId);
@@ -447,7 +453,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = "Puedo ayudarte con precios y opciones del men\u00fa \ud83d\udc4d" + BuildReengagementPrompt(state.Items.Count > 0),
+                                Body = "Puedo ayudarte con precios y opciones del men\u00fa \ud83d\udc4d" + BuildReengagementPrompt(state.Items.Count > 0, inCheckout: inCheckout),
                                 PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
                         }
@@ -2842,6 +2848,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                           || sPlain.StartsWith("tienen ") || sPlain.StartsWith("hay ")
                           || t.Contains("cuanto cuesta") || t.Contains("cuanto vale")
                           || t.Contains("precio de") || t.Contains("que tienen")
+                          || t.Contains("que trae") || t.Contains("que incluye")
+                          || t.Contains(" trae ") // "la hamburguesa trae queso"
                           || sPlain.StartsWith("me puedes ") || sPlain.StartsWith("podrias ")
                           || (t.Contains("?") && !hasOrder);
 
@@ -2873,10 +2881,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
     }
 
     /// <summary>Find a menu item from a free-text question using existing normalization.</summary>
-    private static string BuildReengagementPrompt(bool hasActiveCart, string? itemName = null)
+    private static string BuildReengagementPrompt(bool hasActiveCart, string? itemName = null, bool inCheckout = false)
     {
-        if (!string.IsNullOrWhiteSpace(itemName))
+        if (!string.IsNullOrWhiteSpace(itemName) && !inCheckout)
             return $"\n\n\u00bfQuieres que te agregue {itemName} al pedido o prefieres otra opci\u00f3n?";
+        if (inCheckout)
+            return "\n\n\u00bfQuieres seguir con tu pedido o cambiar algo antes de continuar?";
         if (hasActiveCart)
             return "\n\n\u00bfQuieres seguir con tu pedido o te ayudo con otra opci\u00f3n del men\u00fa?";
         return "\n\n\u00bfQu\u00e9 deseas ordenar?";
