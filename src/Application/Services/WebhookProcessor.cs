@@ -31,7 +31,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly IMenuRepository? _menuRepository;
     private readonly INotificationService? _notificationService;
     private readonly IExchangeRateProvider? _exchangeRateProvider;
-    private readonly IExtrasRepository? _extrasRepository;
     private readonly IVerticalStrategyFactory _verticalStrategyFactory;
     private readonly ILogger<WebhookProcessor> _logger;
     private readonly PaymentMobileOptions _paymentMobile;
@@ -46,8 +45,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         IMenuRepository? menuRepository = null,
         INotificationService? notificationService = null,
         IExchangeRateProvider? exchangeRateProvider = null,
-        IVerticalStrategyFactory? verticalStrategyFactory = null,
-        IExtrasRepository? extrasRepository = null)
+        IVerticalStrategyFactory? verticalStrategyFactory = null)
     {
         _aiParser = aiParser;
         _whatsAppClient = whatsAppClient;
@@ -56,7 +54,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
         _menuRepository = menuRepository;
         _notificationService = notificationService;
         _exchangeRateProvider = exchangeRateProvider;
-        _extrasRepository = extrasRepository;
         _verticalStrategyFactory = verticalStrategyFactory ?? new Application.Strategies.VerticalStrategyFactory();
         _logger = logger;
         _paymentMobile = paymentMobile ?? new PaymentMobileOptions();
@@ -486,9 +483,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         bool isInTrappingState = state.Items.Count > 0 && (
                             (state.ExtrasOffered && !state.ObservationAnswered)   // observation gate
                             || (state.ObservationPromptSent && !state.ObservationAnswered) // observation capture
-                            || state.ExtrasFlowActive // extras selection
-                            || state.UpsellFlowActive // upsell selection
-                            || (state.PreCheckoutInterceptorShown && !state.OrderConfirmed && string.IsNullOrWhiteSpace(state.DeliveryType)) // pre-checkout interceptor
                             || (state.CheckoutFormSent && !state.DeliveryDataConfirmed) // checkout form fill
                             || (state.PaymentMethod == "efectivo" && !state.CashFlowCompleted) // cash sub-flow
                             || state.AwaitingCashCurrency
@@ -710,312 +704,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // A-pci-extras) Extras flow: user is selecting extras
-                    if (state.ExtrasFlowActive && state.AvailableExtras is { Count: > 0 })
-                    {
-                        // Delivery/payment bypass: user jumped ahead
-                        var deliveryBypass = NormalizeDeliveryType(rawText);
-                        if (deliveryBypass != null || NormalizePaymentMethod(rawText) != null)
-                        {
-                            ClearPreCheckoutFlowState(state);
-                            // Don't consume — fall through to normal handlers
-                            goto afterPreCheckout;
-                        }
-
-                        var isNoExtras = IsSkipOrContinue(t);
-
-                        if (isNoExtras)
-                        {
-                            state.ExtrasFlowActive = false;
-                            state.AvailableExtras = null;
-                            var nextReply = BuildOrderReplyFromState(state, _bcvRate);
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From, Body = nextReply.Body, Buttons = nextReply.Buttons,
-                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-                            state.LastActivityUtc = DateTime.UtcNow;
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-
-                        // Try to match user text against available extras
-                        var matched = MatchExtrasFromText(t, state.AvailableExtras);
-                        if (matched.Count > 0)
-                        {
-                            var actuallyAdded = new List<string>();
-                            foreach (var ext in matched)
-                            {
-                                var extraName = ext.Name + " (extra)";
-                                // Duplicate prevention: skip if already in cart
-                                if (state.Items.Any(i => string.Equals(i.Name, extraName, StringComparison.OrdinalIgnoreCase)))
-                                    continue;
-                                state.Items.Add(new ConversationItemEntry
-                                {
-                                    Name = extraName,
-                                    Quantity = 1,
-                                    UnitPrice = ext.AdditivePrice ?? 0m
-                                });
-                                actuallyAdded.Add(ext.Name);
-                            }
-                            state.ExtrasFlowActive = false;
-                            state.AvailableExtras = null;
-                            var summaryReply = BuildOrderReplyFromState(state, _bcvRate);
-                            var confirmText = actuallyAdded.Count > 0
-                                ? $"\u2705 {string.Join(", ", actuallyAdded)} agregado(s).\n\n"
-                                : "Ya lo tienes en tu pedido \ud83d\udc4d\n\n";
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = confirmText + summaryReply.Body,
-                                Buttons = summaryReply.Buttons,
-                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-                            state.LastActivityUtc = DateTime.UtcNow;
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-                        // No match — exit flow gracefully, don't loop
-                        ClearPreCheckoutFlowState(state);
-                        var fallbackReply = BuildOrderReplyFromState(state, _bcvRate);
-                        await SendAsync(new OutgoingMessage
-                        {
-                            To = message.From,
-                            Body = "Listo \ud83d\udc4c seguimos con tu compra.\n\n" + fallbackReply.Body,
-                            Buttons = fallbackReply.Buttons,
-                            PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                        }, businessContext.BusinessId, conversationId, cancellationToken);
-                        state.LastActivityUtc = DateTime.UtcNow;
-                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                        continue;
-                    }
-
-                    // A-pci-upsell) Upsell flow: user is selecting upsell items
-                    if (state.UpsellFlowActive && state.AvailableUpsells is { Count: > 0 })
-                    {
-                        // Delivery/payment bypass: user jumped ahead
-                        var deliveryBypassU = NormalizeDeliveryType(rawText);
-                        if (deliveryBypassU != null || NormalizePaymentMethod(rawText) != null)
-                        {
-                            ClearPreCheckoutFlowState(state);
-                            goto afterPreCheckout;
-                        }
-
-                        var isNoUpsell = IsSkipOrContinue(t);
-
-                        if (isNoUpsell)
-                        {
-                            state.UpsellFlowActive = false;
-                            state.AvailableUpsells = null;
-                            var nextReply = BuildOrderReplyFromState(state, _bcvRate);
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From, Body = nextReply.Body, Buttons = nextReply.Buttons,
-                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-                            state.LastActivityUtc = DateTime.UtcNow;
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-
-                        var matched = MatchUpsellsFromText(t, state.AvailableUpsells);
-                        if (matched.Count > 0)
-                        {
-                            var actuallyAdded = new List<string>();
-                            foreach (var ups in matched)
-                            {
-                                // Duplicate prevention: skip if item already in cart
-                                if (state.Items.Any(i => string.Equals(i.Name, ups.Name, StringComparison.OrdinalIgnoreCase)))
-                                    continue;
-                                state.Items.Add(new ConversationItemEntry
-                                {
-                                    Name = ups.Name,
-                                    Quantity = 1,
-                                    UnitPrice = ups.Price
-                                });
-                                actuallyAdded.Add(ups.Name);
-                            }
-                            state.UpsellFlowActive = false;
-                            state.AvailableUpsells = null;
-                            var summaryReply = BuildOrderReplyFromState(state, _bcvRate);
-                            var confirmText = actuallyAdded.Count > 0
-                                ? $"\u2705 {string.Join(", ", actuallyAdded)} agregado(s).\n\n"
-                                : "Ya lo tienes en tu pedido \ud83d\udc4d\n\n";
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = confirmText + summaryReply.Body,
-                                Buttons = summaryReply.Buttons,
-                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-                            state.LastActivityUtc = DateTime.UtcNow;
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-
-                        // No match — exit flow gracefully, don't loop
-                        ClearPreCheckoutFlowState(state);
-                        var uFallbackReply = BuildOrderReplyFromState(state, _bcvRate);
-                        await SendAsync(new OutgoingMessage
-                        {
-                            To = message.From,
-                            Body = "Perfecto, continuemos \ud83d\udc4d\n\n" + uFallbackReply.Body,
-                            Buttons = uFallbackReply.Buttons,
-                            PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                        }, businessContext.BusinessId, conversationId, cancellationToken);
-                        state.LastActivityUtc = DateTime.UtcNow;
-                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                        continue;
-                    }
-
-                    // A-pci) Pre-checkout interceptor response
-                    if (state.PreCheckoutInterceptorShown && !state.ExtrasFlowActive
-                        && !state.UpsellFlowActive && !state.OrderConfirmed
-                        && state.Items.Count > 0 && string.IsNullOrWhiteSpace(state.DeliveryType))
-                    {
-                        // Delivery bypass: user jumped straight to delivery type
-                        var deliveryDirect = NormalizeDeliveryType(rawText);
-                        if (deliveryDirect != null)
-                        {
-                            state.DeliveryType = deliveryDirect;
-                            var dReply = BuildOrderReplyFromState(state, _bcvRate);
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From, Body = dReply.Body, Buttons = dReply.Buttons,
-                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-                            state.LastActivityUtc = DateTime.UtcNow;
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-
-                        var isContinue = IsSkipOrContinue(t);
-                        var isExtras = t is "extras" or "extra" or "agregar extras"
-                            or "quiero extras" or "si extras";
-
-                        if (isExtras)
-                        {
-                            // Resolve relevant extras for current order items
-                            var extras = await ResolveExtrasForOrderAsync(
-                                businessContext.BusinessId, state.Items, cancellationToken);
-
-                            if (extras.Count == 0)
-                            {
-                                var nextReply = BuildOrderReplyFromState(state, _bcvRate);
-                                await SendAsync(new OutgoingMessage
-                                {
-                                    To = message.From,
-                                    Body = "No hay extras configurados para tu pedido \ud83d\udc4c\n\n" + nextReply.Body,
-                                    Buttons = nextReply.Buttons,
-                                    PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                                }, businessContext.BusinessId, conversationId, cancellationToken);
-                            }
-                            else
-                            {
-                                state.ExtrasFlowActive = true;
-                                state.AvailableExtras = extras.Select(e => new AvailableExtra
-                                {
-                                    Name = e.Name,
-                                    AdditivePrice = e.AdditivePrice
-                                }).ToList();
-
-                                var lines = extras.Select(e =>
-                                    e.AdditivePrice.HasValue && e.AdditivePrice > 0
-                                        ? $"- {e.Name} (+${e.AdditivePrice:0.00})"
-                                        : $"- {e.Name}");
-                                var body = "Para tu pedido puedes agregar:\n"
-                                    + string.Join("\n", lines)
-                                    + "\n\nEscr\u00edbeme cu\u00e1les deseas agregar \ud83d\udc47";
-                                await SendAsync(new OutgoingMessage
-                                {
-                                    To = message.From, Body = body,
-                                    PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                                }, businessContext.BusinessId, conversationId, cancellationToken);
-                            }
-
-                            state.LastActivityUtc = DateTime.UtcNow;
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-
-                        var isUpsell = t is "bebida" or "bebidas" or "agregar bebida"
-                            or "tomar algo" or "quiero bebida" or "algo de tomar";
-
-                        if (isUpsell)
-                        {
-                            var upsells = await ResolveUpsellsForOrderAsync(
-                                businessContext.BusinessId, state.Items, cancellationToken);
-
-                            if (upsells.Count == 0)
-                            {
-                                var nextReply = BuildOrderReplyFromState(state, _bcvRate);
-                                await SendAsync(new OutgoingMessage
-                                {
-                                    To = message.From,
-                                    Body = "No hay sugerencias configuradas para tu pedido \ud83d\udc4c\n\n" + nextReply.Body,
-                                    Buttons = nextReply.Buttons,
-                                    PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                                }, businessContext.BusinessId, conversationId, cancellationToken);
-                            }
-                            else
-                            {
-                                state.UpsellFlowActive = true;
-                                state.AvailableUpsells = upsells.Select(u => new AvailableUpsell
-                                {
-                                    Name = u.SuggestedMenuItemName ?? u.SuggestionLabel ?? "Sugerencia",
-                                    Price = u.SuggestedMenuItemPrice ?? 0m
-                                }).ToList();
-
-                                var lines = upsells.Select(u =>
-                                {
-                                    var name = u.SuggestedMenuItemName ?? u.SuggestionLabel ?? "Sugerencia";
-                                    return u.SuggestedMenuItemPrice.HasValue && u.SuggestedMenuItemPrice > 0
-                                        ? $"- {name} (${u.SuggestedMenuItemPrice:0.00})"
-                                        : $"- {name}";
-                                });
-                                var body = "Tambi\u00e9n puedes agregar:\n"
-                                    + string.Join("\n", lines)
-                                    + "\n\nEscr\u00edbeme qu\u00e9 deseas agregar \ud83d\udc47";
-                                await SendAsync(new OutgoingMessage
-                                {
-                                    To = message.From, Body = body,
-                                    PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                                }, businessContext.BusinessId, conversationId, cancellationToken);
-                            }
-
-                            state.LastActivityUtc = DateTime.UtcNow;
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-
-                        if (isContinue)
-                        {
-                            var nextReply = BuildOrderReplyFromState(state, _bcvRate);
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From, Body = nextReply.Body, Buttons = nextReply.Buttons,
-                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-                            state.LastActivityUtc = DateTime.UtcNow;
-                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-                            continue;
-                        }
-                        // Unrecognized reply — fall through to normal handlers
-                    }
-
-                    afterPreCheckout:
-
                     // A-edit) EDITAR — re-show order for modifications
                     if (IsEditCommand(t) && state.Items.Count > 0)
                     {
                         state.ExtrasOffered = false;
                         state.ObservationPromptSent = false;
                         state.ObservationAnswered = false;
-                        state.PreCheckoutInterceptorShown = false;
-                        state.ExtrasFlowActive = false;
-                        state.AvailableExtras = null;
-                        state.UpsellFlowActive = false;
-                        state.AvailableUpsells = null;
                         state.OrderConfirmed = false;
                         state.CheckoutFormSent = false;
 
@@ -2337,16 +2031,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return new BotReply(Msg.ObservationQuestion, Msg.ObservationButtons);
         }
 
-        // Pre-checkout interceptor: extras/upsells prompt (once per order)
-        if (!state.PreCheckoutInterceptorShown)
-        {
-            state.PreCheckoutInterceptorShown = true;
-            var summary = Msg.OrderSummaryWithTotal(state.Items, bcvRate);
-            return new BotReply(
-                summary + "\n\n" + Msg.PreCheckoutInterceptorPrompt,
-                Msg.PreCheckoutButtons);
-        }
-
         // Delivery step — BEFORE summary so delivery fee is included in total
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
             return new BotReply(Msg.PickupOrDelivery, Msg.DeliveryButtons);
@@ -3395,9 +3079,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
         {
             "btn_obs_si"     => "si",
             "btn_obs_no"     => "no",
-            "btn_pci_extras" => "extras",
-            "btn_pci_upsell" => "bebida",
-            "btn_pci_continue" => "continuar",
             "btn_extras_si"  => "si",   // legacy fallback
             "btn_extras_no"  => "no",   // legacy fallback
             "btn_confirmar"  => "confirmar",
@@ -5665,157 +5346,4 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return string.IsNullOrWhiteSpace(result) ? null : result;
     }
 
-    // ── Pre-checkout flow helpers ──
-
-    private static bool IsSkipOrContinue(string t) => t is
-        "continuar" or "sigue" or "dale" or "ok" or "listo" or "ya"
-        or "eso es" or "eso" or "si" or "sí" or "no" or "nada"
-        or "nada mas" or "nada más" or "no gracias" or "perfecto"
-        or "esta bien" or "está bien" or "asi esta bien"
-        or "así está bien" or "dejalo asi" or "déjalo así";
-
-    private static void ClearPreCheckoutFlowState(ConversationFields state)
-    {
-        state.ExtrasFlowActive = false;
-        state.AvailableExtras = null;
-        state.UpsellFlowActive = false;
-        state.AvailableUpsells = null;
-    }
-
-    // ── Extras flow helpers ──
-
-    private async Task<List<Application.Models.ExtraReadModel>> ResolveExtrasForOrderAsync(
-        Guid businessId, List<ConversationItemEntry> items, CancellationToken ct)
-    {
-        if (_extrasRepository == null || _menuRepository == null || items.Count == 0)
-            return new();
-
-        try
-        {
-            // Load all available menu items for this business to resolve IDs
-            var dbItems = await _menuRepository.GetAvailableItemsAsync(businessId, ct);
-            if (dbItems.Count == 0) return new();
-
-            var seen = new HashSet<Guid>();
-            var result = new List<Application.Models.ExtraReadModel>();
-
-            foreach (var cartItem in items)
-            {
-                // Skip extras already in cart (they end with "(extra)")
-                if (cartItem.Name.EndsWith("(extra)")) continue;
-
-                // Find matching DB item by case-insensitive name
-                var dbItem = dbItems.FirstOrDefault(d =>
-                    string.Equals(d.Name, cartItem.Name, StringComparison.OrdinalIgnoreCase));
-                if (dbItem == null) continue;
-
-                var extras = await _extrasRepository.GetExtrasForItemAsync(
-                    businessId, dbItem.Id, dbItem.CategoryId, ct);
-
-                foreach (var ext in extras)
-                {
-                    if (seen.Add(ext.Id))
-                        result.Add(ext);
-                }
-            }
-
-            return result.OrderBy(e => e.SortOrder).ThenBy(e => e.Name).ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to resolve extras for business {BusinessId}", businessId);
-            return new();
-        }
-    }
-
-    private async Task<List<Application.Models.UpsellReadModel>> ResolveUpsellsForOrderAsync(
-        Guid businessId, List<ConversationItemEntry> items, CancellationToken ct)
-    {
-        if (_extrasRepository == null || _menuRepository == null || items.Count == 0)
-            return new();
-
-        try
-        {
-            var dbItems = await _menuRepository.GetAvailableItemsAsync(businessId, ct);
-            if (dbItems.Count == 0) return new();
-
-            var seenIds = new HashSet<Guid>();
-            var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            var result = new List<Application.Models.UpsellReadModel>();
-
-            foreach (var cartItem in items)
-            {
-                if (cartItem.Name.EndsWith("(extra)")) continue;
-
-                var dbItem = dbItems.FirstOrDefault(d =>
-                    string.Equals(d.Name, cartItem.Name, StringComparison.OrdinalIgnoreCase));
-                if (dbItem == null) continue;
-
-                var upsells = await _extrasRepository.GetUpsellsForCategoryAsync(
-                    businessId, dbItem.CategoryId, ct);
-
-                foreach (var ups in upsells)
-                {
-                    if (ups.Id != Guid.Empty && !seenIds.Add(ups.Id)) continue;
-                    var displayName = ups.SuggestedMenuItemName ?? ups.SuggestionLabel ?? "";
-                    if (!string.IsNullOrWhiteSpace(displayName) && !seenNames.Add(displayName)) continue;
-                    // Skip if the suggested item is already in cart
-                    if (items.Any(i => string.Equals(i.Name, displayName, StringComparison.OrdinalIgnoreCase)))
-                        continue;
-                    result.Add(ups);
-                }
-            }
-
-            return result.OrderBy(u => u.SortOrder).ToList();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to resolve upsells for business {BusinessId}", businessId);
-            return new();
-        }
-    }
-
-    private static List<AvailableUpsell> MatchUpsellsFromText(string text, List<AvailableUpsell> available)
-    {
-        var t = StripAccents(text.ToLowerInvariant().Trim());
-        var matched = new List<AvailableUpsell>();
-
-        foreach (var ups in available)
-        {
-            var upsNorm = StripAccents(ups.Name.ToLowerInvariant());
-            if (t.Contains(upsNorm) || upsNorm.Contains(t))
-            {
-                matched.Add(ups);
-                continue;
-            }
-            var upsWords = upsNorm.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (upsWords.Any(w => w.Length > 2 && t.Contains(w)))
-                matched.Add(ups);
-        }
-
-        return matched;
-    }
-
-    private static List<AvailableExtra> MatchExtrasFromText(string text, List<AvailableExtra> available)
-    {
-        var t = StripAccents(text.ToLowerInvariant().Trim());
-        var matched = new List<AvailableExtra>();
-
-        foreach (var ext in available)
-        {
-            var extNorm = StripAccents(ext.Name.ToLowerInvariant());
-            // Match if user text contains the extra name or vice versa
-            if (t.Contains(extNorm) || extNorm.Contains(t))
-            {
-                matched.Add(ext);
-                continue;
-            }
-            // Also try each word — "queso" matching "Queso extra"
-            var extWords = extNorm.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (extWords.Any(w => w.Length > 2 && t.Contains(w)))
-                matched.Add(ext);
-        }
-
-        return matched;
-    }
 }
