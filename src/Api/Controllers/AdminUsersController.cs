@@ -17,11 +17,13 @@ public sealed class AdminUsersController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly ILogger<AdminUsersController> _logger;
 
-    public AdminUsersController(AppDbContext db, IConfiguration config)
+    public AdminUsersController(AppDbContext db, IConfiguration config, ILogger<AdminUsersController> logger)
     {
         _db = db;
         _config = config;
+        _logger = logger;
     }
 
     private Guid? GetBusinessIdFromToken() =>
@@ -425,6 +427,72 @@ public sealed class AdminUsersController : ControllerBase
         public string? Password { get; set; }
         public bool? IsActive { get; set; }
         public List<Guid>? BusinessIds { get; set; }
+    }
+
+    // POST /api/admin/users/create — Quick onboarding: create user for any business (global admin only)
+    public sealed class QuickCreateRequest
+    {
+        public Guid BusinessId { get; set; }
+        public string Name { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public string Role { get; set; } = "Owner";
+    }
+
+    [HttpPost("create")]
+    [AllowAnonymous]
+    public async Task<IActionResult> QuickCreate([FromBody] QuickCreateRequest req, CancellationToken ct)
+    {
+        if (!IsGlobalAdmin())
+            return Unauthorized(new { error = "Global admin key required (X-Admin-Key header)" });
+
+        if (string.IsNullOrWhiteSpace(req.Email))
+            return BadRequest(new { error = "Email is required" });
+        if (string.IsNullOrWhiteSpace(req.Password))
+            return BadRequest(new { error = "Password is required" });
+        if (req.Password.Length < 8)
+            return BadRequest(new { error = "Password must be at least 8 characters" });
+
+        var validRoles = new[] { "Owner", "Manager", "Operator" };
+        if (!validRoles.Contains(req.Role))
+            return BadRequest(new { error = "Invalid role", allowed = validRoles });
+
+        var biz = await _db.Businesses.FirstOrDefaultAsync(b => b.Id == req.BusinessId && b.IsActive, ct);
+        if (biz is null)
+            return NotFound(new { error = "Business not found or inactive" });
+
+        var email = req.Email.Trim().ToLowerInvariant();
+        var exists = await _db.BusinessUsers.AnyAsync(u => u.BusinessId == req.BusinessId && u.Email == email, ct);
+        if (exists)
+            return Conflict(new { error = "A user with that email already exists in this business" });
+
+        var name = string.IsNullOrWhiteSpace(req.Name) ? email.Split('@')[0] : req.Name.Trim();
+        var user = new BusinessUser
+        {
+            BusinessId = req.BusinessId,
+            Name = name,
+            Email = email,
+            PasswordHash = AuthController.HashPassword(req.Password),
+            Role = req.Role,
+            IsActive = true
+        };
+
+        _db.BusinessUsers.Add(user);
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation("User created: email={Email} role={Role} business={BusinessName} ({BusinessId})",
+            email, req.Role, biz.Name, req.BusinessId);
+
+        return Ok(new
+        {
+            success = true,
+            id = user.Id,
+            email = user.Email,
+            name = user.Name,
+            role = user.Role,
+            businessId = req.BusinessId,
+            businessName = biz.Name
+        });
     }
 
     // POST /api/admin/users/seed-owner — Bootstrap: create first Owner for a business (global admin only)
