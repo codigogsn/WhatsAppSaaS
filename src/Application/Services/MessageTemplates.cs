@@ -142,6 +142,7 @@ internal static class Msg
     internal static readonly List<ReplyButton> PreCheckoutButtons = new()
     {
         new("btn_pci_extras", "Agregar extras"),
+        new("btn_pci_upsell", "Agregar bebida"),
         new("btn_pci_continue", "Continuar")
     };
 

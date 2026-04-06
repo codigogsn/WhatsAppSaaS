@@ -77,6 +77,10 @@ public sealed class ConversationFields
     public bool ExtrasFlowActive { get; set; }
     public List<AvailableExtra>? AvailableExtras { get; set; }
 
+    // Upsell selection flow
+    public bool UpsellFlowActive { get; set; }
+    public List<AvailableUpsell>? AvailableUpsells { get; set; }
+
     // Interactive menu browsing state
     public bool BrowsingMenu { get; set; }
     public Guid? CurrentMenuCategoryId { get; set; }
@@ -142,6 +146,8 @@ public sealed class ConversationFields
         PreCheckoutInterceptorShown = false;
         ExtrasFlowActive = false;
         AvailableExtras = null;
+        UpsellFlowActive = false;
+        AvailableUpsells = null;
         UpsellSuggestedCount = 0;
         UpsellAcceptedCount = 0;
         UpsellDeclinedCount = 0;
@@ -176,6 +182,12 @@ public sealed class AvailableExtra
 {
     public string Name { get; set; } = "";
     public decimal? AdditivePrice { get; set; }
+}
+
+public sealed class AvailableUpsell
+{
+    public string Name { get; set; } = "";
+    public decimal Price { get; set; }
 }
 
 public sealed class AmbiguousItemEntry
