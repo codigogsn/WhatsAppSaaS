@@ -674,10 +674,11 @@ public class AdminBusinessesController : ControllerBase
                 };
             }
 
-            // Toggle
+            // Toggle — use CASE to handle both boolean and integer column types
             using var upd = conn.CreateCommand();
-            upd.CommandText = """UPDATE "Businesses" SET "IsActive" = @val WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@id)""";
-            AddParam(upd, "val", currentActive ? 0 : 1);
+            upd.CommandText = currentActive
+                ? """UPDATE "Businesses" SET "IsActive" = false WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@id)"""
+                : """UPDATE "Businesses" SET "IsActive" = true WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@id)""";
             AddParam(upd, "id", id.ToString());
             await upd.ExecuteNonQueryAsync(ct);
 
@@ -921,7 +922,7 @@ public class AdminBusinessesController : ControllerBase
             foreach (var (id, name, phone, reason) in toDeactivate)
             {
                 using var upd = conn.CreateCommand();
-                upd.CommandText = """UPDATE "Businesses" SET "IsActive" = 0 WHERE "Id"::text = @id""";
+                upd.CommandText = """UPDATE "Businesses" SET "IsActive" = false WHERE "Id"::text = @id""";
                 var p = upd.CreateParameter();
                 p.ParameterName = "id";
                 p.Value = id;
