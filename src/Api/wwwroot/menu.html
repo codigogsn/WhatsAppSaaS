@@ -597,9 +597,9 @@
     </div>
     <div class="card">
       <h3>Extras Configurados</h3>
-      <div class="helper">Extras activos para este negocio. Edicion y eliminacion disponible proximamente.</div>
+      <div class="helper">Extras activos para este negocio.</div>
       <table>
-        <thead><tr><th>Nombre</th><th>Precio +</th><th>Orden</th><th>Estado</th><th>Productos</th><th>Categorias</th></tr></thead>
+        <thead><tr><th>Nombre</th><th>Precio +</th><th>Orden</th><th>Estado</th><th>Productos</th><th>Categorias</th><th>Accion</th></tr></thead>
         <tbody id="extrasBody"></tbody>
       </table>
       <div id="extrasEmpty" class="muted small" style="padding:16px 0;text-align:center;display:none;">No hay extras configurados</div>
@@ -632,9 +632,9 @@
     </div>
     <div class="card">
       <h3>Reglas de Upsell</h3>
-      <div class="helper">Upsells activos para este negocio. Edicion y eliminacion disponible proximamente.</div>
+      <div class="helper">Upsells activos para este negocio.</div>
       <table>
-        <thead><tr><th>Categoria Origen</th><th>Producto Sugerido</th><th>Etiqueta</th><th>Mensaje</th><th>Orden</th><th>Estado</th></tr></thead>
+        <thead><tr><th>Categoria Origen</th><th>Producto Sugerido</th><th>Etiqueta</th><th>Mensaje</th><th>Orden</th><th>Estado</th><th>Accion</th></tr></thead>
         <tbody id="upsellsBody"></tbody>
       </table>
       <div id="upsellsEmpty" class="muted small" style="padding:16px 0;text-align:center;display:none;">No hay reglas de upsell configuradas</div>
@@ -1141,6 +1141,7 @@ async function loadMenuDataForSelectors(){
   }
 }
 
+var _extrasCache=[];
 async function loadExtras(){
   if(!bid()) return;
   await loadMenuDataForSelectors();
@@ -1151,10 +1152,10 @@ async function loadExtras(){
     var res=await fetch('/api/admin/extras?businessId='+bid(),{headers:hdrs()});
     if(!res.ok){ empty.style.display='block'; empty.textContent='Error cargando extras'; return; }
     var list=await res.json();
+    _extrasCache=list;
     if(!list.length){ empty.style.display='block'; tbody.parentElement.style.display='none'; return; }
     empty.style.display='none';
     tbody.parentElement.style.display='';
-    // Build name maps
     var itemMap={}, catMap={};
     for(var i=0;i<_menuItemsCache.length;i++) itemMap[_menuItemsCache[i].id]=_menuItemsCache[i].name;
     for(var j=0;j<_menuCatsCache.length;j++) catMap[_menuCatsCache[j].id]=_menuCatsCache[j].name;
@@ -1168,12 +1169,100 @@ async function loadExtras(){
         '<td>'+e.sortOrder+'</td>'+
         '<td><span class="status-pill '+(e.isActive?'on':'off')+'">'+(e.isActive?'Activo':'Inactivo')+'</span></td>'+
         '<td>'+prodNames+'</td>'+
-        '<td>'+catNames+'</td>';
+        '<td>'+catNames+'</td>'+
+        '<td>'+
+          '<button onclick="editExtraInline(\''+e.id+'\')">Editar</button> '+
+          '<button onclick="toggleExtra(\''+e.id+'\')">'+(e.isActive?'Desactivar':'Activar')+'</button> '+
+          '<button onclick="deleteExtra(\''+e.id+'\')" style="color:var(--danger);">Eliminar</button>'+
+        '</td>';
       tbody.appendChild(tr);
     }
   }catch(err){
     empty.style.display='block'; empty.textContent='Error: '+err.message;
   }
+}
+
+async function toggleExtra(id){
+  try{
+    var res=await fetch('/api/admin/extras/'+id+'/toggle?businessId='+bid(),{method:'PATCH',headers:hdrs()});
+    if(!res.ok) return showToast('Error toggling extra','error');
+    showToast('Extra actualizado','success');
+    await loadExtras();
+  }catch(err){ showToast('Error: '+err.message,'error'); }
+}
+
+async function deleteExtra(id){
+  if(!confirm('Eliminar este extra?')) return;
+  try{
+    var res=await fetch('/api/admin/extras/'+id+'?businessId='+bid(),{method:'DELETE',headers:hdrs()});
+    if(!res.ok) return showToast('Error eliminando extra','error');
+    showToast('Extra eliminado','success');
+    await loadExtras();
+  }catch(err){ showToast('Error: '+err.message,'error'); }
+}
+
+function editExtraInline(id){
+  var e=_extrasCache.find(function(x){return x.id===id;});
+  if(!e) return;
+  // Remove any existing edit row
+  var old=document.getElementById('edit-extra-row');
+  if(old) old.remove();
+  // Find the row and insert edit row after it
+  var tbody=document.getElementById('extrasBody');
+  var rows=tbody.querySelectorAll('tr');
+  var idx=_extrasCache.indexOf(e);
+  if(idx<0||idx>=rows.length) return;
+  var editTr=document.createElement('tr');
+  editTr.id='edit-extra-row';
+  editTr.style.background='var(--accent-subtle)';
+  // Build item/cat multi-selects with current selections
+  var itemOpts='';
+  for(var i=0;i<_menuItemsCache.length;i++){
+    var sel=(e.menuItemIds||[]).indexOf(_menuItemsCache[i].id)!==-1?' selected':'';
+    itemOpts+='<option value="'+_menuItemsCache[i].id+'"'+sel+'>'+esc(_menuItemsCache[i].name)+'</option>';
+  }
+  var catOpts='';
+  for(var j=0;j<_menuCatsCache.length;j++){
+    var sel2=(e.menuCategoryIds||[]).indexOf(_menuCatsCache[j].id)!==-1?' selected':'';
+    catOpts+='<option value="'+_menuCatsCache[j].id+'"'+sel2+'>'+esc(_menuCatsCache[j].name)+'</option>';
+  }
+  editTr.innerHTML='<td colspan="7" style="padding:14px;">'+
+    '<div class="row"><label class="small muted" style="font-weight:600;">Nombre:</label>'+
+    '<input id="editExtraName" value="'+esc(e.name)+'" style="width:180px;" />'+
+    '<label class="small muted" style="font-weight:600;">Precio +:</label>'+
+    '<input id="editExtraPrice" type="number" step="0.01" value="'+(e.additivePrice!=null?e.additivePrice:'')+'" style="width:100px;" />'+
+    '<label class="small muted" style="font-weight:600;">Orden:</label>'+
+    '<input id="editExtraOrder" type="number" value="'+e.sortOrder+'" style="width:60px;" /></div>'+
+    '<div class="row"><label class="small muted" style="font-weight:600;">Productos:</label>'+
+    '<select id="editExtraItems" multiple style="min-width:240px;height:60px;">'+itemOpts+'</select>'+
+    '<label class="small muted" style="font-weight:600;margin-left:8px;">Categorias:</label>'+
+    '<select id="editExtraCats" multiple style="min-width:200px;height:60px;">'+catOpts+'</select></div>'+
+    '<div class="row" style="margin-top:6px;">'+
+    '<button class="primary" onclick="saveExtra(\''+e.id+'\','+e.isActive+')">Guardar</button> '+
+    '<button onclick="document.getElementById(\'edit-extra-row\').remove()">Cancelar</button></div></td>';
+  rows[idx].after(editTr);
+}
+
+async function saveExtra(id,isActive){
+  var name=document.getElementById('editExtraName').value.trim();
+  if(!name) return showToast('Nombre es requerido','warn');
+  var price=parseFloat(document.getElementById('editExtraPrice').value);
+  var order=parseInt(document.getElementById('editExtraOrder').value)||0;
+  var itemIds=Array.from(document.getElementById('editExtraItems').selectedOptions).map(function(o){return o.value;});
+  var catIds=Array.from(document.getElementById('editExtraCats').selectedOptions).map(function(o){return o.value;});
+  try{
+    var res=await fetch('/api/admin/extras/'+id+'?businessId='+bid(),{
+      method:'PUT',headers:hdrs(),
+      body:JSON.stringify({name:name,additivePrice:isNaN(price)?null:price,sortOrder:order,isActive:isActive,menuItemIds:itemIds,menuCategoryIds:catIds})
+    });
+    if(!res.ok){
+      var detail='HTTP '+res.status;
+      try{var err=await res.json();detail+=': '+(err.error||err.title||JSON.stringify(err));}catch(_){}
+      return showToast(detail,'error');
+    }
+    showToast('Extra actualizado','success');
+    await loadExtras();
+  }catch(err){ showToast('Error: '+err.message,'error'); }
 }
 
 async function createExtra(){
@@ -1206,6 +1295,7 @@ async function createExtra(){
 }
 
 // ═══ Upsells ═══
+var _upsellsCache=[];
 async function loadUpsells(){
   if(!bid()) return;
   await loadMenuDataForSelectors();
@@ -1216,6 +1306,7 @@ async function loadUpsells(){
     var res=await fetch('/api/admin/upsells?businessId='+bid(),{headers:hdrs()});
     if(!res.ok){ empty.style.display='block'; empty.textContent='Error cargando upsells'; return; }
     var list=await res.json();
+    _upsellsCache=list;
     if(!list.length){ empty.style.display='block'; tbody.parentElement.style.display='none'; return; }
     empty.style.display='none';
     tbody.parentElement.style.display='';
@@ -1227,12 +1318,99 @@ async function loadUpsells(){
         '<td>'+esc(u.suggestionLabel||'—')+'</td>'+
         '<td class="muted small">'+esc(u.customMessage||'—')+'</td>'+
         '<td>'+u.sortOrder+'</td>'+
-        '<td><span class="status-pill '+(u.isActive?'on':'off')+'">'+(u.isActive?'Activo':'Inactivo')+'</span></td>';
+        '<td><span class="status-pill '+(u.isActive?'on':'off')+'">'+(u.isActive?'Activo':'Inactivo')+'</span></td>'+
+        '<td>'+
+          '<button onclick="editUpsellInline(\''+u.id+'\')">Editar</button> '+
+          '<button onclick="toggleUpsell(\''+u.id+'\')">'+(u.isActive?'Desactivar':'Activar')+'</button> '+
+          '<button onclick="deleteUpsell(\''+u.id+'\')" style="color:var(--danger);">Eliminar</button>'+
+        '</td>';
       tbody.appendChild(tr);
     }
   }catch(err){
     empty.style.display='block'; empty.textContent='Error: '+err.message;
   }
+}
+
+async function toggleUpsell(id){
+  try{
+    var res=await fetch('/api/admin/upsells/'+id+'/toggle?businessId='+bid(),{method:'PATCH',headers:hdrs()});
+    if(!res.ok) return showToast('Error toggling upsell','error');
+    showToast('Upsell actualizado','success');
+    await loadUpsells();
+  }catch(err){ showToast('Error: '+err.message,'error'); }
+}
+
+async function deleteUpsell(id){
+  if(!confirm('Eliminar esta regla de upsell?')) return;
+  try{
+    var res=await fetch('/api/admin/upsells/'+id+'?businessId='+bid(),{method:'DELETE',headers:hdrs()});
+    if(!res.ok) return showToast('Error eliminando upsell','error');
+    showToast('Upsell eliminado','success');
+    await loadUpsells();
+  }catch(err){ showToast('Error: '+err.message,'error'); }
+}
+
+function editUpsellInline(id){
+  var u=_upsellsCache.find(function(x){return x.id===id;});
+  if(!u) return;
+  var old=document.getElementById('edit-upsell-row');
+  if(old) old.remove();
+  var tbody=document.getElementById('upsellsBody');
+  var rows=tbody.querySelectorAll('tr');
+  var idx=_upsellsCache.indexOf(u);
+  if(idx<0||idx>=rows.length) return;
+  // Build category select
+  var catOpts='<option value="">(Seleccionar)</option>';
+  for(var j=0;j<_menuCatsCache.length;j++){
+    var sel=_menuCatsCache[j].id===u.sourceCategoryId?' selected':'';
+    catOpts+='<option value="'+_menuCatsCache[j].id+'"'+sel+'>'+esc(_menuCatsCache[j].name)+'</option>';
+  }
+  // Build item select
+  var itemOpts='<option value="">(Texto libre)</option>';
+  for(var i=0;i<_menuItemsCache.length;i++){
+    var sel2=_menuItemsCache[i].id===u.suggestedMenuItemId?' selected':'';
+    itemOpts+='<option value="'+_menuItemsCache[i].id+'"'+sel2+'>'+esc(_menuItemsCache[i].name)+'</option>';
+  }
+  var editTr=document.createElement('tr');
+  editTr.id='edit-upsell-row';
+  editTr.style.background='var(--accent-subtle)';
+  editTr.innerHTML='<td colspan="7" style="padding:14px;">'+
+    '<div class="row"><label class="small muted" style="font-weight:600;">Categoria origen:</label>'+
+    '<select id="editUpsellCat" style="min-width:200px;">'+catOpts+'</select>'+
+    '<label class="small muted" style="font-weight:600;margin-left:8px;">Sugerir producto:</label>'+
+    '<select id="editUpsellItem" style="min-width:200px;">'+itemOpts+'</select></div>'+
+    '<div class="row"><label class="small muted" style="font-weight:600;">Etiqueta:</label>'+
+    '<input id="editUpsellLabel" value="'+esc(u.suggestionLabel||'')+'" style="width:200px;" />'+
+    '<label class="small muted" style="font-weight:600;margin-left:8px;">Mensaje:</label>'+
+    '<input id="editUpsellMsg" value="'+esc(u.customMessage||'')+'" style="width:240px;" />'+
+    '<label class="small muted" style="font-weight:600;margin-left:8px;">Orden:</label>'+
+    '<input id="editUpsellOrder" type="number" value="'+u.sortOrder+'" style="width:60px;" /></div>'+
+    '<div class="row" style="margin-top:6px;">'+
+    '<button class="primary" onclick="saveUpsell(\''+u.id+'\','+u.isActive+')">Guardar</button> '+
+    '<button onclick="document.getElementById(\'edit-upsell-row\').remove()">Cancelar</button></div></td>';
+  rows[idx].after(editTr);
+}
+
+async function saveUpsell(id,isActive){
+  var sourceCat=document.getElementById('editUpsellCat').value;
+  if(!sourceCat) return showToast('Categoria origen es requerida','warn');
+  var suggestedItem=document.getElementById('editUpsellItem').value||null;
+  var label=document.getElementById('editUpsellLabel').value.trim()||null;
+  var message=document.getElementById('editUpsellMsg').value.trim()||null;
+  var order=parseInt(document.getElementById('editUpsellOrder').value)||0;
+  try{
+    var res=await fetch('/api/admin/upsells/'+id+'?businessId='+bid(),{
+      method:'PUT',headers:hdrs(),
+      body:JSON.stringify({sourceCategoryId:sourceCat,suggestedMenuItemId:suggestedItem,suggestionLabel:label,customMessage:message,sortOrder:order,isActive:isActive})
+    });
+    if(!res.ok){
+      var detail='HTTP '+res.status;
+      try{var err=await res.json();detail+=': '+(err.error||err.title||JSON.stringify(err));}catch(_){}
+      return showToast(detail,'error');
+    }
+    showToast('Upsell actualizado','success');
+    await loadUpsells();
+  }catch(err){ showToast('Error: '+err.message,'error'); }
 }
 
 async function createUpsell(){
