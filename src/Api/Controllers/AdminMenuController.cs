@@ -768,6 +768,20 @@ public sealed class AdminMenuController : ControllerBase
         public List<string> Aliases { get; set; } = new();
     }
 
+    private sealed class ParsedExtra
+    {
+        public string Name { get; set; } = "";
+        public decimal? Price { get; set; }
+        public List<string> ProductNames { get; set; } = new();
+        public List<string> CategoryNames { get; set; } = new();
+    }
+
+    private sealed class ParsedUpsell
+    {
+        public string SourceCategoryName { get; set; } = "";
+        public string SuggestedItemName { get; set; } = "";
+    }
+
     // POST /api/admin/menu/import
     [HttpPost("import")]
     public async Task<IActionResult> BulkImport([FromBody] BulkImportRequest req, CancellationToken ct)
@@ -778,15 +792,17 @@ public sealed class AdminMenuController : ControllerBase
             if (string.IsNullOrWhiteSpace(req.RawInput)) return BadRequest(new { error = "rawInput is empty" });
 
             var categories = new List<ParsedCategory>();
+            var extras = new List<ParsedExtra>();
+            var upsells = new List<ParsedUpsell>();
             var warnings = new List<string>();
 
             if (req.Mode == "json")
                 ParseJsonInput(req.RawInput, categories, warnings);
             else
-                ParseTextInput(req.RawInput, categories, warnings);
+                ParseTextInput(req.RawInput, categories, extras, upsells, warnings);
 
-            if (categories.Count == 0)
-                return BadRequest(new { error = "No categories detected", warnings });
+            if (categories.Count == 0 && extras.Count == 0 && upsells.Count == 0)
+                return BadRequest(new { error = "No categories, extras, or upsells detected", warnings });
 
             // Execute import
             var conn = await GetOpenConnectionAsync(ct);
@@ -895,11 +911,169 @@ public sealed class AdminMenuController : ControllerBase
                 }
             }
 
+            // ── Import Extras ──
+            int extrasCreated = 0;
+            foreach (var ext in extras)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(ext.Name)) continue;
+                    var extraId = Guid.NewGuid();
+                    using var insExtra = conn.CreateCommand();
+                    insExtra.CommandText = """
+                        INSERT INTO "Extras" ("Id","BusinessId","Name","AdditivePrice","IsActive","SortOrder","CreatedAtUtc")
+                        VALUES (@id,@bid,@name,@price,true,@sort,@created)
+                    """;
+                    MakeParam(insExtra, "id", extraId);
+                    MakeParam(insExtra, "bid", req.BusinessId);
+                    MakeParam(insExtra, "name", ext.Name.Trim());
+                    MakeParam(insExtra, "price", ext.Price.HasValue ? (object)ext.Price.Value : DBNull.Value);
+                    MakeParam(insExtra, "sort", extrasCreated);
+                    MakeParam(insExtra, "created", DateTime.UtcNow);
+                    await insExtra.ExecuteNonQueryAsync(ct);
+
+                    // Link to products by name
+                    foreach (var prodName in ext.ProductNames)
+                    {
+                        using var findItem = conn.CreateCommand();
+                        findItem.CommandText = """
+                            SELECT i."Id" FROM "MenuItems" i
+                            JOIN "MenuCategories" c ON c."Id" = i."CategoryId"
+                            WHERE c."BusinessId" = @bid AND LOWER(i."Name") = LOWER(@name)
+                            LIMIT 1
+                        """;
+                        MakeParam(findItem, "bid", req.BusinessId);
+                        MakeParam(findItem, "name", prodName.Trim());
+                        var itemId = await findItem.ExecuteScalarAsync(ct);
+                        if (itemId is not null and not DBNull)
+                        {
+                            using var link = conn.CreateCommand();
+                            link.CommandText = """
+                                INSERT INTO "ExtraMenuItems" ("Id","ExtraId","MenuItemId")
+                                VALUES (@id,@eid,@mid)
+                            """;
+                            MakeParam(link, "id", Guid.NewGuid());
+                            MakeParam(link, "eid", extraId);
+                            MakeParam(link, "mid", (Guid)itemId);
+                            await link.ExecuteNonQueryAsync(ct);
+                        }
+                        else
+                        {
+                            warnings.Add($"Extra '{ext.Name}': product '{prodName.Trim()}' not found");
+                        }
+                    }
+
+                    // Link to categories by name
+                    foreach (var catName in ext.CategoryNames)
+                    {
+                        using var findCat = conn.CreateCommand();
+                        findCat.CommandText = """
+                            SELECT "Id" FROM "MenuCategories"
+                            WHERE "BusinessId" = @bid AND LOWER("Name") = LOWER(@name)
+                            LIMIT 1
+                        """;
+                        MakeParam(findCat, "bid", req.BusinessId);
+                        MakeParam(findCat, "name", catName.Trim());
+                        var catId = await findCat.ExecuteScalarAsync(ct);
+                        if (catId is not null and not DBNull)
+                        {
+                            using var link = conn.CreateCommand();
+                            link.CommandText = """
+                                INSERT INTO "ExtraMenuCategories" ("Id","ExtraId","MenuCategoryId")
+                                VALUES (@id,@eid,@cid)
+                            """;
+                            MakeParam(link, "id", Guid.NewGuid());
+                            MakeParam(link, "eid", extraId);
+                            MakeParam(link, "cid", (Guid)catId);
+                            await link.ExecuteNonQueryAsync(ct);
+                        }
+                        else
+                        {
+                            warnings.Add($"Extra '{ext.Name}': category '{catName.Trim()}' not found");
+                        }
+                    }
+
+                    extrasCreated++;
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"Extra '{ext.Name}' failed: {ex.Message}");
+                }
+            }
+
+            // ── Import Upsells ──
+            int upsellsCreated = 0;
+            foreach (var ups in upsells)
+            {
+                try
+                {
+                    if (string.IsNullOrWhiteSpace(ups.SourceCategoryName)) continue;
+
+                    // Find source category
+                    using var findSrcCat = conn.CreateCommand();
+                    findSrcCat.CommandText = """
+                        SELECT "Id" FROM "MenuCategories"
+                        WHERE "BusinessId" = @bid AND LOWER("Name") = LOWER(@name)
+                        LIMIT 1
+                    """;
+                    MakeParam(findSrcCat, "bid", req.BusinessId);
+                    MakeParam(findSrcCat, "name", ups.SourceCategoryName.Trim());
+                    var srcCatId = await findSrcCat.ExecuteScalarAsync(ct);
+                    if (srcCatId is null or DBNull)
+                    {
+                        warnings.Add($"Upsell: source category '{ups.SourceCategoryName.Trim()}' not found");
+                        continue;
+                    }
+
+                    // Find suggested item
+                    Guid? suggestedItemId = null;
+                    string? suggestionLabel = null;
+                    if (!string.IsNullOrWhiteSpace(ups.SuggestedItemName))
+                    {
+                        using var findItem = conn.CreateCommand();
+                        findItem.CommandText = """
+                            SELECT i."Id" FROM "MenuItems" i
+                            JOIN "MenuCategories" c ON c."Id" = i."CategoryId"
+                            WHERE c."BusinessId" = @bid AND LOWER(i."Name") = LOWER(@name)
+                            LIMIT 1
+                        """;
+                        MakeParam(findItem, "bid", req.BusinessId);
+                        MakeParam(findItem, "name", ups.SuggestedItemName.Trim());
+                        var itemId = await findItem.ExecuteScalarAsync(ct);
+                        if (itemId is not null and not DBNull)
+                            suggestedItemId = (Guid)itemId;
+                        else
+                            suggestionLabel = ups.SuggestedItemName.Trim();
+                    }
+
+                    using var insUpsell = conn.CreateCommand();
+                    insUpsell.CommandText = """
+                        INSERT INTO "UpsellRules" ("Id","BusinessId","SourceCategoryId","SuggestedMenuItemId","SuggestionLabel","IsActive","SortOrder","CreatedAtUtc")
+                        VALUES (@id,@bid,@srcCat,@sugItem,@label,true,@sort,@created)
+                    """;
+                    MakeParam(insUpsell, "id", Guid.NewGuid());
+                    MakeParam(insUpsell, "bid", req.BusinessId);
+                    MakeParam(insUpsell, "srcCat", (Guid)srcCatId);
+                    MakeParam(insUpsell, "sugItem", suggestedItemId.HasValue ? (object)suggestedItemId.Value : DBNull.Value);
+                    MakeParam(insUpsell, "label", (object?)suggestionLabel ?? DBNull.Value);
+                    MakeParam(insUpsell, "sort", upsellsCreated);
+                    MakeParam(insUpsell, "created", DateTime.UtcNow);
+                    await insUpsell.ExecuteNonQueryAsync(ct);
+                    upsellsCreated++;
+                }
+                catch (Exception ex)
+                {
+                    warnings.Add($"Upsell '{ups.SourceCategoryName} -> {ups.SuggestedItemName}' failed: {ex.Message}");
+                }
+            }
+
             return Ok(new
             {
                 categoriesCreated,
                 itemsCreated,
                 aliasesCreated,
+                extrasCreated,
+                upsellsCreated,
                 skipped,
                 warnings
             });
@@ -911,8 +1085,11 @@ public sealed class AdminMenuController : ControllerBase
         }
     }
 
-    private static void ParseTextInput(string raw, List<ParsedCategory> categories, List<string> warnings)
+    private static void ParseTextInput(string raw, List<ParsedCategory> categories,
+        List<ParsedExtra> extras, List<ParsedUpsell> upsells, List<string> warnings)
     {
+        // section: "categories" (default), "extras", "upsells"
+        var section = "categories";
         ParsedCategory? current = null;
         var lines = raw.Split('\n');
         for (int i = 0; i < lines.Length; i++)
@@ -920,64 +1097,139 @@ public sealed class AdminMenuController : ControllerBase
             var line = lines[i].Trim();
             if (string.IsNullOrEmpty(line)) continue;
 
-            // Detect category line
-            if (line.StartsWith("Category:", StringComparison.OrdinalIgnoreCase) ||
-                line.StartsWith("Categoria:", StringComparison.OrdinalIgnoreCase) ||
-                line.StartsWith("Categoría:", StringComparison.OrdinalIgnoreCase))
+            // Detect section headers
+            if (line.Equals("Extras:", StringComparison.OrdinalIgnoreCase))
+            { section = "extras"; current = null; continue; }
+            if (line.Equals("Upsells:", StringComparison.OrdinalIgnoreCase))
+            { section = "upsells"; current = null; continue; }
+
+            // ── Categories/Products section ──
+            if (section == "categories")
             {
-                var catName = line.Substring(line.IndexOf(':') + 1).Trim();
-                if (string.IsNullOrWhiteSpace(catName))
+                // Detect category line
+                if (line.StartsWith("Category:", StringComparison.OrdinalIgnoreCase) ||
+                    line.StartsWith("Categoria:", StringComparison.OrdinalIgnoreCase) ||
+                    line.StartsWith("Categoría:", StringComparison.OrdinalIgnoreCase))
                 {
-                    warnings.Add($"Line {i + 1}: Category with empty name, skipped");
-                    current = null;
+                    var catName = line.Substring(line.IndexOf(':') + 1).Trim();
+                    if (string.IsNullOrWhiteSpace(catName))
+                    {
+                        warnings.Add($"Line {i + 1}: Category with empty name, skipped");
+                        current = null;
+                        continue;
+                    }
+                    current = new ParsedCategory { Name = catName };
+                    categories.Add(current);
                     continue;
                 }
-                current = new ParsedCategory { Name = catName };
-                categories.Add(current);
+
+                // Detect item line
+                if (line.StartsWith("-") && current != null)
+                {
+                    var content = line.Substring(1).Trim();
+                    var parts = content.Split('|');
+                    if (parts.Length < 2)
+                    {
+                        warnings.Add($"Line {i + 1}: Expected at least name|price, skipped: '{Truncate(content, 50)}'");
+                        continue;
+                    }
+
+                    var name = parts[0].Trim();
+                    var priceStr = parts[1].Trim().Replace(',', '.');
+                    if (!decimal.TryParse(priceStr, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var price) || price < 0)
+                    {
+                        warnings.Add($"Line {i + 1}: Invalid price '{parts[1].Trim()}' for '{name}', skipped");
+                        continue;
+                    }
+
+                    var desc = parts.Length > 2 ? parts[2].Trim() : null;
+                    var aliases = new List<string>();
+                    if (parts.Length > 3)
+                    {
+                        aliases = parts[3].Split(',').Select(a => a.Trim()).Where(a => a.Length > 0).ToList();
+                    }
+
+                    if (string.IsNullOrWhiteSpace(name))
+                    {
+                        warnings.Add($"Line {i + 1}: Empty item name, skipped");
+                        continue;
+                    }
+
+                    current.Items.Add(new ParsedItem { Name = name, Price = price, Description = desc, Aliases = aliases });
+                    continue;
+                }
+
+                if (current == null && !line.StartsWith("-"))
+                {
+                    warnings.Add($"Line {i + 1}: No category context, skipped: '{Truncate(line, 50)}'");
+                }
                 continue;
             }
 
-            // Detect item line
-            if (line.StartsWith("-") && current != null)
+            // ── Extras section ──
+            if (section == "extras")
             {
+                if (!line.StartsWith("-")) continue;
                 var content = line.Substring(1).Trim();
-                var parts = content.Split('|');
-                if (parts.Length < 2)
+                // Format: name | price | productos: A, B  OR  categorias: X, Y
+                var parts = content.Split('|').Select(p => p.Trim()).ToArray();
+                if (parts.Length < 1 || string.IsNullOrWhiteSpace(parts[0])) continue;
+
+                var ext = new ParsedExtra { Name = parts[0] };
+
+                if (parts.Length >= 2)
                 {
-                    warnings.Add($"Line {i + 1}: Expected at least name|price, skipped: '{Truncate(content, 50)}'");
-                    continue;
+                    var priceStr = parts[1].Replace(',', '.');
+                    if (decimal.TryParse(priceStr, System.Globalization.NumberStyles.Any,
+                        System.Globalization.CultureInfo.InvariantCulture, out var p) && p >= 0)
+                        ext.Price = p;
                 }
 
-                var name = parts[0].Trim();
-                var priceStr = parts[1].Trim().Replace(',', '.');
-                if (!decimal.TryParse(priceStr, System.Globalization.NumberStyles.Any,
-                    System.Globalization.CultureInfo.InvariantCulture, out var price) || price < 0)
+                // Parse linkage from remaining parts
+                for (int j = (parts.Length >= 2 ? 2 : 1); j < parts.Length; j++)
                 {
-                    warnings.Add($"Line {i + 1}: Invalid price '{parts[1].Trim()}' for '{name}', skipped");
-                    continue;
+                    var segment = parts[j];
+                    if (segment.StartsWith("productos:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var names = segment.Substring("productos:".Length).Split(',')
+                            .Select(n => n.Trim()).Where(n => n.Length > 0);
+                        ext.ProductNames.AddRange(names);
+                    }
+                    else if (segment.StartsWith("categorias:", StringComparison.OrdinalIgnoreCase) ||
+                             segment.StartsWith("categorías:", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var names = segment.Substring(segment.IndexOf(':') + 1).Split(',')
+                            .Select(n => n.Trim()).Where(n => n.Length > 0);
+                        ext.CategoryNames.AddRange(names);
+                    }
                 }
 
-                var desc = parts.Length > 2 ? parts[2].Trim() : null;
-                var aliases = new List<string>();
-                if (parts.Length > 3)
-                {
-                    aliases = parts[3].Split(',').Select(a => a.Trim()).Where(a => a.Length > 0).ToList();
-                }
-
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    warnings.Add($"Line {i + 1}: Empty item name, skipped");
-                    continue;
-                }
-
-                current.Items.Add(new ParsedItem { Name = name, Price = price, Description = desc, Aliases = aliases });
+                extras.Add(ext);
                 continue;
             }
 
-            // Line doesn't match any pattern — warn if not blank
-            if (current == null && !line.StartsWith("-"))
+            // ── Upsells section ──
+            if (section == "upsells")
             {
-                warnings.Add($"Line {i + 1}: No category context, skipped: '{Truncate(line, 50)}'");
+                if (!line.StartsWith("-")) continue;
+                var content = line.Substring(1).Trim();
+                // Format: categoria origen -> producto sugerido
+                var arrowIdx = content.IndexOf("->");
+                if (arrowIdx < 0) arrowIdx = content.IndexOf("→");
+                if (arrowIdx < 0)
+                {
+                    warnings.Add($"Line {i + 1}: Upsell needs 'category -> product' format, skipped");
+                    continue;
+                }
+                var srcCat = content.Substring(0, arrowIdx).Trim();
+                var sugItem = content.Substring(arrowIdx + (content[arrowIdx] == '→' ? 1 : 2)).Trim();
+                if (string.IsNullOrWhiteSpace(srcCat) || string.IsNullOrWhiteSpace(sugItem))
+                {
+                    warnings.Add($"Line {i + 1}: Upsell missing category or product, skipped");
+                    continue;
+                }
+                upsells.Add(new ParsedUpsell { SourceCategoryName = srcCat, SuggestedItemName = sugItem });
             }
         }
     }
