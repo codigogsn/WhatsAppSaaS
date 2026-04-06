@@ -483,6 +483,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         bool isInTrappingState = state.Items.Count > 0 && (
                             (state.ExtrasOffered && !state.ObservationAnswered)   // observation gate
                             || (state.ObservationPromptSent && !state.ObservationAnswered) // observation capture
+                            || (state.PreCheckoutInterceptorShown && !state.OrderConfirmed && string.IsNullOrWhiteSpace(state.DeliveryType)) // pre-checkout interceptor
                             || (state.CheckoutFormSent && !state.DeliveryDataConfirmed) // checkout form fill
                             || (state.PaymentMethod == "efectivo" && !state.CashFlowCompleted) // cash sub-flow
                             || state.AwaitingCashCurrency
@@ -704,12 +705,56 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // A-pci) Pre-checkout interceptor response
+                    if (state.PreCheckoutInterceptorShown && !state.OrderConfirmed
+                        && state.Items.Count > 0 && string.IsNullOrWhiteSpace(state.DeliveryType))
+                    {
+                        var isContinue = t is "continuar" or "sigue" or "dale" or "ok"
+                            or "listo" or "eso es" or "eso" or "si" or "sí"
+                            or "esta bien" or "está bien" or "no" or "nada" or "nada mas"
+                            or "nada más" or "no gracias";
+                        var isExtras = t is "extras" or "extra" or "agregar extras"
+                            or "quiero extras" or "si extras";
+
+                        if (isContinue || isExtras)
+                        {
+                            // Both paths advance to BuildOrderReplyFromState which will
+                            // ask delivery type (interceptor already shown)
+                            var nextReply = BuildOrderReplyFromState(state, _bcvRate);
+                            string body;
+                            if (isExtras)
+                            {
+                                // For now, extras flow is not yet wired — acknowledge and proceed
+                                body = "Los extras se podr\u00e1n agregar pr\u00f3ximamente \ud83d\udee0\ufe0f\n\n" + nextReply.Body;
+                            }
+                            else
+                            {
+                                body = nextReply.Body;
+                            }
+
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = body,
+                                Buttons = nextReply.Buttons,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                        // Unrecognized reply — treat as natural continuation, fall through
+                    }
+
                     // A-edit) EDITAR — re-show order for modifications
                     if (IsEditCommand(t) && state.Items.Count > 0)
                     {
                         state.ExtrasOffered = false;
                         state.ObservationPromptSent = false;
                         state.ObservationAnswered = false;
+                        state.PreCheckoutInterceptorShown = false;
                         state.OrderConfirmed = false;
                         state.CheckoutFormSent = false;
 
@@ -2031,6 +2076,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return new BotReply(Msg.ObservationQuestion, Msg.ObservationButtons);
         }
 
+        // Pre-checkout interceptor: extras/upsells prompt (once per order)
+        if (!state.PreCheckoutInterceptorShown)
+        {
+            state.PreCheckoutInterceptorShown = true;
+            var summary = Msg.OrderSummaryWithTotal(state.Items, bcvRate);
+            return new BotReply(
+                summary + "\n\n" + Msg.PreCheckoutInterceptorPrompt,
+                Msg.PreCheckoutButtons);
+        }
+
         // Delivery step — BEFORE summary so delivery fee is included in total
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
             return new BotReply(Msg.PickupOrDelivery, Msg.DeliveryButtons);
@@ -3079,6 +3134,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         {
             "btn_obs_si"     => "si",
             "btn_obs_no"     => "no",
+            "btn_pci_extras" => "extras",
+            "btn_pci_continue" => "continuar",
             "btn_extras_si"  => "si",   // legacy fallback
             "btn_extras_no"  => "no",   // legacy fallback
             "btn_confirmar"  => "confirmar",

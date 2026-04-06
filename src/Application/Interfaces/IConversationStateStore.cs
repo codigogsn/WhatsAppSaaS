@@ -70,6 +70,9 @@ public sealed class ConversationFields
     public string? LastSuggestedItem { get; set; }
     public bool AddonSuggestionSent { get; set; }
 
+    // Pre-checkout interceptor: extras/upsells prompt shown once per order
+    public bool PreCheckoutInterceptorShown { get; set; }
+
     // Interactive menu browsing state
     public bool BrowsingMenu { get; set; }
     public Guid? CurrentMenuCategoryId { get; set; }
@@ -132,6 +135,7 @@ public sealed class ConversationFields
         SuggestionDeclined = false;
         LastSuggestedItem = null;
         AddonSuggestionSent = false;
+        PreCheckoutInterceptorShown = false;
         UpsellSuggestedCount = 0;
         UpsellAcceptedCount = 0;
         UpsellDeclinedCount = 0;

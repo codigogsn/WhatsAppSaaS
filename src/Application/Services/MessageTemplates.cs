@@ -134,6 +134,17 @@ internal static class Msg
          + "_sin hielo_\n"
          + "_bien tostado_";
 
+    // ── Pre-checkout interceptor ──
+
+    internal static string PreCheckoutInterceptorPrompt
+        => "\u00bfDeseas agregar algo m\u00e1s?";
+
+    internal static readonly List<ReplyButton> PreCheckoutButtons = new()
+    {
+        new("btn_pci_extras", "Agregar extras"),
+        new("btn_pci_continue", "Continuar")
+    };
+
     // ── Order confirmation gate ──
 
     internal static string ConfirmOrderPrompt
