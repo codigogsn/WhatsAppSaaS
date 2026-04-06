@@ -188,6 +188,31 @@ public sealed class AdminUsersController : ControllerBase
         });
     }
 
+    // DELETE /api/admin/users/{id} — permanent delete (Owner or global admin)
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var bizId = GetBusinessIdFromToken();
+        var isAdmin = IsGlobalAdmin();
+        if (bizId is null && !isAdmin) return Unauthorized();
+        if (!IsOwner() && !isAdmin) return Forbid();
+
+        var query = _db.BusinessUsers.Where(u => u.Id == id);
+        if (!isAdmin && bizId is not null)
+            query = query.Where(u => u.BusinessId == bizId.Value);
+
+        var user = await query.FirstOrDefaultAsync(ct);
+        if (user is null) return NotFound(new { error = "User not found" });
+
+        _db.BusinessUsers.Remove(user);
+        await _db.SaveChangesAsync(ct);
+
+        _logger.LogInformation("User permanently deleted: id={UserId} email={Email} business={BusinessId}",
+            user.Id, user.Email, user.BusinessId);
+
+        return Ok(new { deleted = true, id = user.Id, email = user.Email });
+    }
+
     // GET /api/admin/users/me
     [HttpGet("me")]
     public async Task<IActionResult> Me(CancellationToken ct)
