@@ -21,6 +21,10 @@ public class AppDbContext : DbContext
     public DbSet<BackgroundJob> BackgroundJobs => Set<BackgroundJob>();
     public DbSet<ExchangeRate> ExchangeRates => Set<ExchangeRate>();
     public DbSet<MenuPdf> MenuPdfs => Set<MenuPdf>();
+    public DbSet<Extra> Extras => Set<Extra>();
+    public DbSet<ExtraMenuItem> ExtraMenuItems => Set<ExtraMenuItem>();
+    public DbSet<ExtraMenuCategory> ExtraMenuCategories => Set<ExtraMenuCategory>();
+    public DbSet<UpsellRule> UpsellRules => Set<UpsellRule>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -309,6 +313,85 @@ public class AppDbContext : DbContext
             b.Property(x => x.FetchedAtUtc).IsRequired();
 
             b.HasIndex(x => x.RateDate).IsUnique();
+        });
+
+        modelBuilder.Entity<Extra>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Name).IsRequired().HasMaxLength(200);
+            b.Property(x => x.AdditivePrice).HasPrecision(12, 2);
+            b.Property(x => x.IsActive).IsRequired();
+            b.Property(x => x.SortOrder);
+            b.Property(x => x.CreatedAtUtc).IsRequired();
+
+            b.HasOne(x => x.Business)
+                .WithMany()
+                .HasForeignKey(x => x.BusinessId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasMany(x => x.MenuItems)
+                .WithOne(j => j.Extra)
+                .HasForeignKey(j => j.ExtraId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasMany(x => x.MenuCategories)
+                .WithOne(j => j.Extra)
+                .HasForeignKey(j => j.ExtraId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasIndex(x => x.BusinessId);
+        });
+
+        modelBuilder.Entity<ExtraMenuItem>(b =>
+        {
+            b.HasKey(x => x.Id);
+
+            b.HasOne(x => x.MenuItem)
+                .WithMany()
+                .HasForeignKey(x => x.MenuItemId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasIndex(x => new { x.ExtraId, x.MenuItemId }).IsUnique();
+        });
+
+        modelBuilder.Entity<ExtraMenuCategory>(b =>
+        {
+            b.HasKey(x => x.Id);
+
+            b.HasOne(x => x.MenuCategory)
+                .WithMany()
+                .HasForeignKey(x => x.MenuCategoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasIndex(x => new { x.ExtraId, x.MenuCategoryId }).IsUnique();
+        });
+
+        modelBuilder.Entity<UpsellRule>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.SuggestionLabel).HasMaxLength(200);
+            b.Property(x => x.CustomMessage).HasMaxLength(500);
+            b.Property(x => x.IsActive).IsRequired();
+            b.Property(x => x.SortOrder);
+            b.Property(x => x.CreatedAtUtc).IsRequired();
+
+            b.HasOne(x => x.Business)
+                .WithMany()
+                .HasForeignKey(x => x.BusinessId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasOne(x => x.SourceCategory)
+                .WithMany()
+                .HasForeignKey(x => x.SourceCategoryId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            b.HasOne(x => x.SuggestedMenuItem)
+                .WithMany()
+                .HasForeignKey(x => x.SuggestedMenuItemId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            b.HasIndex(x => x.BusinessId);
+            b.HasIndex(x => x.SourceCategoryId);
         });
     }
 }
