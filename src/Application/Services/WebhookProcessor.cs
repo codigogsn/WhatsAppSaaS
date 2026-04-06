@@ -713,9 +713,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // A-pci-extras) Extras flow: user is selecting extras
                     if (state.ExtrasFlowActive && state.AvailableExtras is { Count: > 0 })
                     {
-                        var isNoExtras = t is "no" or "nada" or "nada mas" or "nada más"
-                            or "no gracias" or "continuar" or "sigue" or "dale" or "listo"
-                            or "ok" or "ya" or "eso" or "eso es";
+                        // Delivery/payment bypass: user jumped ahead
+                        var deliveryBypass = NormalizeDeliveryType(rawText);
+                        if (deliveryBypass != null || NormalizePaymentMethod(rawText) != null)
+                        {
+                            ClearPreCheckoutFlowState(state);
+                            // Don't consume — fall through to normal handlers
+                            goto afterPreCheckout;
+                        }
+
+                        var isNoExtras = IsSkipOrContinue(t);
 
                         if (isNoExtras)
                         {
@@ -768,12 +775,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                             continue;
                         }
-                        // No match — let them know and stay in flow
-                        var availList = string.Join(", ", state.AvailableExtras.Select(e => e.Name));
+                        // No match — exit flow gracefully, don't loop
+                        ClearPreCheckoutFlowState(state);
+                        var fallbackReply = BuildOrderReplyFromState(state, _bcvRate);
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = $"No encontr\u00e9 ese extra. Los disponibles son: {availList}\n\nEscr\u00edbeme cu\u00e1l deseas o *continuar* para seguir.",
+                            Body = "Listo \ud83d\udc4c seguimos con tu compra.\n\n" + fallbackReply.Body,
+                            Buttons = fallbackReply.Buttons,
                             PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
                         state.LastActivityUtc = DateTime.UtcNow;
@@ -784,9 +793,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // A-pci-upsell) Upsell flow: user is selecting upsell items
                     if (state.UpsellFlowActive && state.AvailableUpsells is { Count: > 0 })
                     {
-                        var isNoUpsell = t is "no" or "nada" or "nada mas" or "nada más"
-                            or "no gracias" or "continuar" or "sigue" or "dale" or "listo"
-                            or "ok" or "ya" or "eso" or "eso es";
+                        // Delivery/payment bypass: user jumped ahead
+                        var deliveryBypassU = NormalizeDeliveryType(rawText);
+                        if (deliveryBypassU != null || NormalizePaymentMethod(rawText) != null)
+                        {
+                            ClearPreCheckoutFlowState(state);
+                            goto afterPreCheckout;
+                        }
+
+                        var isNoUpsell = IsSkipOrContinue(t);
 
                         if (isNoUpsell)
                         {
@@ -838,11 +853,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                         }
 
-                        var availList = string.Join(", ", state.AvailableUpsells.Select(u => u.Name));
+                        // No match — exit flow gracefully, don't loop
+                        ClearPreCheckoutFlowState(state);
+                        var uFallbackReply = BuildOrderReplyFromState(state, _bcvRate);
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = $"No encontr\u00e9 eso. Las opciones son: {availList}\n\nEscr\u00edbeme cu\u00e1l deseas o *continuar* para seguir.",
+                            Body = "Perfecto, continuemos \ud83d\udc4d\n\n" + uFallbackReply.Body,
+                            Buttons = uFallbackReply.Buttons,
                             PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
                         state.LastActivityUtc = DateTime.UtcNow;
@@ -855,10 +873,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         && !state.UpsellFlowActive && !state.OrderConfirmed
                         && state.Items.Count > 0 && string.IsNullOrWhiteSpace(state.DeliveryType))
                     {
-                        var isContinue = t is "continuar" or "sigue" or "dale" or "ok"
-                            or "listo" or "ya" or "eso es" or "eso" or "si" or "sí"
-                            or "esta bien" or "está bien" or "no" or "nada" or "nada mas"
-                            or "nada más" or "no gracias";
+                        // Delivery bypass: user jumped straight to delivery type
+                        var deliveryDirect = NormalizeDeliveryType(rawText);
+                        if (deliveryDirect != null)
+                        {
+                            state.DeliveryType = deliveryDirect;
+                            var dReply = BuildOrderReplyFromState(state, _bcvRate);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From, Body = dReply.Body, Buttons = dReply.Buttons,
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        var isContinue = IsSkipOrContinue(t);
                         var isExtras = t is "extras" or "extra" or "agregar extras"
                             or "quiero extras" or "si extras";
 
@@ -971,6 +1002,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         }
                         // Unrecognized reply — fall through to normal handlers
                     }
+
+                    afterPreCheckout:
 
                     // A-edit) EDITAR — re-show order for modifications
                     if (IsEditCommand(t) && state.Items.Count > 0)
@@ -5630,6 +5663,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
         result = Regex.Replace(result, @"[,\s]+$", "").Trim();
 
         return string.IsNullOrWhiteSpace(result) ? null : result;
+    }
+
+    // ── Pre-checkout flow helpers ──
+
+    private static bool IsSkipOrContinue(string t) => t is
+        "continuar" or "sigue" or "dale" or "ok" or "listo" or "ya"
+        or "eso es" or "eso" or "si" or "sí" or "no" or "nada"
+        or "nada mas" or "nada más" or "no gracias" or "perfecto"
+        or "esta bien" or "está bien" or "asi esta bien"
+        or "así está bien" or "dejalo asi" or "déjalo así";
+
+    private static void ClearPreCheckoutFlowState(ConversationFields state)
+    {
+        state.ExtrasFlowActive = false;
+        state.AvailableExtras = null;
+        state.UpsellFlowActive = false;
+        state.AvailableUpsells = null;
     }
 
     // ── Extras flow helpers ──
