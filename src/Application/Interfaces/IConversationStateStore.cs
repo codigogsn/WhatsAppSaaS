@@ -73,6 +73,10 @@ public sealed class ConversationFields
     // Pre-checkout interceptor: extras/upsells prompt shown once per order
     public bool PreCheckoutInterceptorShown { get; set; }
 
+    // Extras selection flow
+    public bool ExtrasFlowActive { get; set; }
+    public List<AvailableExtra>? AvailableExtras { get; set; }
+
     // Interactive menu browsing state
     public bool BrowsingMenu { get; set; }
     public Guid? CurrentMenuCategoryId { get; set; }
@@ -136,6 +140,8 @@ public sealed class ConversationFields
         LastSuggestedItem = null;
         AddonSuggestionSent = false;
         PreCheckoutInterceptorShown = false;
+        ExtrasFlowActive = false;
+        AvailableExtras = null;
         UpsellSuggestedCount = 0;
         UpsellAcceptedCount = 0;
         UpsellDeclinedCount = 0;
@@ -164,6 +170,12 @@ public sealed class ConversationFields
         CurrentMenuCategoryName = null;
         LastActivityUtc = null;
     }
+}
+
+public sealed class AvailableExtra
+{
+    public string Name { get; set; } = "";
+    public decimal? AdditivePrice { get; set; }
 }
 
 public sealed class AmbiguousItemEntry

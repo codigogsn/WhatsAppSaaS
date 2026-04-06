@@ -31,6 +31,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly IMenuRepository? _menuRepository;
     private readonly INotificationService? _notificationService;
     private readonly IExchangeRateProvider? _exchangeRateProvider;
+    private readonly IExtrasRepository? _extrasRepository;
     private readonly IVerticalStrategyFactory _verticalStrategyFactory;
     private readonly ILogger<WebhookProcessor> _logger;
     private readonly PaymentMobileOptions _paymentMobile;
@@ -45,7 +46,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         IMenuRepository? menuRepository = null,
         INotificationService? notificationService = null,
         IExchangeRateProvider? exchangeRateProvider = null,
-        IVerticalStrategyFactory? verticalStrategyFactory = null)
+        IVerticalStrategyFactory? verticalStrategyFactory = null,
+        IExtrasRepository? extrasRepository = null)
     {
         _aiParser = aiParser;
         _whatsAppClient = whatsAppClient;
@@ -54,6 +56,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         _menuRepository = menuRepository;
         _notificationService = notificationService;
         _exchangeRateProvider = exchangeRateProvider;
+        _extrasRepository = extrasRepository;
         _verticalStrategyFactory = verticalStrategyFactory ?? new Application.Strategies.VerticalStrategyFactory();
         _logger = logger;
         _paymentMobile = paymentMobile ?? new PaymentMobileOptions();
@@ -483,6 +486,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         bool isInTrappingState = state.Items.Count > 0 && (
                             (state.ExtrasOffered && !state.ObservationAnswered)   // observation gate
                             || (state.ObservationPromptSent && !state.ObservationAnswered) // observation capture
+                            || state.ExtrasFlowActive // extras selection
                             || (state.PreCheckoutInterceptorShown && !state.OrderConfirmed && string.IsNullOrWhiteSpace(state.DeliveryType)) // pre-checkout interceptor
                             || (state.CheckoutFormSent && !state.DeliveryDataConfirmed) // checkout form fill
                             || (state.PaymentMethod == "efectivo" && !state.CashFlowCompleted) // cash sub-flow
@@ -705,8 +709,72 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
+                    // A-pci-extras) Extras flow: user is selecting extras
+                    if (state.ExtrasFlowActive && state.AvailableExtras is { Count: > 0 })
+                    {
+                        var isNoExtras = t is "no" or "nada" or "nada mas" or "nada más"
+                            or "no gracias" or "continuar" or "sigue" or "dale" or "listo"
+                            or "ok" or "eso" or "eso es";
+
+                        if (isNoExtras)
+                        {
+                            state.ExtrasFlowActive = false;
+                            state.AvailableExtras = null;
+                            var nextReply = BuildOrderReplyFromState(state, _bcvRate);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From, Body = nextReply.Body, Buttons = nextReply.Buttons,
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+
+                        // Try to match user text against available extras
+                        var matched = MatchExtrasFromText(t, state.AvailableExtras);
+                        if (matched.Count > 0)
+                        {
+                            foreach (var ext in matched)
+                            {
+                                state.Items.Add(new ConversationItemEntry
+                                {
+                                    Name = ext.Name + " (extra)",
+                                    Quantity = 1,
+                                    UnitPrice = ext.AdditivePrice ?? 0m
+                                });
+                            }
+                            state.ExtrasFlowActive = false;
+                            state.AvailableExtras = null;
+                            var addedNames = string.Join(", ", matched.Select(e => e.Name));
+                            var summaryReply = BuildOrderReplyFromState(state, _bcvRate);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = $"\u2705 {addedNames} agregado(s).\n\n" + summaryReply.Body,
+                                Buttons = summaryReply.Buttons,
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                        // No match — let them know and stay in flow
+                        var availList = string.Join(", ", state.AvailableExtras.Select(e => e.Name));
+                        await SendAsync(new OutgoingMessage
+                        {
+                            To = message.From,
+                            Body = $"No encontr\u00e9 ese extra. Los disponibles son: {availList}\n\nEscr\u00edbeme cu\u00e1l deseas o *continuar* para seguir.",
+                            PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                        }, businessContext.BusinessId, conversationId, cancellationToken);
+                        state.LastActivityUtc = DateTime.UtcNow;
+                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        continue;
+                    }
+
                     // A-pci) Pre-checkout interceptor response
-                    if (state.PreCheckoutInterceptorShown && !state.OrderConfirmed
+                    if (state.PreCheckoutInterceptorShown && !state.ExtrasFlowActive
+                        && !state.OrderConfirmed
                         && state.Items.Count > 0 && string.IsNullOrWhiteSpace(state.DeliveryType))
                     {
                         var isContinue = t is "continuar" or "sigue" or "dale" or "ok"
@@ -716,36 +784,64 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         var isExtras = t is "extras" or "extra" or "agregar extras"
                             or "quiero extras" or "si extras";
 
-                        if (isContinue || isExtras)
+                        if (isExtras)
                         {
-                            // Both paths advance to BuildOrderReplyFromState which will
-                            // ask delivery type (interceptor already shown)
-                            var nextReply = BuildOrderReplyFromState(state, _bcvRate);
-                            string body;
-                            if (isExtras)
+                            // Resolve relevant extras for current order items
+                            var extras = await ResolveExtrasForOrderAsync(
+                                businessContext.BusinessId, state.Items, cancellationToken);
+
+                            if (extras.Count == 0)
                             {
-                                // For now, extras flow is not yet wired — acknowledge and proceed
-                                body = "Los extras se podr\u00e1n agregar pr\u00f3ximamente \ud83d\udee0\ufe0f\n\n" + nextReply.Body;
+                                var nextReply = BuildOrderReplyFromState(state, _bcvRate);
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = "No hay extras configurados para tu pedido \ud83d\udc4c\n\n" + nextReply.Body,
+                                    Buttons = nextReply.Buttons,
+                                    PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
                             }
                             else
                             {
-                                body = nextReply.Body;
-                            }
+                                state.ExtrasFlowActive = true;
+                                state.AvailableExtras = extras.Select(e => new AvailableExtra
+                                {
+                                    Name = e.Name,
+                                    AdditivePrice = e.AdditivePrice
+                                }).ToList();
 
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = body,
-                                Buttons = nextReply.Buttons,
-                                PhoneNumberId = phoneNumberId,
-                                AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                                var lines = extras.Select(e =>
+                                    e.AdditivePrice.HasValue && e.AdditivePrice > 0
+                                        ? $"- {e.Name} (+${e.AdditivePrice:0.00})"
+                                        : $"- {e.Name}");
+                                var body = "Para tu pedido puedes agregar:\n"
+                                    + string.Join("\n", lines)
+                                    + "\n\nEscr\u00edbeme cu\u00e1les deseas agregar \ud83d\udc47";
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From, Body = body,
+                                    PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+                            }
 
                             state.LastActivityUtc = DateTime.UtcNow;
                             await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                             continue;
                         }
-                        // Unrecognized reply — treat as natural continuation, fall through
+
+                        if (isContinue)
+                        {
+                            var nextReply = BuildOrderReplyFromState(state, _bcvRate);
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From, Body = nextReply.Body, Buttons = nextReply.Buttons,
+                                PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                        // Unrecognized reply — fall through to normal handlers
                     }
 
                     // A-edit) EDITAR — re-show order for modifications
@@ -755,6 +851,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.ObservationPromptSent = false;
                         state.ObservationAnswered = false;
                         state.PreCheckoutInterceptorShown = false;
+                        state.ExtrasFlowActive = false;
+                        state.AvailableExtras = null;
                         state.OrderConfirmed = false;
                         state.CheckoutFormSent = false;
 
@@ -5401,5 +5499,74 @@ public sealed class WebhookProcessor : IWebhookProcessor
         result = Regex.Replace(result, @"[,\s]+$", "").Trim();
 
         return string.IsNullOrWhiteSpace(result) ? null : result;
+    }
+
+    // ── Extras flow helpers ──
+
+    private async Task<List<Application.Models.ExtraReadModel>> ResolveExtrasForOrderAsync(
+        Guid businessId, List<ConversationItemEntry> items, CancellationToken ct)
+    {
+        if (_extrasRepository == null || _menuRepository == null || items.Count == 0)
+            return new();
+
+        try
+        {
+            // Load all available menu items for this business to resolve IDs
+            var dbItems = await _menuRepository.GetAvailableItemsAsync(businessId, ct);
+            if (dbItems.Count == 0) return new();
+
+            var seen = new HashSet<Guid>();
+            var result = new List<Application.Models.ExtraReadModel>();
+
+            foreach (var cartItem in items)
+            {
+                // Skip extras already in cart (they end with "(extra)")
+                if (cartItem.Name.EndsWith("(extra)")) continue;
+
+                // Find matching DB item by case-insensitive name
+                var dbItem = dbItems.FirstOrDefault(d =>
+                    string.Equals(d.Name, cartItem.Name, StringComparison.OrdinalIgnoreCase));
+                if (dbItem == null) continue;
+
+                var extras = await _extrasRepository.GetExtrasForItemAsync(
+                    businessId, dbItem.Id, dbItem.CategoryId, ct);
+
+                foreach (var ext in extras)
+                {
+                    if (seen.Add(ext.Id))
+                        result.Add(ext);
+                }
+            }
+
+            return result.OrderBy(e => e.SortOrder).ThenBy(e => e.Name).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to resolve extras for business {BusinessId}", businessId);
+            return new();
+        }
+    }
+
+    private static List<AvailableExtra> MatchExtrasFromText(string text, List<AvailableExtra> available)
+    {
+        var t = StripAccents(text.ToLowerInvariant().Trim());
+        var matched = new List<AvailableExtra>();
+
+        foreach (var ext in available)
+        {
+            var extNorm = StripAccents(ext.Name.ToLowerInvariant());
+            // Match if user text contains the extra name or vice versa
+            if (t.Contains(extNorm) || extNorm.Contains(t))
+            {
+                matched.Add(ext);
+                continue;
+            }
+            // Also try each word — "queso" matching "Queso extra"
+            var extWords = extNorm.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (extWords.Any(w => w.Length > 2 && t.Contains(w)))
+                matched.Add(ext);
+        }
+
+        return matched;
     }
 }
