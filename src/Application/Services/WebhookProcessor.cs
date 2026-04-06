@@ -715,7 +715,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     {
                         var isNoExtras = t is "no" or "nada" or "nada mas" or "nada más"
                             or "no gracias" or "continuar" or "sigue" or "dale" or "listo"
-                            or "ok" or "eso" or "eso es";
+                            or "ok" or "ya" or "eso" or "eso es";
 
                         if (isNoExtras)
                         {
@@ -736,23 +736,31 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         var matched = MatchExtrasFromText(t, state.AvailableExtras);
                         if (matched.Count > 0)
                         {
+                            var actuallyAdded = new List<string>();
                             foreach (var ext in matched)
                             {
+                                var extraName = ext.Name + " (extra)";
+                                // Duplicate prevention: skip if already in cart
+                                if (state.Items.Any(i => string.Equals(i.Name, extraName, StringComparison.OrdinalIgnoreCase)))
+                                    continue;
                                 state.Items.Add(new ConversationItemEntry
                                 {
-                                    Name = ext.Name + " (extra)",
+                                    Name = extraName,
                                     Quantity = 1,
                                     UnitPrice = ext.AdditivePrice ?? 0m
                                 });
+                                actuallyAdded.Add(ext.Name);
                             }
                             state.ExtrasFlowActive = false;
                             state.AvailableExtras = null;
-                            var addedNames = string.Join(", ", matched.Select(e => e.Name));
                             var summaryReply = BuildOrderReplyFromState(state, _bcvRate);
+                            var confirmText = actuallyAdded.Count > 0
+                                ? $"\u2705 {string.Join(", ", actuallyAdded)} agregado(s).\n\n"
+                                : "Ya lo tienes en tu pedido \ud83d\udc4d\n\n";
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = $"\u2705 {addedNames} agregado(s).\n\n" + summaryReply.Body,
+                                Body = confirmText + summaryReply.Body,
                                 Buttons = summaryReply.Buttons,
                                 PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -778,7 +786,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     {
                         var isNoUpsell = t is "no" or "nada" or "nada mas" or "nada más"
                             or "no gracias" or "continuar" or "sigue" or "dale" or "listo"
-                            or "ok" or "eso" or "eso es";
+                            or "ok" or "ya" or "eso" or "eso es";
 
                         if (isNoUpsell)
                         {
@@ -798,23 +806,30 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         var matched = MatchUpsellsFromText(t, state.AvailableUpsells);
                         if (matched.Count > 0)
                         {
+                            var actuallyAdded = new List<string>();
                             foreach (var ups in matched)
                             {
+                                // Duplicate prevention: skip if item already in cart
+                                if (state.Items.Any(i => string.Equals(i.Name, ups.Name, StringComparison.OrdinalIgnoreCase)))
+                                    continue;
                                 state.Items.Add(new ConversationItemEntry
                                 {
                                     Name = ups.Name,
                                     Quantity = 1,
                                     UnitPrice = ups.Price
                                 });
+                                actuallyAdded.Add(ups.Name);
                             }
                             state.UpsellFlowActive = false;
                             state.AvailableUpsells = null;
-                            var addedNames = string.Join(", ", matched.Select(u => u.Name));
                             var summaryReply = BuildOrderReplyFromState(state, _bcvRate);
+                            var confirmText = actuallyAdded.Count > 0
+                                ? $"\u2705 {string.Join(", ", actuallyAdded)} agregado(s).\n\n"
+                                : "Ya lo tienes en tu pedido \ud83d\udc4d\n\n";
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = $"\u2705 {addedNames} agregado(s).\n\n" + summaryReply.Body,
+                                Body = confirmText + summaryReply.Body,
                                 Buttons = summaryReply.Buttons,
                                 PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -841,7 +856,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         && state.Items.Count > 0 && string.IsNullOrWhiteSpace(state.DeliveryType))
                     {
                         var isContinue = t is "continuar" or "sigue" or "dale" or "ok"
-                            or "listo" or "eso es" or "eso" or "si" or "sí"
+                            or "listo" or "ya" or "eso es" or "eso" or "si" or "sí"
                             or "esta bien" or "está bien" or "no" or "nada" or "nada mas"
                             or "nada más" or "no gracias";
                         var isExtras = t is "extras" or "extra" or "agregar extras"

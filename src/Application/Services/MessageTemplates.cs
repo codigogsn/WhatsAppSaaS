@@ -335,6 +335,7 @@ internal static class Msg
         var cat = ResolveCategoryKey(itemName);
         return cat switch
         {
+            "extras" => 8,
             "hamburguesas" => 1,
             "perros calientes" => 2,
             "papas" => 3,
@@ -362,11 +363,13 @@ internal static class Msg
         if (n.Contains("salsa")) return "salsas";
         if (n.Contains("coca") || n.Contains("refresco") || n.Contains("bebida") || n.Contains("jugo")
             || n.Contains("agua") || n.Contains("pepsi") || n.Contains("malta") || n.Contains("te ")) return "bebidas";
+        if (n.Contains("(extra)")) return "extras";
         return "";
     }
 
     private static string CategoryEmoji(string catKey) => catKey switch
     {
+        "extras" => "\u2728",
         "hamburguesas" => "\ud83c\udf54",
         "perros calientes" => "\ud83c\udf2d",
         "papas" => "\ud83c\udf5f",
@@ -378,6 +381,7 @@ internal static class Msg
 
     private static string CategoryDisplayName(string catKey) => catKey switch
     {
+        "extras" => "Extras",
         "hamburguesas" => "Hamburguesas",
         "perros calientes" => "Perros Calientes",
         "papas" => "Papas",
