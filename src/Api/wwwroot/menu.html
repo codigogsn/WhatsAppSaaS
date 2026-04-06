@@ -578,66 +578,89 @@
   <!-- ═══ TAB: Extras ═══ -->
   <div id="tab-extras" class="section-panel">
     <div class="card">
-      <h3>Crear Extra</h3>
-      <div class="helper">Un extra modifica un producto existente (ej: queso extra, tocineta). Precio aditivo al producto base.</div>
+      <h3>Nuevo Extra</h3>
+      <div class="helper">Un extra se suma al producto base (ej: queso extra +$1.50, tocineta +$2.00). El precio se agrega al del producto.</div>
       <div class="row">
-        <input id="newExtraName" placeholder="Nombre del extra" style="width:180px;" />
-        <input id="newExtraPrice" type="number" step="0.01" placeholder="Precio adicional" style="width:120px;" />
-        <input id="newExtraOrder" type="number" value="0" style="width:60px;" placeholder="Orden" />
+        <input id="newExtraName" placeholder="Ej: Queso extra" style="width:180px;" />
+        <input id="newExtraPrice" type="number" step="0.01" placeholder="+$0.00" style="width:100px;" />
+        <input id="newExtraOrder" type="number" value="0" style="width:60px;" title="Orden de aparicion" />
       </div>
-      <div class="row">
-        <label class="small muted" style="font-weight:600;">Productos:</label>
-        <select id="extraItemSelect" multiple style="min-width:260px;height:70px;"></select>
-        <label class="small muted" style="font-weight:600;margin-left:8px;">Categorias:</label>
-        <select id="extraCatSelect" multiple style="min-width:200px;height:70px;"></select>
+      <div class="row" style="gap:14px;">
+        <div>
+          <label class="small muted" style="font-weight:600;display:block;margin-bottom:4px;">Aplica a productos (Ctrl+click):</label>
+          <select id="extraItemSelect" multiple style="min-width:260px;height:70px;"></select>
+        </div>
+        <div>
+          <label class="small muted" style="font-weight:600;display:block;margin-bottom:4px;">Aplica a categorias:</label>
+          <select id="extraCatSelect" multiple style="min-width:200px;height:70px;"></select>
+        </div>
       </div>
-      <div class="row" style="margin-top:6px;">
-        <button class="primary" onclick="createExtra()">+ Crear Extra</button>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnCreateExtra" class="primary" onclick="createExtra()">+ Crear Extra</button>
+        <span class="small muted">Puedes vincular a productos, categorias o ambos.</span>
       </div>
     </div>
-    <div class="card">
+    <div class="card" id="extrasListCard">
       <h3>Extras Configurados</h3>
-      <div class="helper">Extras activos para este negocio.</div>
-      <table>
+      <table id="extrasTable">
         <thead><tr><th>Nombre</th><th>Precio +</th><th>Orden</th><th>Estado</th><th>Productos</th><th>Categorias</th><th>Accion</th></tr></thead>
         <tbody id="extrasBody"></tbody>
       </table>
-      <div id="extrasEmpty" class="muted small" style="padding:16px 0;text-align:center;display:none;">No hay extras configurados</div>
+      <div id="extrasEmpty" style="padding:32px 16px;text-align:center;display:none;">
+        <div style="font-size:28px;margin-bottom:8px;">🧩</div>
+        <div style="font-weight:600;font-size:14px;color:var(--text);margin-bottom:4px;">Sin extras todavia</div>
+        <div class="small muted">Los extras modifican productos existentes (ej: queso extra, tocineta).<br>Crea el primero arriba para empezar.</div>
+      </div>
     </div>
   </div>
 
   <!-- ═══ TAB: Upsells ═══ -->
   <div id="tab-upsells" class="section-panel">
     <div class="card">
-      <h3>Crear Regla de Upsell</h3>
-      <div class="helper">Un upsell sugiere un producto adicional cuando el cliente ordena de una categoria (ej: ordena hamburguesa → sugerir bebida).</div>
-      <div class="row">
-        <label class="small muted" style="font-weight:600;">Cuando ordena de:</label>
-        <select id="upsellSourceCat" style="min-width:200px;"></select>
+      <h3>Nueva Regla de Upsell</h3>
+      <div class="helper">Cuando un cliente ordena de una categoria, el bot puede sugerir un producto adicional para aumentar el ticket (ej: "hamburguesa" → sugerir "bebida").</div>
+      <div class="row" style="gap:14px;">
+        <div>
+          <label class="small muted" style="font-weight:600;display:block;margin-bottom:4px;">Cuando ordena de:</label>
+          <select id="upsellSourceCat" style="min-width:220px;"></select>
+        </div>
+        <div>
+          <label class="small muted" style="font-weight:600;display:block;margin-bottom:4px;">Sugerir este producto:</label>
+          <select id="upsellSuggestItem" style="min-width:220px;">
+            <option value="">(Usar texto libre)</option>
+          </select>
+        </div>
       </div>
-      <div class="row">
-        <label class="small muted" style="font-weight:600;">Sugerir producto:</label>
-        <select id="upsellSuggestItem" style="min-width:200px;">
-          <option value="">(Texto libre)</option>
-        </select>
+      <div class="row" style="gap:14px;">
+        <div>
+          <label class="small muted" style="font-weight:600;display:block;margin-bottom:4px;">Texto alternativo:</label>
+          <input id="upsellLabel" placeholder="Ej: Agrega unas papas fritas" style="width:240px;" title="Se usa si no hay producto vinculado" />
+        </div>
+        <div>
+          <label class="small muted" style="font-weight:600;display:block;margin-bottom:4px;">Mensaje al cliente (opcional):</label>
+          <input id="upsellMessage" placeholder="Ej: Te gustan unas papas con eso?" style="width:260px;" />
+        </div>
+        <div>
+          <label class="small muted" style="font-weight:600;display:block;margin-bottom:4px;">Orden:</label>
+          <input id="upsellOrder" type="number" value="0" style="width:60px;" />
+        </div>
       </div>
-      <div class="row">
-        <input id="upsellLabel" placeholder="Etiqueta sugerencia (si no hay producto)" style="width:220px;" />
-        <input id="upsellMessage" placeholder="Mensaje personalizado (opcional)" style="width:260px;" />
-        <input id="upsellOrder" type="number" value="0" style="width:60px;" placeholder="Orden" />
-      </div>
-      <div class="row" style="margin-top:6px;">
-        <button class="primary" onclick="createUpsell()">+ Crear Upsell</button>
+      <div class="row" style="margin-top:8px;">
+        <button id="btnCreateUpsell" class="primary" onclick="createUpsell()">+ Crear Upsell</button>
+        <span class="small muted">Vincula un producto del menu o usa texto libre como alternativa.</span>
       </div>
     </div>
-    <div class="card">
+    <div class="card" id="upsellsListCard">
       <h3>Reglas de Upsell</h3>
-      <div class="helper">Upsells activos para este negocio.</div>
-      <table>
-        <thead><tr><th>Categoria Origen</th><th>Producto Sugerido</th><th>Etiqueta</th><th>Mensaje</th><th>Orden</th><th>Estado</th><th>Accion</th></tr></thead>
+      <table id="upsellsTable">
+        <thead><tr><th>Categoria Origen</th><th>Producto Sugerido</th><th>Texto Alternativo</th><th>Mensaje</th><th>Orden</th><th>Estado</th><th>Accion</th></tr></thead>
         <tbody id="upsellsBody"></tbody>
       </table>
-      <div id="upsellsEmpty" class="muted small" style="padding:16px 0;text-align:center;display:none;">No hay reglas de upsell configuradas</div>
+      <div id="upsellsEmpty" style="padding:32px 16px;text-align:center;display:none;">
+        <div style="font-size:28px;margin-bottom:8px;">📈</div>
+        <div style="font-weight:600;font-size:14px;color:var(--text);margin-bottom:4px;">Sin upsells todavia</div>
+        <div class="small muted">Los upsells sugieren productos adicionales para aumentar el ticket.<br>Crea la primera regla arriba para empezar.</div>
+      </div>
     </div>
   </div>
 
@@ -1081,13 +1104,22 @@ function showToast(msg){
 }
 
 // ═══ Tab switching ═══
+var _activeTab='products';
 function switchTab(tab){
+  _activeTab=tab;
   document.querySelectorAll('.section-tab').forEach(function(t){ t.classList.remove('active'); });
   document.querySelectorAll('.section-panel').forEach(function(p){ p.classList.remove('active'); });
   document.querySelector('.section-tab[onclick*="\''+tab+'\'"]').classList.add('active');
   document.getElementById('tab-'+tab).classList.add('active');
   if(tab==='extras' && bid()) loadExtras();
   if(tab==='upsells' && bid()) loadUpsells();
+}
+function setLoading(btnId,loading){
+  var btn=document.getElementById(btnId);
+  if(!btn) return;
+  btn.disabled=loading;
+  if(loading){ btn._origText=btn.textContent; btn.textContent='Guardando...'; }
+  else if(btn._origText){ btn.textContent=btn._origText; }
 }
 
 // ═══ Extras ═══
@@ -1132,7 +1164,7 @@ async function loadMenuDataForSelectors(){
     }
   }
   if(upsellItemSel){
-    upsellItemSel.innerHTML='<option value="">(Texto libre)</option>';
+    upsellItemSel.innerHTML='<option value="">(Usar texto libre)</option>';
     for(var m=0;m<_menuItemsCache.length;m++){
       var o4=document.createElement('option');
       o4.value=_menuItemsCache[m].id; o4.textContent=_menuItemsCache[m].name;
@@ -1153,27 +1185,29 @@ async function loadExtras(){
     if(!res.ok){ empty.style.display='block'; empty.textContent='Error cargando extras'; return; }
     var list=await res.json();
     _extrasCache=list;
-    if(!list.length){ empty.style.display='block'; tbody.parentElement.style.display='none'; return; }
+    var tbl=document.getElementById('extrasTable');
+    if(!list.length){ empty.style.display='block'; tbl.style.display='none'; return; }
     empty.style.display='none';
-    tbody.parentElement.style.display='';
+    tbl.style.display='';
     var itemMap={}, catMap={};
     for(var i=0;i<_menuItemsCache.length;i++) itemMap[_menuItemsCache[i].id]=_menuItemsCache[i].name;
     for(var j=0;j<_menuCatsCache.length;j++) catMap[_menuCatsCache[j].id]=_menuCatsCache[j].name;
     for(var k=0;k<list.length;k++){
       var e=list[k];
-      var prodNames=(e.menuItemIds||[]).map(function(id){return '<span class="pill">'+esc(itemMap[id]||id.slice(0,8))+'</span>';}).join(' ')||'<span class="muted">—</span>';
-      var catNames=(e.menuCategoryIds||[]).map(function(id){return '<span class="pill">'+esc(catMap[id]||id.slice(0,8))+'</span>';}).join(' ')||'<span class="muted">—</span>';
+      var prodNames=(e.menuItemIds||[]).map(function(id){return '<span class="pill">'+esc(itemMap[id]||id.slice(0,8))+'</span>';}).join(' ')||'<span class="muted small">sin vincular</span>';
+      var catNames=(e.menuCategoryIds||[]).map(function(id){return '<span class="pill">'+esc(catMap[id]||id.slice(0,8))+'</span>';}).join(' ')||'<span class="muted small">sin vincular</span>';
       var tr=document.createElement('tr');
+      if(!e.isActive) tr.style.opacity='0.55';
       tr.innerHTML='<td><b>'+esc(e.name)+'</b></td>'+
-        '<td>'+(e.additivePrice!=null?'$'+e.additivePrice.toFixed(2):'<span class="muted">—</span>')+'</td>'+
+        '<td>'+(e.additivePrice!=null?'+$'+e.additivePrice.toFixed(2):'<span class="muted">—</span>')+'</td>'+
         '<td>'+e.sortOrder+'</td>'+
         '<td><span class="status-pill '+(e.isActive?'on':'off')+'">'+(e.isActive?'Activo':'Inactivo')+'</span></td>'+
         '<td>'+prodNames+'</td>'+
         '<td>'+catNames+'</td>'+
-        '<td>'+
-          '<button onclick="editExtraInline(\''+e.id+'\')">Editar</button> '+
-          '<button onclick="toggleExtra(\''+e.id+'\')">'+(e.isActive?'Desactivar':'Activar')+'</button> '+
-          '<button onclick="deleteExtra(\''+e.id+'\')" style="color:var(--danger);">Eliminar</button>'+
+        '<td style="white-space:nowrap;">'+
+          '<button onclick="editExtraInline(\''+e.id+'\')" style="font-size:12px;">Editar</button> '+
+          '<button onclick="toggleExtra(\''+e.id+'\')" style="font-size:12px;">'+(e.isActive?'Desactivar':'Activar')+'</button> '+
+          '<button onclick="deleteExtra(\''+e.id+'\')" style="color:var(--danger);font-size:12px;">Eliminar</button>'+
         '</td>';
       tbody.appendChild(tr);
     }
@@ -1275,6 +1309,7 @@ async function createExtra(){
   var catSel=document.getElementById('extraCatSelect');
   var menuItemIds=Array.from(itemSel.selectedOptions).map(function(o){return o.value;});
   var menuCategoryIds=Array.from(catSel.selectedOptions).map(function(o){return o.value;});
+  setLoading('btnCreateExtra',true);
   try{
     var res=await fetch('/api/admin/extras?businessId='+bid(),{
       method:'POST', headers:hdrs(),
@@ -1289,9 +1324,10 @@ async function createExtra(){
     document.getElementById('newExtraPrice').value='';
     document.getElementById('newExtraOrder').value='0';
     itemSel.selectedIndex=-1; catSel.selectedIndex=-1;
-    showToast('Extra creado correctamente','success');
+    showToast('Extra creado','success');
     await loadExtras();
   }catch(err){ showToast('Error: '+err.message,'error'); }
+  finally{ setLoading('btnCreateExtra',false); }
 }
 
 // ═══ Upsells ═══
@@ -1307,22 +1343,24 @@ async function loadUpsells(){
     if(!res.ok){ empty.style.display='block'; empty.textContent='Error cargando upsells'; return; }
     var list=await res.json();
     _upsellsCache=list;
-    if(!list.length){ empty.style.display='block'; tbody.parentElement.style.display='none'; return; }
+    var tbl=document.getElementById('upsellsTable');
+    if(!list.length){ empty.style.display='block'; tbl.style.display='none'; return; }
     empty.style.display='none';
-    tbody.parentElement.style.display='';
+    tbl.style.display='';
     for(var i=0;i<list.length;i++){
       var u=list[i];
       var tr=document.createElement('tr');
+      if(!u.isActive) tr.style.opacity='0.55';
       tr.innerHTML='<td>'+esc(u.sourceCategoryName||'—')+'</td>'+
-        '<td>'+(u.suggestedMenuItemName?'<b>'+esc(u.suggestedMenuItemName)+'</b>':'<span class="muted">—</span>')+'</td>'+
-        '<td>'+esc(u.suggestionLabel||'—')+'</td>'+
+        '<td>'+(u.suggestedMenuItemName?'<b>'+esc(u.suggestedMenuItemName)+'</b>':'<span class="muted small">sin vincular</span>')+'</td>'+
+        '<td>'+esc(u.suggestionLabel||'<span class="muted">—</span>')+'</td>'+
         '<td class="muted small">'+esc(u.customMessage||'—')+'</td>'+
         '<td>'+u.sortOrder+'</td>'+
         '<td><span class="status-pill '+(u.isActive?'on':'off')+'">'+(u.isActive?'Activo':'Inactivo')+'</span></td>'+
-        '<td>'+
-          '<button onclick="editUpsellInline(\''+u.id+'\')">Editar</button> '+
-          '<button onclick="toggleUpsell(\''+u.id+'\')">'+(u.isActive?'Desactivar':'Activar')+'</button> '+
-          '<button onclick="deleteUpsell(\''+u.id+'\')" style="color:var(--danger);">Eliminar</button>'+
+        '<td style="white-space:nowrap;">'+
+          '<button onclick="editUpsellInline(\''+u.id+'\')" style="font-size:12px;">Editar</button> '+
+          '<button onclick="toggleUpsell(\''+u.id+'\')" style="font-size:12px;">'+(u.isActive?'Desactivar':'Activar')+'</button> '+
+          '<button onclick="deleteUpsell(\''+u.id+'\')" style="color:var(--danger);font-size:12px;">Eliminar</button>'+
         '</td>';
       tbody.appendChild(tr);
     }
@@ -1421,7 +1459,8 @@ async function createUpsell(){
   var label=document.getElementById('upsellLabel').value.trim()||null;
   var message=document.getElementById('upsellMessage').value.trim()||null;
   var order=parseInt(document.getElementById('upsellOrder').value)||0;
-  if(!suggestedItem && !label) return showToast('Selecciona un producto o escribe una etiqueta','warn');
+  if(!suggestedItem && !label) return showToast('Selecciona un producto o escribe un texto alternativo','warn');
+  setLoading('btnCreateUpsell',true);
   try{
     var res=await fetch('/api/admin/upsells?businessId='+bid(),{
       method:'POST', headers:hdrs(),
@@ -1437,9 +1476,10 @@ async function createUpsell(){
     document.getElementById('upsellOrder').value='0';
     document.getElementById('upsellSourceCat').selectedIndex=0;
     document.getElementById('upsellSuggestItem').selectedIndex=0;
-    showToast('Upsell creado correctamente','success');
+    showToast('Upsell creado','success');
     await loadUpsells();
   }catch(err){ showToast('Error: '+err.message,'error'); }
+  finally{ setLoading('btnCreateUpsell',false); }
 }
 
 // Init
