@@ -1696,6 +1696,7 @@
     .ds-nav-item.active { background: var(--accent-subtle); color: var(--accent); font-weight: 600; }
     .ds-nav-icon { width: 18px; text-align: center; font-size: 13px; flex-shrink: 0; }
     .ds-nav-separator { height: 1px; background: var(--border-light); margin: 6px 8px; }
+    .ds-biz-status { display:block; padding:4px 10px; font-size:10.5px; color:var(--muted); font-weight:500; }
     .ds-nav-item .ds-badge {
       margin-left: auto; font-size: 10px; font-weight: 600; padding: 1px 6px;
       border-radius: 99px; background: var(--success-bg); color: var(--success);
@@ -1732,7 +1733,7 @@
     </div>
   </div>
 
-  <!-- Nav Bar: Business Selector -->
+  <!-- Nav Bar: Business Selector + Operational Controls -->
   <div class="nav-bar">
     <label>Negocio:</label>
     <div class="biz-selector-area">
@@ -1741,15 +1742,15 @@
       </select>
       <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:16px;padding:4px 8px;">&#x21bb;</button>
     </div>
-    <button class="primary" onclick="openCreateBiz()" id="btnNewBiz">+ Nuevo Negocio</button>
-    <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
-    <button onclick="openMenuManager()" id="btnMenuMgr" style="display:none;">Menu Manager</button>
-    <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
-    <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
     <span id="selectedBizStatus" class="small"></span>
-    <button onclick="openDashboardConfig()" id="btnDashConfig" title="Personalizar dashboard" style="font-size:14px;padding:4px 10px;">&#9881;</button>
+    <!-- Hidden: keep old button refs so existing JS doesn't break -->
+    <button id="btnNewBiz" style="display:none;"></button>
+    <button id="btnBizAdmin" style="display:none;"></button>
+    <button id="btnMenuMgr" style="display:none;"></button>
+    <button id="btnUsersAdmin" style="display:none;"></button>
+    <button id="btnCustomers" style="display:none;"></button>
+    <button id="btnDashConfig" style="display:none;"></button>
     <span style="flex:1;"></span>
-    <span class="muted small">API: <code id="baseUrl"></code></span>
     <label class="toggle-switch" title="Auto-refresh cada 10s">
       <input type="checkbox" id="autoRefreshToggle" onchange="onAutoToggle(this.checked)">
       <span class="toggle-track"></span>
@@ -1771,13 +1772,15 @@
           <div class="ds-profile-role" id="dsRole">—</div>
         </div>
       </div>
-      <button class="ds-nav-item" onclick="openCreateBiz()"><span class="ds-nav-icon">+</span>Nuevo Negocio</button>
-      <button class="ds-nav-item" onclick="toggleBizPanel()" id="dsBtnBizAdmin" style="display:none;"><span class="ds-nav-icon">&#9881;</span>Administrar Negocio</button>
-      <button class="ds-nav-item" onclick="openMenuManager()" id="dsBtnMenuMgr" style="display:none;"><span class="ds-nav-icon">&#9776;</span>Menu Manager</button>
-      <button class="ds-nav-item" onclick="toggleUsersPanel()" id="dsBtnUsers" style="display:none;"><span class="ds-nav-icon">&#9679;</span>Usuarios</button>
-      <button class="ds-nav-item" onclick="toggleCustomersPanel()"><span class="ds-nav-icon">&#9734;</span>Customers</button>
+      <button class="ds-nav-item active" onclick="dsNavigate(this,'dashboard')" data-dsnav="dashboard"><span class="ds-nav-icon">&#9632;</span>Dashboard</button>
+      <button class="ds-nav-item" onclick="dsNavigate(this,'newbiz');openCreateBiz();" data-dsnav="newbiz"><span class="ds-nav-icon">+</span>Nuevo Negocio</button>
+      <button class="ds-nav-item" onclick="dsNavigate(this,'bizadmin');toggleBizPanel();" id="dsBtnBizAdmin" style="display:none;" data-dsnav="bizadmin"><span class="ds-nav-icon">&#9881;</span>Administrar</button>
+      <button class="ds-nav-item" onclick="dsNavigate(this,'menu');openMenuManager();" id="dsBtnMenuMgr" style="display:none;" data-dsnav="menu"><span class="ds-nav-icon">&#9776;</span>Menu Manager</button>
+      <button class="ds-nav-item" onclick="dsNavigate(this,'users');toggleUsersPanel();" id="dsBtnUsers" style="display:none;" data-dsnav="users"><span class="ds-nav-icon">&#9679;</span>Usuarios</button>
+      <button class="ds-nav-item" onclick="dsNavigate(this,'customers');toggleCustomersPanel();" data-dsnav="customers"><span class="ds-nav-icon">&#9734;</span>Customers</button>
       <div class="ds-nav-separator"></div>
-      <button class="ds-nav-item" onclick="openDashboardConfig()"><span class="ds-nav-icon">&#9881;</span>Settings</button>
+      <span class="ds-biz-status" id="dsBizStatus"></span>
+      <button class="ds-nav-item" onclick="openDashboardConfig()" data-dsnav="settings"><span class="ds-nav-icon">&#9881;</span>Settings</button>
     </div>
   </div>
   <div class="app-container" style="flex:1;min-width:0;">
@@ -2739,6 +2742,16 @@ function updateBizAdminButton(){
   if (dsBiz) dsBiz.style.display = (hasBiz && admin) ? '' : 'none';
   if (dsMenu) dsMenu.style.display = (admin || role === 'Manager') && businessList.length > 0 ? '' : 'none';
   if (dsUsers) dsUsers.style.display = (admin || role === 'Manager') ? '' : 'none';
+  // Sidebar business status
+  var dsBizStatus = document.getElementById('dsBizStatus');
+  if (dsBizStatus) {
+    if (hasBiz) {
+      var biz = businessList.find(function(b){ return b.id === bid; });
+      dsBizStatus.innerHTML = biz ? '<span style="color:var(--success);">&#9679;</span> ' + (biz.name||'').split(' - ').pop() : '';
+    } else {
+      dsBizStatus.textContent = '';
+    }
+  }
 }
 
 // ── BCV exchange rate (fetched once per refresh cycle) ──
@@ -5063,6 +5076,12 @@ document.getElementById('baseUrl').textContent = location.origin;
 if (isStaffMode()) { localStorage.removeItem('ADMIN_KEY'); }
 applyRoleBadge();
 updateLoginUI();
+// Sidebar navigation active state
+function dsNavigate(btn, section) {
+  document.querySelectorAll('.ds-nav-item').forEach(function(b){ b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
+}
+
 // Populate sidebar profile
 (function initSidebarProfile(){
   var u = getJwtUser();
