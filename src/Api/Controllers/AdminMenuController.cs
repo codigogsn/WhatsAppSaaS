@@ -332,21 +332,23 @@ public sealed class AdminMenuController : ControllerBase
             // Collect item IDs to batch-load aliases
             var itemRows = new List<(Guid Id, string Name, decimal Price, string? Description,
                                      bool IsAvailable, int SortOrder, Guid CategoryId, string CategoryName)>();
-            using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
+            using (var reader = await cmd.ExecuteReaderAsync(ct))
             {
-                var descOrd = reader.GetOrdinal("Description");
-                itemRows.Add((
-                    reader.GetGuid(reader.GetOrdinal("Id")),
-                    reader.GetString(reader.GetOrdinal("Name")),
-                    reader.GetDecimal(reader.GetOrdinal("Price")),
-                    reader.IsDBNull(descOrd) ? null : reader.GetString(descOrd),
-                    ParseBool(reader["IsAvailable"]),
-                    reader.GetInt32(reader.GetOrdinal("SortOrder")),
-                    reader.GetGuid(reader.GetOrdinal("CategoryId")),
-                    reader.GetString(reader.GetOrdinal("CategoryName"))
-                ));
-            }
+                while (await reader.ReadAsync(ct))
+                {
+                    var descOrd = reader.GetOrdinal("Description");
+                    itemRows.Add((
+                        reader.GetGuid(reader.GetOrdinal("Id")),
+                        reader.GetString(reader.GetOrdinal("Name")),
+                        reader.GetDecimal(reader.GetOrdinal("Price")),
+                        reader.IsDBNull(descOrd) ? null : reader.GetString(descOrd),
+                        ParseBool(reader["IsAvailable"]),
+                        reader.GetInt32(reader.GetOrdinal("SortOrder")),
+                        reader.GetGuid(reader.GetOrdinal("CategoryId")),
+                        reader.GetString(reader.GetOrdinal("CategoryName"))
+                    ));
+                }
+            } // reader disposed here — connection free for alias query
 
             // Load aliases for all items in one query
             var aliases = new Dictionary<Guid, List<object>>();
