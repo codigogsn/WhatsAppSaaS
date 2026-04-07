@@ -825,12 +825,12 @@
       letter-spacing: .6px; font-weight: 500; opacity: .85;
     }
     .hero-stat .value {
-      font-size: 32px; font-weight: 600; color: var(--text);
-      line-height: 1.2; letter-spacing: -.03em; white-space: nowrap;
+      font-size: 26px; font-weight: 700; color: var(--text);
+      line-height: 1.15; letter-spacing: -.02em; white-space: nowrap;
       font-variant-numeric: tabular-nums;
     }
     .hero-stat-primary .value {
-      font-size: 32px; font-weight: 600;
+      font-size: 28px; font-weight: 700;
     }
     .hero-stat-secondary {
       margin-top: auto; padding-top: 16px;
@@ -2204,7 +2204,7 @@ Tipo: burger"></textarea>
       </select>
       <button class="primary" onclick="loadCrm()">Load</button>
     </div>
-    <div id="crmBody" style="font-size:12px;color:var(--muted);">Click Load to view customers.</div>
+    <div id="crmBody" style="font-size:13px;color:var(--muted);text-align:center;padding:24px 0;">Sin datos de clientes. Presiona <b>Load</b> para cargar.</div>
   </div>
 
   <!-- Human Handoff Inbox -->
@@ -5113,30 +5113,12 @@ async function sendPromotion(){
     </div>
     <div class="dcp-body">
       <div class="dcp-sidebar">
-        <button class="dcp-nav-item active" onclick="dcpNav(this,'layout')"><span class="dcp-nav-icon">&#9638;</span>Layout</button>
-        <button class="dcp-nav-item" onclick="dcpNav(this,'appearance')"><span class="dcp-nav-icon">&#9788;</span>Apariencia</button>
-        <button class="dcp-nav-item" onclick="dcpNav(this,'branding')"><span class="dcp-nav-icon">&#9733;</span>Branding</button>
+        <button class="dcp-nav-item active" onclick="dcpNav(this,'layout')"><span class="dcp-nav-icon">&#9638;</span>Dashboard</button>
       </div>
       <div class="dcp-content">
         <div id="dcpSectionLayout">
           <div class="dcp-section-title">Personalizar Dashboard</div>
           <div class="dcp-section-desc">Configura tu experiencia de dashboard.</div>
-        </div>
-        <div id="dcpSectionAppearance" style="display:none;">
-          <div class="dcp-section-title">Apariencia</div>
-          <div class="dcp-section-desc">Personaliza colores y estilo visual.</div>
-          <div class="dcp-placeholder">
-            <div class="dcp-placeholder-icon">&#127912;</div>
-            <div class="dcp-placeholder-text">Proximamente: temas, colores y tipografia.</div>
-          </div>
-        </div>
-        <div id="dcpSectionBranding" style="display:none;">
-          <div class="dcp-section-title">Branding</div>
-          <div class="dcp-section-desc">Logo y colores de tu negocio.</div>
-          <div class="dcp-placeholder">
-            <div class="dcp-placeholder-icon">&#9733;</div>
-            <div class="dcp-placeholder-text">Proximamente: sube tu logo y elige tu color de marca.</div>
-          </div>
         </div>
       </div>
     </div>
