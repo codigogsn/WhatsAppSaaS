@@ -1658,6 +1658,58 @@
       .assist-dock { width: calc(100vw - 24px); right: 12px; bottom: 12px; max-height: 85vh; border-radius: 16px; }
       .assist-launcher { bottom: 16px; right: 16px; }
     }
+
+    /* ═══ Left Nav Shell ═══ */
+    .dash-layout { display: flex; min-height: 0; }
+    .dash-sidebar {
+      width: 220px; flex-shrink: 0; padding: 16px 10px;
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .dash-sidebar-inner {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius, 16px);
+      padding: 14px 10px;
+      box-shadow: var(--shadow);
+      position: sticky; top: 12px;
+    }
+    /* Profile block */
+    .ds-profile { display: flex; align-items: center; gap: 10px; padding: 4px 8px 12px; border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
+    .ds-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--accent-subtle); color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700; flex-shrink: 0;
+    }
+    .ds-profile-info { min-width: 0; }
+    .ds-profile-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .ds-profile-role { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 500; }
+    /* Nav items */
+    .ds-nav-item {
+      display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+      border-radius: 8px; cursor: pointer; font-size: 12.5px; font-weight: 500;
+      color: var(--text-secondary); border: none; background: none; box-shadow: none;
+      text-align: left; width: 100%; transition: background .15s, color .15s;
+      white-space: nowrap;
+    }
+    .ds-nav-item:hover { background: var(--accent-subtle); color: var(--text); transform: none; }
+    .ds-nav-item.active { background: var(--accent-subtle); color: var(--accent); font-weight: 600; }
+    .ds-nav-icon { width: 18px; text-align: center; font-size: 13px; flex-shrink: 0; }
+    .ds-nav-separator { height: 1px; background: var(--border-light); margin: 6px 8px; }
+    .ds-nav-item .ds-badge {
+      margin-left: auto; font-size: 10px; font-weight: 600; padding: 1px 6px;
+      border-radius: 99px; background: var(--success-bg); color: var(--success);
+    }
+    /* Dark mode refinements */
+    [data-theme="dark"] .dash-sidebar-inner {
+      background: var(--card); border-color: var(--border);
+      box-shadow: var(--shadow);
+    }
+    /* Responsive: hide sidebar on small screens */
+    @media (max-width: 900px) {
+      .dash-sidebar { display: none; }
+      .dash-layout { display: block; }
+    }
   </style>
 </head>
 <body>
@@ -1709,7 +1761,26 @@
   </div>
 
   <div class="layout-edit-banner">Modo edicion de layout activo — arrastra los modulos para reordenar. <a href="#" onclick="toggleEditMode();return false;" style="margin-left:8px;">Finalizar</a></div>
-  <div class="app-container">
+  <div class="dash-layout">
+  <div class="dash-sidebar">
+    <div class="dash-sidebar-inner">
+      <div class="ds-profile">
+        <div class="ds-avatar" id="dsAvatar">?</div>
+        <div class="ds-profile-info">
+          <div class="ds-profile-name" id="dsName">—</div>
+          <div class="ds-profile-role" id="dsRole">—</div>
+        </div>
+      </div>
+      <button class="ds-nav-item" onclick="openCreateBiz()"><span class="ds-nav-icon">+</span>Nuevo Negocio</button>
+      <button class="ds-nav-item" onclick="toggleBizPanel()" id="dsBtnBizAdmin" style="display:none;"><span class="ds-nav-icon">&#9881;</span>Administrar Negocio</button>
+      <button class="ds-nav-item" onclick="openMenuManager()" id="dsBtnMenuMgr" style="display:none;"><span class="ds-nav-icon">&#9776;</span>Menu Manager</button>
+      <button class="ds-nav-item" onclick="toggleUsersPanel()" id="dsBtnUsers" style="display:none;"><span class="ds-nav-icon">&#9679;</span>Usuarios</button>
+      <button class="ds-nav-item" onclick="toggleCustomersPanel()"><span class="ds-nav-icon">&#9734;</span>Customers</button>
+      <div class="ds-nav-separator"></div>
+      <button class="ds-nav-item" onclick="openDashboardConfig()"><span class="ds-nav-icon">&#9881;</span>Settings</button>
+    </div>
+  </div>
+  <div class="app-container" style="flex:1;min-width:0;">
 
   <!-- Business Admin Panel (collapsible) -->
   <div id="bizPanel" class="biz-panel" style="display:none;">
@@ -2257,6 +2328,7 @@ Tipo: burger"></textarea>
   </table>
 
   </div><!-- /.app-container -->
+  </div><!-- /.dash-layout -->
 
 <script>
 // ═══ Auth Gate ═══
@@ -2660,6 +2732,13 @@ function updateBizAdminButton(){
   } else {
     statusEl.innerHTML = '';
   }
+  // Sync sidebar nav visibility
+  var dsBiz = document.getElementById('dsBtnBizAdmin');
+  var dsMenu = document.getElementById('dsBtnMenuMgr');
+  var dsUsers = document.getElementById('dsBtnUsers');
+  if (dsBiz) dsBiz.style.display = (hasBiz && admin) ? '' : 'none';
+  if (dsMenu) dsMenu.style.display = (admin || role === 'Manager') && businessList.length > 0 ? '' : 'none';
+  if (dsUsers) dsUsers.style.display = (admin || role === 'Manager') ? '' : 'none';
 }
 
 // ── BCV exchange rate (fetched once per refresh cycle) ──
@@ -4984,6 +5063,19 @@ document.getElementById('baseUrl').textContent = location.origin;
 if (isStaffMode()) { localStorage.removeItem('ADMIN_KEY'); }
 applyRoleBadge();
 updateLoginUI();
+// Populate sidebar profile
+(function initSidebarProfile(){
+  var u = getJwtUser();
+  var avatar = document.getElementById('dsAvatar');
+  var nameEl = document.getElementById('dsName');
+  var roleEl = document.getElementById('dsRole');
+  if (u && nameEl) {
+    var displayName = u.name || u.email || '?';
+    nameEl.textContent = displayName;
+    roleEl.textContent = u.role || '—';
+    if (avatar) avatar.textContent = displayName.charAt(0).toUpperCase();
+  }
+})();
 
 // Set default date filter to today
 const today = new Date().toISOString().slice(0,10);
