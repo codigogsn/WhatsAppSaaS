@@ -25,6 +25,7 @@ public class AppDbContext : DbContext
     public DbSet<ExtraMenuItem> ExtraMenuItems => Set<ExtraMenuItem>();
     public DbSet<ExtraMenuCategory> ExtraMenuCategories => Set<ExtraMenuCategory>();
     public DbSet<UpsellRule> UpsellRules => Set<UpsellRule>();
+    public DbSet<DashboardLayout> DashboardLayouts => Set<DashboardLayout>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -392,6 +393,15 @@ public class AppDbContext : DbContext
 
             b.HasIndex(x => x.BusinessId);
             b.HasIndex(x => x.SourceCategoryId);
+        });
+
+        modelBuilder.Entity<DashboardLayout>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.LayoutJson).IsRequired();
+            b.Property(x => x.UpdatedAtUtc).IsRequired();
+
+            b.HasIndex(x => x.BusinessId).IsUnique();
         });
     }
 }

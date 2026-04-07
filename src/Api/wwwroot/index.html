@@ -2028,7 +2028,7 @@ Tipo: burger"></textarea>
   <!-- Hero KPI Area -->
   <div id="heroKpi" class="hero-kpi">
     <!-- LEFT: Revenue focus -->
-    <div class="hero-panel hero-revenue">
+    <div class="hero-panel hero-revenue" data-module="revenue">
       <div class="hero-panel-title">Revenue</div>
       <div class="hero-stat hero-stat-primary">
         <div class="label">Ventas Hoy</div>
@@ -2045,7 +2045,7 @@ Tipo: burger"></textarea>
     </div>
 
     <!-- CENTER: Business performance -->
-    <div class="hero-panel hero-performance">
+    <div class="hero-panel hero-performance" data-module="performance">
       <div class="hero-panel-title">Performance</div>
       <div class="hero-mini-grid">
         <div class="hero-stat">
@@ -2076,7 +2076,7 @@ Tipo: burger"></textarea>
     </div>
 
     <!-- RIGHT: Operational alerts -->
-    <div class="hero-panel hero-alerts">
+    <div class="hero-panel hero-alerts" data-module="alerts">
       <div class="hero-panel-title">Alerts</div>
       <div class="hero-stat hero-alert-warning">
         <div class="label">Pagos Pendientes</div>
@@ -2100,7 +2100,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Order Status Strip -->
-  <div id="statusStrip" class="status-strip">
+  <div id="statusStrip" class="status-strip" data-module="statusStrip">
     <div class="status-chip"><div class="status-chip-label">Cargados</div><div class="status-chip-value" id="kpiTotal">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pending</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparing</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
@@ -2110,7 +2110,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Extended Analytics -->
-  <details id="extAnalytics" class="section-panel">
+  <details id="extAnalytics" class="section-panel" data-module="analytics">
     <summary>Analíticas Avanzadas</summary>
 
     <!-- Row A: Operations -->
@@ -2155,7 +2155,7 @@ Tipo: burger"></textarea>
   </details>
 
   <!-- Customers CRM Panel -->
-  <div id="customersPanel" class="biz-panel" style="display:none;">
+  <div id="customersPanel" class="biz-panel" data-module="customers" style="display:none;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
       <h3>Customers</h3>
       <button onclick="toggleCustomersPanel()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>
@@ -2173,7 +2173,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Human Handoff Inbox -->
-  <details id="handoffInbox" class="section-panel handoff-panel" ontoggle="if(this.open)acknowledgeHandoff('inbox_open')">
+  <details id="handoffInbox" class="section-panel handoff-panel" data-module="handoffs" ontoggle="if(this.open)acknowledgeHandoff('inbox_open')">
     <summary>
       Atencion Humana <span id="handoffBadge" class="section-badge section-badge-danger">0</span>
     </summary>
@@ -3929,6 +3929,35 @@ function insightCard(msgOrObj, severity, label) {
 }
 
 // ── Load ──
+// ═══ Dashboard Layout Engine ═══
+var _dashboardLayout = null;
+async function loadDashboardLayout() {
+  try {
+    var jwt = getJwt();
+    if (!jwt || !getBusinessId()) return;
+    var res = await fetch('/api/dashboard/layout', { headers: jwtHeaders() });
+    if (res.ok) {
+      _dashboardLayout = await res.json();
+      applyDashboardLayout();
+    }
+  } catch(e) { console.warn('Layout load failed, using defaults', e); }
+}
+function applyDashboardLayout() {
+  if (!_dashboardLayout || !_dashboardLayout.modules) return;
+  var modules = _dashboardLayout.modules.slice().sort(function(a,b){ return (a.position||0)-(b.position||0); });
+  modules.forEach(function(mod) {
+    var els = document.querySelectorAll('[data-module="'+mod.id+'"]');
+    els.forEach(function(el) {
+      if (mod.visible === false) {
+        el.style.display = 'none';
+      } else {
+        el.style.removeProperty('display');
+      }
+      el.style.order = mod.position || 0;
+    });
+  });
+}
+
 async function load() {
   applyGlobalModeUI();
   // Global mode: founder gets global dashboard, others get nothing
@@ -3936,6 +3965,9 @@ async function load() {
     if (isFounderUser()) { await loadFounderDashboard(); }
     return;
   }
+
+  // Load business-specific dashboard layout (non-blocking)
+  if (!_dashboardLayout) loadDashboardLayout();
 
   if (_loadInProgress) {
     console.log('[AUTOREFRESH] load() called but already in progress — skipping');
