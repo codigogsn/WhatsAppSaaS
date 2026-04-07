@@ -515,6 +515,56 @@
       .settings-body { flex-direction: column; min-height: auto; }
       .settings-sidebar { width: auto; flex-direction: row; border-right: none; border-bottom: 1px solid var(--border-light); overflow-x: auto; }
     }
+    /* ═══ Menu Manager polish (scoped to #menuPanel) ═══ */
+    #menuPanel .settings-section h3 {
+      font-size: 15px; font-weight: 700; letter-spacing: -.01em;
+      margin: 0 0 4px; color: var(--text);
+    }
+    #menuPanel .settings-section .helper {
+      margin-bottom: 14px;
+    }
+    #menuPanel .card {
+      background: var(--surface); border: 1px solid var(--border-light);
+      border-radius: 12px; padding: 16px 18px; margin-bottom: 16px;
+    }
+    [data-theme="dark"] #menuPanel .card {
+      background: var(--surface-2); border-color: var(--border);
+    }
+    #menuPanel table {
+      border-radius: 10px; overflow: hidden;
+      border: 1px solid var(--border-light);
+    }
+    #menuPanel th {
+      font-size: 11px; letter-spacing: .03em; text-transform: uppercase;
+      color: var(--muted); font-weight: 500; padding: 10px 14px;
+      background: var(--surface-2);
+    }
+    #menuPanel td { padding: 10px 14px; }
+    #menuPanel tr { transition: background .15s ease-out; }
+    #menuPanel tr:hover { background: var(--accent-subtle); }
+    [data-theme="dark"] #menuPanel tr:hover { background: rgba(255,255,255,.03); }
+    #menuPanel input,
+    #menuPanel select,
+    #menuPanel textarea {
+      transition: border-color .15s ease-out, box-shadow .15s ease-out;
+    }
+    #menuPanel input:focus,
+    #menuPanel select:focus,
+    #menuPanel textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+    #menuPanel input::placeholder,
+    #menuPanel textarea::placeholder { opacity: .45; }
+    #menuPanel button { transition: all .15s ease-out; }
+    #menuPanel button:hover { transform: translateY(-1px); }
+    #menuPanel button:active { transform: translateY(0) scale(.98); }
+    #menuPanel .primary {
+      box-shadow: 0 2px 6px rgba(0,122,255,.12);
+    }
+    #menuPanel .primary:hover {
+      box-shadow: 0 4px 12px rgba(0,122,255,.18);
+    }
   </style>
 </head>
 <body>
