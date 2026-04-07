@@ -873,6 +873,21 @@
     .hero-alert-danger .value { color: var(--danger) !important; }
     .hero-alerts { justify-content: flex-start; gap: 16px; }
 
+    /* ═══ Data Freshness Indicator ═══ */
+    .freshness-bar {
+      display: flex; justify-content: flex-end; align-items: center;
+      padding: 0 4px 6px; gap: 6px;
+    }
+    .freshness-bar .freshness-text {
+      font-size: 11px; color: var(--muted); font-weight: 400;
+      letter-spacing: .02em;
+    }
+    .freshness-bar .freshness-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--success); flex-shrink: 0;
+    }
+    .freshness-bar .freshness-dot.stale { background: var(--warning); }
+
     /* ═══ Order Status Strip ═══ */
     .status-strip {
       display: flex; gap: 0; flex-wrap: wrap; margin-bottom: 24px;
@@ -1443,6 +1458,18 @@
       .status-actions { flex-direction: column; }
       .status-actions select { min-width: 100%; }
       .nav-bar { padding: 10px 14px; }
+      /* Filters: stack vertically on small screens */
+      .filters .row { flex-direction: column; align-items: stretch; gap: 8px; }
+      .filters .row label { margin-top: 4px; }
+      .filters .row select,
+      .filters .row input { width: 100% !important; min-width: 0; }
+    }
+
+    @media (max-width: 640px) {
+      /* Status strip: allow wrapping, smaller chips */
+      .status-chip { min-width: 70px; padding: 8px 4px; }
+      .status-chip-label { font-size: 9px; }
+      .status-chip-value { font-size: 16px; }
     }
 
     /* ── Assistant Dock ── */
@@ -2046,6 +2073,12 @@ Tipo: burger"></textarea>
 
   </div>
 
+  <!-- Data Freshness -->
+  <div class="freshness-bar" id="freshnessBar">
+    <span class="freshness-dot" id="freshnessDot"></span>
+    <span class="freshness-text" id="freshnessText">—</span>
+  </div>
+
   <!-- Hero KPI Area -->
   <div id="heroKpi" class="hero-kpi" data-module="heroKpi">
     <!-- LEFT: Revenue focus -->
@@ -2303,6 +2336,7 @@ let businessList = []; // cached for admin panel
 const knownOrders = new Set();
 let initialLoadDone = false;
 let _loadInProgress = false;
+let _lastDataUpdate = null;
 let _autoRefreshActive = false;
 let _soundEnabled = localStorage.getItem('SOUND_ENABLED') !== 'false'; // default ON
 let _newOrderIds = new Set(); // track new order IDs for row highlighting
@@ -4528,6 +4562,8 @@ async function load() {
     document.getElementById('msg').textContent = 'Error: ' + err.message;
   } finally {
     _loadInProgress = false;
+    _lastDataUpdate = Date.now();
+    updateFreshnessDisplay();
   }
 }
 
@@ -4982,6 +5018,20 @@ async function submitCreateUser(){
     document.getElementById('createUserMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
   }
 }
+
+// ═══ Data Freshness Display ═══
+function updateFreshnessDisplay() {
+  var el = document.getElementById('freshnessText');
+  var dot = document.getElementById('freshnessDot');
+  if (!el || !_lastDataUpdate) { if (el) el.textContent = '—'; return; }
+  var ago = Math.round((Date.now() - _lastDataUpdate) / 1000);
+  var stale = ago > 60;
+  if (ago < 10) el.textContent = 'Actualizado ahora';
+  else if (ago < 60) el.textContent = 'Actualizado hace ' + ago + ' seg';
+  else el.textContent = 'Actualizado hace ' + Math.round(ago / 60) + ' min';
+  if (dot) { dot.classList.toggle('stale', stale); }
+}
+setInterval(updateFreshnessDisplay, 15000);
 
 // Init
 document.getElementById('baseUrl').textContent = location.origin;
