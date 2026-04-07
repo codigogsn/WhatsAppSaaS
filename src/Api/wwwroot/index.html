@@ -1175,15 +1175,10 @@
       text-transform: uppercase; letter-spacing: .03em;
       white-space: nowrap;
     }
-    /* Visual separator before action buttons */
-    .filters .filter-actions {
-      display: contents;
+    /* Actions row: right-aligned, secondary */
+    .filters .filters-actions-row {
+      justify-content: flex-end; gap: 8px; margin-top: 4px;
     }
-    .filters .filter-actions::before {
-      content: ''; width: 1px; height: 24px;
-      background: var(--border-light); margin: 0 4px;
-    }
-    .filters .muted.small { margin-left: auto; }
 
     /* ═══ Panels ═══ */
     .biz-panel {
@@ -2358,13 +2353,11 @@ Tipo: burger"></textarea>
       <input id="take" type="number" value="50" min="1" max="200" style="width:60px;" />
 
       <button class="primary" onclick="load()">Cargar</button>
-
-      <span class="filter-actions">
-        <button onclick="downloadOrdersCsv()">CSV Orders</button>
-        <button onclick="downloadCustomersCsv()">CSV Customers</button>
-        <button onclick="openPromoModal()" style="background:var(--accent);color:#fff;">Send Promotion</button>
-      </span>
-
+    </div>
+    <div class="row filters-actions-row">
+      <button onclick="downloadOrdersCsv()">CSV Orders</button>
+      <button onclick="downloadCustomersCsv()">CSV Customers</button>
+      <button onclick="openPromoModal()" style="background:var(--accent);color:#fff;">Send Promotion</button>
       <span class="muted small" id="msg"></span>
     </div>
   </div>
