@@ -2229,9 +2229,14 @@ Tipo: burger"></textarea>
         <option value="NeedsHuman">Necesita Humano</option>
       </select>
       <label>Fecha:</label>
-      <input id="dateFrom" type="date" />
+      <select id="datePreset" onchange="applyDatePreset(this.value)" style="width:auto;min-width:0;">
+        <option value="today">Hoy</option>
+        <option value="7d">7 dias</option>
+        <option value="custom">Personalizado</option>
+      </select>
+      <input id="dateFrom" type="date" oninput="document.getElementById('datePreset').value='custom'" />
       <span class="muted small">a</span>
-      <input id="dateTo" type="date" />
+      <input id="dateTo" type="date" oninput="document.getElementById('datePreset').value='custom'" />
       <label>Telefono:</label>
       <input id="phone" placeholder="0414..." style="width:120px;" />
       <label>Order ID:</label>
@@ -2240,11 +2245,11 @@ Tipo: burger"></textarea>
       <input id="take" type="number" value="50" min="1" max="200" style="width:60px;" />
       <button class="primary" onclick="load()">Cargar</button>
     </div>
-    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:6px;">
-      <button onclick="downloadOrdersCsv()">CSV Orders</button>
-      <button onclick="downloadCustomersCsv()">CSV Customers</button>
-      <button onclick="openPromoModal()" style="background:var(--accent);color:#fff;">Send Promotion</button>
-      <span class="muted small" id="msg"></span>
+    <div class="row" style="justify-content:flex-end;align-items:center;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border-light);">
+      <span class="muted small" id="msg" style="margin-right:auto;"></span>
+      <button onclick="downloadOrdersCsv()" style="font-size:12px;padding:6px 12px;">CSV Orders</button>
+      <button onclick="downloadCustomersCsv()" style="font-size:12px;padding:6px 12px;">CSV Customers</button>
+      <button onclick="openPromoModal()" style="background:var(--accent);color:#fff;font-size:12px;padding:6px 12px;">Send Promotion</button>
     </div>
   </div>
 
@@ -4781,6 +4786,21 @@ document.getElementById('baseUrl').textContent = location.origin;
 if (isStaffMode()) { localStorage.removeItem('ADMIN_KEY'); }
 applyRoleBadge();
 updateLoginUI();
+
+// Date preset helper
+function applyDatePreset(preset) {
+  var now = new Date();
+  var toISO = function(d){ return d.toISOString().slice(0,10); };
+  if (preset === 'today') {
+    document.getElementById('dateFrom').value = toISO(now);
+    document.getElementById('dateTo').value = '';
+  } else if (preset === '7d') {
+    var week = new Date(now); week.setDate(week.getDate() - 6);
+    document.getElementById('dateFrom').value = toISO(week);
+    document.getElementById('dateTo').value = toISO(now);
+  }
+  // 'custom' — leave inputs as-is
+}
 
 // Set default date filter to today
 const today = new Date().toISOString().slice(0,10);
