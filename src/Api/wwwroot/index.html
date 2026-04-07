@@ -715,7 +715,7 @@
         linear-gradient(90deg, rgba(255,255,255,.07) 1px, transparent 1px);
     }
 
-    .app-container { max-width: 1320px; margin: 0 auto; padding: 0 24px 48px; position: relative; z-index: 1; }
+    .app-container { max-width: 1320px; margin: 0 auto; padding: 0 24px 48px; position: relative; z-index: 1; display: flex; flex-direction: column; }
     a { color: var(--accent); text-decoration: none; }
     a:hover { opacity: .8; }
     .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
@@ -2214,27 +2214,22 @@ Tipo: burger"></textarea>
         <option value="Cancelled">Cancelado</option>
         <option value="NeedsHuman">Necesita Humano</option>
       </select>
-
       <label>Fecha:</label>
       <input id="dateFrom" type="date" />
       <span class="muted small">a</span>
       <input id="dateTo" type="date" />
-
       <label>Telefono:</label>
       <input id="phone" placeholder="0414..." style="width:120px;" />
-
       <label>Order ID:</label>
       <input id="searchId" placeholder="uuid..." style="width:180px;" />
-
       <label>Take:</label>
       <input id="take" type="number" value="50" min="1" max="200" style="width:60px;" />
-
       <button class="primary" onclick="load()">Cargar</button>
-
+    </div>
+    <div class="row" style="justify-content:flex-end;gap:8px;margin-top:6px;">
       <button onclick="downloadOrdersCsv()">CSV Orders</button>
       <button onclick="downloadCustomersCsv()">CSV Customers</button>
       <button onclick="openPromoModal()" style="background:var(--accent);color:#fff;">Send Promotion</button>
-
       <span class="muted small" id="msg"></span>
     </div>
   </div>
@@ -2774,11 +2769,18 @@ function openMenuManager(){
 
 // ── Business Admin Panel ──
 
+function closeAllPanels(except) {
+  ['bizPanel','usersPanel','customersPanel'].forEach(function(id) {
+    if (id !== except) document.getElementById(id).style.display = 'none';
+  });
+}
+
 function toggleBizPanel(){
   const panel = document.getElementById('bizPanel');
   if (panel.style.display === 'none') {
     const bid = getBusinessId();
     if (!bid) { showToast('Select a business first', 'warn'); return; }
+    closeAllPanels('bizPanel');
     loadBizProfile(bid);
     panel.style.display = '';
   } else {
@@ -4780,6 +4782,7 @@ async function toggleUsersPanel(){
   if (!getBusinessId()) { showToast('Select a business to manage users', 'warn'); return; }
   const panel = document.getElementById('usersPanel');
   if (panel.style.display === 'none') {
+    closeAllPanels('usersPanel');
     panel.style.display = '';
     await loadUsers();
   } else {
@@ -4792,6 +4795,7 @@ function toggleCustomersPanel(){
   if (!getBusinessId()) { showToast('Select a business to view customers', 'warn'); return; }
   const panel = document.getElementById('customersPanel');
   if (panel.style.display === 'none') {
+    closeAllPanels('customersPanel');
     panel.style.display = '';
     loadCrm();
   } else {
