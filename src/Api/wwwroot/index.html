@@ -1427,24 +1427,6 @@
 
     /* Analytics & handoff now use .section-panel styles */
 
-    /* ═══ Drag & Drop (edit mode only) ═══ */
-    .layout-editing [data-module] {
-      outline: 1px dashed var(--border);
-      outline-offset: 2px;
-      cursor: grab;
-      user-select: none;
-    }
-    .layout-editing [data-module]:active { cursor: grabbing; }
-    .layout-editing .drag-over {
-      outline: 2px dashed var(--accent);
-      outline-offset: 2px;
-    }
-    .layout-edit-banner {
-      background: var(--accent-subtle); color: var(--accent);
-      text-align: center; padding: 6px; font-size: 12px; font-weight: 600;
-      letter-spacing: .3px; display: none;
-    }
-    .layout-editing .layout-edit-banner { display: block; }
 
     /* ═══ Responsive ═══ */
     @media (max-width: 768px) {
@@ -1735,7 +1717,6 @@
     </button>
   </div>
 
-  <div class="layout-edit-banner">Modo edicion de layout activo — arrastra los modulos para reordenar. <a href="#" onclick="toggleEditMode();return false;" style="margin-left:8px;">Finalizar</a></div>
   <div class="app-container">
 
   <!-- Business Admin Panel (collapsible) -->
@@ -2080,9 +2061,9 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Hero KPI Area -->
-  <div id="heroKpi" class="hero-kpi" data-module="heroKpi">
+  <div id="heroKpi" class="hero-kpi">
     <!-- LEFT: Revenue focus -->
-    <div class="hero-panel hero-revenue" data-module="revenue">
+    <div class="hero-panel hero-revenue">
       <div class="hero-panel-title">Revenue</div>
       <div class="hero-stat hero-stat-primary">
         <div class="label">Ventas Hoy</div>
@@ -2099,7 +2080,7 @@ Tipo: burger"></textarea>
     </div>
 
     <!-- CENTER: Business performance -->
-    <div class="hero-panel hero-performance" data-module="performance">
+    <div class="hero-panel hero-performance">
       <div class="hero-panel-title">Performance</div>
       <div class="hero-mini-grid">
         <div class="hero-stat">
@@ -2130,7 +2111,7 @@ Tipo: burger"></textarea>
     </div>
 
     <!-- RIGHT: Operational alerts -->
-    <div class="hero-panel hero-alerts" data-module="alerts">
+    <div class="hero-panel hero-alerts">
       <div class="hero-panel-title">Alerts</div>
       <div class="hero-stat hero-alert-warning">
         <div class="label">Pagos Pendientes</div>
@@ -2154,7 +2135,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Order Status Strip -->
-  <div id="statusStrip" class="status-strip" data-module="statusStrip">
+  <div id="statusStrip" class="status-strip">
     <div class="status-chip"><div class="status-chip-label">Cargados</div><div class="status-chip-value" id="kpiTotal">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pending</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparing</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
@@ -2164,7 +2145,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Extended Analytics -->
-  <details id="extAnalytics" class="section-panel" data-module="analytics">
+  <details id="extAnalytics" class="section-panel">
     <summary>Analíticas Avanzadas</summary>
 
     <!-- Row A: Operations -->
@@ -2209,7 +2190,7 @@ Tipo: burger"></textarea>
   </details>
 
   <!-- Customers CRM Panel -->
-  <div id="customersPanel" class="biz-panel" data-module="customers" style="display:none;">
+  <div id="customersPanel" class="biz-panel" style="display:none;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
       <h3>Customers</h3>
       <button onclick="toggleCustomersPanel()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>
@@ -2227,7 +2208,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Human Handoff Inbox -->
-  <details id="handoffInbox" class="section-panel handoff-panel" data-module="handoffs" ontoggle="if(this.open)acknowledgeHandoff('inbox_open')">
+  <details id="handoffInbox" class="section-panel handoff-panel" ontoggle="if(this.open)acknowledgeHandoff('inbox_open')">
     <summary>
       Atencion Humana <span id="handoffBadge" class="section-badge section-badge-danger">0</span>
     </summary>
@@ -3986,214 +3967,10 @@ function insightCard(msgOrObj, severity, label) {
 }
 
 // ── Load ──
-// ═══ Dashboard Layout Engine + Drag & Drop ═══
-var _dashboardLayout = null;
-var _layoutSaveTimer = null;
-var _dragState = { el: null, container: null };
-var _editMode = false;
-
-async function loadDashboardLayout() {
-  try {
-    var jwt = getJwt();
-    if (!jwt || !getBusinessId()) return;
-    var res = await fetch('/api/dashboard/layout', { headers: jwtHeaders() });
-    if (res.ok) {
-      _dashboardLayout = await res.json();
-      applyDashboardLayout();
-    }
-  } catch(e) { console.warn('Layout load failed, using defaults', e); }
-}
-
-function applyDashboardLayout() {
-  if (!_dashboardLayout || !_dashboardLayout.modules) return;
-  var modules = _dashboardLayout.modules.slice().sort(function(a,b){ return (a.position||0)-(b.position||0); });
-  // Reorder hero panels inside heroKpi
-  var heroContainer = document.getElementById('heroKpi');
-  // Reorder top-level modules
-  modules.forEach(function(mod) {
-    var el = document.querySelector('[data-module="'+mod.id+'"]');
-    if (!el) return;
-    if (mod.visible === false) { el.style.display = 'none'; }
-    else { el.style.removeProperty('display'); }
-    el.style.order = mod.position || 0;
-    // Move hero panels within their container
-    if (heroContainer && el.parentElement === heroContainer) {
-      heroContainer.appendChild(el);
-    }
-  });
-  // Sort top-level flex children by order
-  var appContent = document.querySelector('.app-container');
-  if (appContent) {
-    var topModules = Array.from(appContent.children).filter(function(c){ return c.hasAttribute('data-module') || c.id === 'heroKpi'; });
-    topModules.sort(function(a,b){
-      var oa = parseInt(a.style.order)||0, ob = parseInt(b.style.order)||0;
-      return oa - ob;
-    });
-    // Use a reference node to reinsert in order
-    topModules.forEach(function(el){ appContent.appendChild(el); });
-  }
-}
-
-function toggleEditMode() {
-  _editMode = !_editMode;
-  if (_editMode) {
-    enableDragAndDrop();
-    document.body.classList.add('layout-editing');
-  } else {
-    disableDragAndDrop();
-    document.body.classList.remove('layout-editing');
-  }
-  // Update button state in config modal if open
-  var btn = document.getElementById('btnEditLayout');
-  if (btn) btn.textContent = _editMode ? 'Finalizar edicion' : 'Reordenar modulos';
-}
-
-function enableDragAndDrop() {
-  var heroContainer = document.getElementById('heroKpi');
-  if (heroContainer) setupDragContainer(heroContainer, '[data-module]');
-  var appContent = document.querySelector('.app-container');
-  if (appContent) setupDragContainer(appContent, '[data-module], #heroKpi');
-}
-
-function disableDragAndDrop() {
-  document.querySelectorAll('[data-module]').forEach(function(el) {
-    el.draggable = false;
-    el.style.removeProperty('cursor');
-  });
-  // Clean any lingering drag states
-  document.querySelectorAll('.drag-over').forEach(function(el){ el.classList.remove('drag-over'); });
-}
-
-function setupDragContainer(container, selector) {
-  var parts = selector.split(',').map(function(s){ return s.trim(); });
-  var all = new Set();
-  parts.forEach(function(s){
-    container.querySelectorAll(':scope > ' + s).forEach(function(el){ all.add(el); });
-  });
-  var items = Array.from(all);
-
-  items.forEach(function(el) {
-    el.draggable = true;
-    el.style.cursor = 'grab';
-    // Remove old listeners by replacing with cloned node? No — gate with _editMode instead.
-    el.ondragstart = function(e) {
-      if (!_editMode) { e.preventDefault(); return; }
-      _dragState.el = el;
-      _dragState.container = container;
-      el.style.opacity = '0.5';
-      el.style.cursor = 'grabbing';
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', '');
-    };
-    el.ondragend = function() {
-      el.style.opacity = '1';
-      el.style.cursor = _editMode ? 'grab' : '';
-      container.querySelectorAll('.drag-over-indicator').forEach(function(ind){ ind.remove(); });
-      Array.from(container.children).forEach(function(c){ c.classList.remove('drag-over'); });
-      _dragState.el = null;
-      _dragState.container = null;
-    };
-    el.ondragover = function(e) {
-      if (!_editMode || !_dragState.el || _dragState.container !== container) return;
-      if (el === _dragState.el) return;
-      e.preventDefault();
-      e.dataTransfer.dropEffect = 'move';
-      Array.from(container.children).forEach(function(c){ c.classList.remove('drag-over'); });
-      el.classList.add('drag-over');
-    };
-    el.ondragleave = function() { el.classList.remove('drag-over'); };
-    el.ondrop = function(e) {
-      e.preventDefault();
-      if (!_editMode || !_dragState.el || _dragState.container !== container) return;
-      if (el === _dragState.el) return;
-      el.classList.remove('drag-over');
-      var dragRect = _dragState.el.getBoundingClientRect();
-      var dropRect = el.getBoundingClientRect();
-      if (container.id === 'heroKpi') {
-        if (dragRect.left < dropRect.left) container.insertBefore(_dragState.el, el.nextSibling);
-        else container.insertBefore(_dragState.el, el);
-      } else {
-        if (dragRect.top < dropRect.top) container.insertBefore(_dragState.el, el.nextSibling);
-        else container.insertBefore(_dragState.el, el);
-      }
-      scheduleLayoutSave();
-    };
-  });
-}
-
-function scheduleLayoutSave() {
-  clearTimeout(_layoutSaveTimer);
-  _layoutSaveTimer = setTimeout(saveCurrentLayout, 400);
-}
-
-function saveCurrentLayout() {
-  var modules = [];
-  var pos = 1;
-  // Walk app-container children in DOM order
-  var appContent = document.querySelector('.app-container');
-  if (!appContent) return;
-  Array.from(appContent.children).forEach(function(el) {
-    var mid = el.getAttribute('data-module');
-    if (!mid) return;
-    if (el.id === 'heroKpi') {
-      // Save heroKpi as a block, then its children
-      modules.push({ id: 'heroKpi', visible: true, position: pos++ });
-      Array.from(el.children).forEach(function(child) {
-        var cid = child.getAttribute('data-module');
-        if (cid) modules.push({ id: cid, visible: child.style.display !== 'none', position: pos++ });
-      });
-    } else {
-      modules.push({ id: mid, visible: el.style.display !== 'none', position: pos++ });
-    }
-  });
-  if (modules.length === 0) return;
-  _dashboardLayout = { modules: modules };
-  var jwt = getJwt();
-  if (!jwt || !getBusinessId()) return;
-  fetch('/api/dashboard/layout', {
-    method: 'POST',
-    headers: jwtHeaders(),
-    body: JSON.stringify({ modules: modules })
-  }).catch(function(e) { console.warn('Layout save failed', e); });
-}
 
 // ═══ Dashboard Config Panel ═══
-var _moduleLabels = {
-  heroKpi: 'Panel de KPIs',
-  revenue: 'Revenue',
-  performance: 'Performance',
-  alerts: 'Alertas',
-  statusStrip: 'Estado de Pedidos',
-  analytics: 'Analiticas Avanzadas',
-  handoffs: 'Atencion Humana',
-  customers: 'Clientes'
-};
-
 function openDashboardConfig() {
   var modal = document.getElementById('dashConfigModal');
-  var list = document.getElementById('dashConfigList');
-  list.innerHTML = '';
-  var moduleIds = [];
-  document.querySelectorAll('[data-module]').forEach(function(el) {
-    var mid = el.getAttribute('data-module');
-    if (moduleIds.indexOf(mid) === -1) moduleIds.push(mid);
-  });
-  moduleIds.forEach(function(mid) {
-    var el = document.querySelector('[data-module="'+mid+'"]');
-    if (!el) return;
-    var isVisible = el.style.display !== 'none';
-    var label = _moduleLabels[mid] || mid;
-    var row = document.createElement('div');
-    row.className = 'dcp-row';
-    row.innerHTML = '<span class="dcp-row-label">'+label+'</span>'
-      + '<label class="dcp-toggle">'
-      + '<input type="checkbox" '+(isVisible?'checked':'')+' onchange="toggleDashModule(\''+mid+'\',this.checked)">'
-      + '<span class="dcp-toggle-track"></span></label>';
-    list.appendChild(row);
-  });
-  var btn = document.getElementById('btnEditLayout');
-  if (btn) btn.innerHTML = (_editMode ? '&#9776; Finalizar edicion' : '&#9776; Reordenar modulos');
-  // Show layout section by default
   dcpNav(document.querySelector('.dcp-nav-item.active') || document.querySelector('.dcp-nav-item'), 'layout');
   modal.style.display = 'flex';
 }
@@ -4211,37 +3988,6 @@ function dcpNav(btn, section) {
   });
 }
 
-function resetDashboardLayout() {
-  document.querySelectorAll('[data-module]').forEach(function(el){
-    el.style.removeProperty('display');
-    el.style.removeProperty('order');
-  });
-  _dashboardLayout = null;
-  var jwt = getJwt();
-  if (jwt && getBusinessId()) {
-    var defaultModules = [
-      {id:'heroKpi',visible:true,position:1},{id:'revenue',visible:true,position:2},
-      {id:'performance',visible:true,position:3},{id:'alerts',visible:true,position:4},
-      {id:'statusStrip',visible:true,position:5},{id:'analytics',visible:true,position:6},
-      {id:'handoffs',visible:true,position:7},{id:'customers',visible:true,position:8}
-    ];
-    fetch('/api/dashboard/layout', { method:'POST', headers:jwtHeaders(), body:JSON.stringify({modules:defaultModules}) })
-      .catch(function(e){ console.warn('Reset save failed',e); });
-  }
-  closeDashboardConfig();
-}
-
-function toggleDashModule(moduleId, visible) {
-  var el = document.querySelector('[data-module="'+moduleId+'"]');
-  if (!el) return;
-  if (visible) {
-    el.style.removeProperty('display');
-  } else {
-    el.style.display = 'none';
-  }
-  scheduleLayoutSave();
-}
-
 async function load() {
   applyGlobalModeUI();
   // Global mode: founder gets global dashboard, others get nothing
@@ -4249,9 +3995,6 @@ async function load() {
     if (isFounderUser()) { await loadFounderDashboard(); }
     return;
   }
-
-  // Load business-specific dashboard layout (non-blocking)
-  if (!_dashboardLayout) loadDashboardLayout();
 
   if (_loadInProgress) {
     console.log('[AUTOREFRESH] load() called but already in progress — skipping');
@@ -5376,14 +5119,8 @@ async function sendPromotion(){
       </div>
       <div class="dcp-content">
         <div id="dcpSectionLayout">
-          <div class="dcp-section-title">Modulos del Dashboard</div>
-          <div class="dcp-section-desc">Activa o desactiva los modulos visibles.</div>
-          <div id="dashConfigList"></div>
-          <div class="dcp-actions">
-            <button class="dcp-btn" id="btnEditLayout" onclick="toggleEditMode();closeDashboardConfig();">&#9776; Reordenar modulos</button>
-            <button class="dcp-btn" onclick="resetDashboardLayout()">&#8635; Restaurar layout</button>
-          </div>
-          <div class="dcp-autosave">Los cambios se guardan automaticamente.</div>
+          <div class="dcp-section-title">Personalizar Dashboard</div>
+          <div class="dcp-section-desc">Configura tu experiencia de dashboard.</div>
         </div>
         <div id="dcpSectionAppearance" style="display:none;">
           <div class="dcp-section-title">Apariencia</div>
