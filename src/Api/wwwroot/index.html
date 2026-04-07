@@ -1685,6 +1685,7 @@
     <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
     <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
     <span id="selectedBizStatus" class="small"></span>
+    <button onclick="openDashboardConfig()" id="btnDashConfig" title="Personalizar dashboard" style="font-size:14px;padding:4px 10px;">&#9881;</button>
     <span style="flex:1;"></span>
     <span class="muted small">API: <code id="baseUrl"></code></span>
     <label class="toggle-switch" title="Auto-refresh cada 10s">
@@ -4109,6 +4110,59 @@ function saveCurrentLayout() {
   }).catch(function(e) { console.warn('Layout save failed', e); });
 }
 
+// ═══ Dashboard Config Panel ═══
+var _moduleLabels = {
+  heroKpi: 'Panel de KPIs',
+  revenue: 'Revenue',
+  performance: 'Performance',
+  alerts: 'Alertas',
+  statusStrip: 'Estado de Pedidos',
+  analytics: 'Analiticas Avanzadas',
+  handoffs: 'Atencion Humana',
+  customers: 'Clientes'
+};
+
+function openDashboardConfig() {
+  var modal = document.getElementById('dashConfigModal');
+  var list = document.getElementById('dashConfigList');
+  list.innerHTML = '';
+  // Build module list from current layout or DOM
+  var moduleIds = [];
+  document.querySelectorAll('[data-module]').forEach(function(el) {
+    var mid = el.getAttribute('data-module');
+    if (moduleIds.indexOf(mid) === -1) moduleIds.push(mid);
+  });
+  moduleIds.forEach(function(mid) {
+    var el = document.querySelector('[data-module="'+mid+'"]');
+    if (!el) return;
+    var isVisible = el.style.display !== 'none';
+    var label = _moduleLabels[mid] || mid;
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-light,#f2f2f7);';
+    row.innerHTML = '<span style="font-size:13px;font-weight:500;">'+label+'</span>'
+      + '<label class="toggle-switch" style="margin:0;">'
+      + '<input type="checkbox" '+(isVisible?'checked':'')+' onchange="toggleDashModule(\''+mid+'\',this.checked)">'
+      + '<span class="toggle-track"></span></label>';
+    list.appendChild(row);
+  });
+  modal.style.display = 'flex';
+}
+
+function closeDashboardConfig() {
+  document.getElementById('dashConfigModal').style.display = 'none';
+}
+
+function toggleDashModule(moduleId, visible) {
+  var el = document.querySelector('[data-module="'+moduleId+'"]');
+  if (!el) return;
+  if (visible) {
+    el.style.removeProperty('display');
+  } else {
+    el.style.display = 'none';
+  }
+  scheduleLayoutSave();
+}
+
 async function load() {
   applyGlobalModeUI();
   // Global mode: founder gets global dashboard, others get nothing
@@ -5087,5 +5141,18 @@ async function sendPromotion(){
 </div>
 
 <div id="toastStack" class="toast-stack"></div>
+
+<!-- Dashboard Config Modal -->
+<div id="dashConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(3px);">
+  <div style="background:var(--card,#fff);border:1px solid var(--border,#e8e8ed);border-radius:var(--radius,16px);padding:24px 28px;width:380px;max-width:92vw;box-shadow:var(--shadow-md);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+      <h3 style="margin:0;font-size:16px;font-weight:700;">Personalizar Dashboard</h3>
+      <button onclick="closeDashboardConfig()" style="font-size:18px;background:none;border:none;color:var(--muted);cursor:pointer;box-shadow:none;padding:0;">&times;</button>
+    </div>
+    <p class="muted small" style="margin-bottom:14px;">Activa o desactiva los modulos visibles en tu dashboard.</p>
+    <div id="dashConfigList"></div>
+    <p class="muted small" style="margin-top:12px;">Los cambios se guardan automaticamente.</p>
+  </div>
+</div>
 </body>
 </html>
