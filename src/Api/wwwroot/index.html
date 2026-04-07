@@ -1465,10 +1465,8 @@
       display: flex; align-items: center; gap: 8px;
       padding: 6px 10px; border-radius: 8px;
       font-size: 12.5px; font-weight: 500; color: var(--text-secondary);
-      cursor: pointer; white-space: nowrap;
-      transition: background .15s, color .15s;
+      cursor: default; white-space: nowrap;
     }
-    .dock-module .dm-item:hover { background: var(--accent-subtle); color: var(--text); }
     .dock-module .dm-item.dm-active {
       background: var(--accent-subtle); color: var(--accent); font-weight: 600;
     }
@@ -1776,14 +1774,14 @@
         <div class="dm-role" id="dmRole">—</div>
       </div>
     </div>
-    <div class="dm-item dm-active" id="dsBtnDashboard" onclick="dsGoHome(this)"><span class="dm-icon">&#9632;</span>Dashboard</div>
-    <div class="dm-item" id="dsBtnNewBiz" onclick="dsSetActive(this);openCreateBiz()"><span class="dm-icon">+</span>Nuevo Negocio</div>
-    <div class="dm-item" id="dsBtnAdmin" onclick="dsSetActive(this);toggleBizPanel()"><span class="dm-icon">&#9881;</span>Administrar</div>
-    <div class="dm-item" id="dsBtnMenu" onclick="dsSetActive(this);openMenuManager()"><span class="dm-icon">&#9776;</span>Menu Manager</div>
-    <div class="dm-item" id="dsBtnUsers" onclick="dsSetActive(this);toggleUsersPanel()"><span class="dm-icon">&#9679;</span>Usuarios</div>
-    <div class="dm-item" id="dsBtnCustomers" onclick="dsSetActive(this);toggleCustomersPanel()"><span class="dm-icon">&#9734;</span>Customers</div>
+    <div class="dm-item dm-active"><span class="dm-icon">&#9632;</span>Dashboard</div>
+    <div class="dm-item"><span class="dm-icon">+</span>Nuevo Negocio</div>
+    <div class="dm-item"><span class="dm-icon">&#9881;</span>Administrar</div>
+    <div class="dm-item"><span class="dm-icon">&#9776;</span>Menu Manager</div>
+    <div class="dm-item"><span class="dm-icon">&#9679;</span>Usuarios</div>
+    <div class="dm-item"><span class="dm-icon">&#9734;</span>Customers</div>
     <div class="dm-sep"></div>
-    <div class="dm-item" id="dsBtnSettings" onclick="dsSetActive(this);openDashboardConfig()"><span class="dm-icon">&#9881;</span>Settings</div>
+    <div class="dm-item"><span class="dm-icon">&#9881;</span>Settings</div>
   </div>
 
   <div class="layout-edit-banner">Modo edicion de layout activo — arrastra los modulos para reordenar. <a href="#" onclick="toggleEditMode();return false;" style="margin-left:8px;">Finalizar</a></div>
@@ -5054,21 +5052,6 @@ async function submitCreateUser(){
     setTimeout(function(){ closeCreateUser(); loadUsers(); }, 1500);
   } catch(e) {
     document.getElementById('createUserMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
-  }
-}
-
-// ═══ Left Dock Module Navigation ═══
-function dsSetActive(btn) {
-  var items = document.querySelectorAll('#dockModule .dm-item');
-  for (var i = 0; i < items.length; i++) items[i].classList.remove('dm-active');
-  if (btn) btn.classList.add('dm-active');
-}
-function dsGoHome(btn) {
-  dsSetActive(btn);
-  var panels = ['bizPanel','usersPanel','customersPanel'];
-  for (var i = 0; i < panels.length; i++) {
-    var p = document.getElementById(panels[i]);
-    if (p) p.style.display = 'none';
   }
 }
 
