@@ -1432,6 +1432,63 @@
     .layout-editing .layout-edit-banner { display: block; }
 
     /* ═══ Responsive ═══ */
+    /* ═══ Left Dock Module ═══ */
+    .dock-module {
+      position: fixed; top: 110px; left: 16px; width: 210px; z-index: 50;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius, 16px);
+      padding: 14px 10px;
+      box-shadow: var(--shadow);
+      transition: opacity .2s;
+    }
+    .dock-module .dm-profile {
+      display: flex; align-items: center; gap: 10px;
+      padding: 2px 8px 12px; border-bottom: 1px solid var(--border-light);
+      margin-bottom: 6px;
+    }
+    .dock-module .dm-avatar {
+      width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+      background: var(--accent-subtle); color: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 14px; font-weight: 700;
+    }
+    .dock-module .dm-name {
+      font-size: 13px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .dock-module .dm-role {
+      font-size: 10px; color: var(--muted); text-transform: uppercase;
+      letter-spacing: .4px; font-weight: 500;
+    }
+    .dock-module .dm-item {
+      display: flex; align-items: center; gap: 8px;
+      padding: 6px 10px; border-radius: 8px;
+      font-size: 12.5px; font-weight: 500; color: var(--text-secondary);
+      cursor: default; white-space: nowrap;
+    }
+    .dock-module .dm-item.dm-active {
+      background: var(--accent-subtle); color: var(--accent); font-weight: 600;
+    }
+    .dock-module .dm-icon {
+      width: 16px; text-align: center; font-size: 12px; flex-shrink: 0;
+    }
+    .dock-module .dm-sep {
+      height: 1px; background: var(--border-light); margin: 5px 8px;
+    }
+    /* Shift dashboard to make room */
+    .app-container { margin-left: 240px; }
+    /* Dark mode */
+    [data-theme="dark"] .dock-module {
+      background: var(--card); border-color: var(--border);
+      box-shadow: var(--shadow);
+    }
+    /* Responsive: hide dock, reset margin */
+    @media (max-width: 900px) {
+      .dock-module { display: none; }
+      .app-container { margin-left: 0; }
+    }
+
     @media (max-width: 768px) {
       .brand-header { padding: 12px 16px; }
       .app-container { padding: 0 14px 28px; }
@@ -1706,6 +1763,25 @@
     <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Sonido de notificaciones">
       <span id="soundIcon">&#128264;</span>
     </button>
+  </div>
+
+  <!-- Left Dock Module (visual only — no logic) -->
+  <div class="dock-module" id="dockModule">
+    <div class="dm-profile">
+      <div class="dm-avatar" id="dmAvatar">?</div>
+      <div>
+        <div class="dm-name" id="dmName">—</div>
+        <div class="dm-role" id="dmRole">—</div>
+      </div>
+    </div>
+    <div class="dm-item dm-active"><span class="dm-icon">&#9632;</span>Dashboard</div>
+    <div class="dm-item"><span class="dm-icon">+</span>Nuevo Negocio</div>
+    <div class="dm-item"><span class="dm-icon">&#9881;</span>Administrar</div>
+    <div class="dm-item"><span class="dm-icon">&#9776;</span>Menu Manager</div>
+    <div class="dm-item"><span class="dm-icon">&#9679;</span>Usuarios</div>
+    <div class="dm-item"><span class="dm-icon">&#9734;</span>Customers</div>
+    <div class="dm-sep"></div>
+    <div class="dm-item"><span class="dm-icon">&#9881;</span>Settings</div>
   </div>
 
   <div class="layout-edit-banner">Modo edicion de layout activo — arrastra los modulos para reordenar. <a href="#" onclick="toggleEditMode();return false;" style="margin-left:8px;">Finalizar</a></div>
@@ -4984,6 +5060,18 @@ document.getElementById('baseUrl').textContent = location.origin;
 if (isStaffMode()) { localStorage.removeItem('ADMIN_KEY'); }
 applyRoleBadge();
 updateLoginUI();
+// Dock module profile (read-only)
+(function(){
+  var u = getJwtUser();
+  if (!u) return;
+  var name = u.name || u.email || '?';
+  var el = document.getElementById('dmName');
+  if (el) el.textContent = name;
+  var rl = document.getElementById('dmRole');
+  if (rl) rl.textContent = u.role || '';
+  var av = document.getElementById('dmAvatar');
+  if (av) av.textContent = name.charAt(0).toUpperCase();
+})();
 
 // Set default date filter to today
 const today = new Date().toISOString().slice(0,10);
