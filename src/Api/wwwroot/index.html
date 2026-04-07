@@ -797,8 +797,8 @@
       letter-spacing: .5px; font-weight: 600; margin: 0;
     }
     .kpi .card .value {
-      font-size: 32px; font-weight: 600; color: var(--text);
-      line-height: 1.2; letter-spacing: -.03em;
+      font-size: 22px; font-weight: 700; color: var(--text);
+      line-height: 1.15; letter-spacing: -.02em;
       white-space: nowrap; font-variant-numeric: tabular-nums;
       margin-top: auto;
     }
@@ -806,23 +806,24 @@
 
     /* ═══ Hero KPI Layout ═══ */
     .hero-kpi {
-      display: grid; grid-template-columns: 1fr 2.2fr 0.8fr; gap: 14px;
+      display: grid; grid-template-columns: 1fr 2.2fr 0.8fr; gap: 16px;
       margin-bottom: 24px;
     }
     .hero-panel {
       background: var(--card-kpi, var(--card)); border-radius: var(--radius);
-      padding: 26px 28px;
-      display: flex; flex-direction: column; gap: 22px;
+      padding: 20px;
+      display: flex; flex-direction: column; gap: 16px;
+      will-change: transform;
     }
     .hero-panel-title {
-      font-size: 10px; font-weight: 500; text-transform: uppercase;
-      letter-spacing: 1.2px; color: var(--muted); padding-bottom: 14px;
+      font-size: 11px; font-weight: 500; text-transform: uppercase;
+      letter-spacing: .03em; color: var(--muted); padding-bottom: 12px;
       border-bottom: 1px solid var(--border-light);
     }
-    .hero-stat { display: flex; flex-direction: column; gap: 5px; }
+    .hero-stat { display: flex; flex-direction: column; gap: 4px; }
     .hero-stat .label {
-      font-size: 10.5px; color: var(--text-secondary); text-transform: uppercase;
-      letter-spacing: .6px; font-weight: 500; opacity: .85;
+      font-size: 11px; color: var(--text-secondary); text-transform: uppercase;
+      letter-spacing: .03em; font-weight: 500; opacity: .75;
     }
     .hero-stat .value {
       font-size: 26px; font-weight: 700; color: var(--text);
@@ -841,7 +842,7 @@
       color: var(--text-secondary); white-space: normal;
     }
     .hero-mini-grid {
-      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 22px 20px;
+      display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;
     }
     .hero-alert-warning {
       padding: 14px 16px; border-radius: var(--radius-sm);
@@ -903,9 +904,9 @@
       width: 1px; background: var(--border-light);
     }
     .status-chip-label {
-      font-size: 10px; text-transform: uppercase; letter-spacing: .5px;
-      font-weight: 500; color: var(--text-secondary); margin-bottom: 6px;
-      opacity: .8;
+      font-size: 11px; text-transform: uppercase; letter-spacing: .03em;
+      font-weight: 500; color: var(--text-secondary); margin-bottom: 4px;
+      opacity: .75;
     }
     .status-chip-value {
       font-size: 20px; font-weight: 700; color: var(--text);
@@ -1157,7 +1158,7 @@
       border-radius: var(--radius); padding: 16px 20px; margin-bottom: 24px;
       transition: background var(--transition);
     }
-    .filters label { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .3px; }
+    .filters label { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .03em; }
 
     /* ═══ Panels ═══ */
     .biz-panel {
@@ -2057,7 +2058,7 @@ Tipo: burger"></textarea>
   <!-- Data Freshness -->
   <div class="freshness-bar" id="freshnessBar">
     <span class="freshness-dot" id="freshnessDot"></span>
-    <span class="freshness-text" id="freshnessText">—</span>
+    <span class="freshness-text" id="freshnessText">Cargando...</span>
   </div>
 
   <!-- Hero KPI Area -->
@@ -2212,7 +2213,9 @@ Tipo: burger"></textarea>
     <summary>
       Atencion Humana <span id="handoffBadge" class="section-badge section-badge-danger">0</span>
     </summary>
-    <div id="handoffList" style="margin-top:14px;display:flex;flex-direction:column;gap:10px;"></div>
+    <div id="handoffList" style="margin-top:14px;display:flex;flex-direction:column;gap:10px;">
+      <div class="hf-empty" id="handoffEmpty">No hay conversaciones activas</div>
+    </div>
   </details>
 
   <!-- Filters -->
@@ -3987,7 +3990,7 @@ function closeDashboardConfig() {
 function dcpNav(btn, section) {
   document.querySelectorAll('.dcp-nav-item').forEach(function(b){ b.classList.remove('active'); });
   btn.classList.add('active');
-  ['layout','appearance','branding'].forEach(function(s){
+  ['layout'].forEach(function(s){
     var el = document.getElementById('dcpSection' + s.charAt(0).toUpperCase() + s.slice(1));
     if (el) el.style.display = s === section ? '' : 'none';
   });
@@ -4008,6 +4011,10 @@ async function load() {
   _loadInProgress = true;
   const isAuto = _autoRefreshActive;
   const tag = isAuto ? '[AUTOREFRESH]' : '[MANUAL]';
+
+  // Show loading state
+  var ft = document.getElementById('freshnessText');
+  if (ft) ft.textContent = 'Cargando...';
 
   try {
   const status = document.getElementById('status').value;
