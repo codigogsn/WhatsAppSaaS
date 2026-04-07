@@ -486,10 +486,34 @@
     .status-pill.on { background: var(--success-bg); color: var(--success); }
     .status-pill.off { background: var(--danger-bg); color: var(--danger); }
 
+    /* ═══ Settings Panel (shared DCP system) ═══ */
+    .settings-panel { display: flex; flex-direction: column; overflow: hidden; padding: 0; border-radius: 14px; box-shadow: 0 8px 32px rgba(0,0,0,.07), 0 2px 8px rgba(0,0,0,.04); }
+    [data-theme="dark"] .settings-panel { box-shadow: 0 8px 40px rgba(0,0,0,.4), 0 2px 10px rgba(0,0,0,.3); }
+    .settings-titlebar { height: 42px; display: flex; align-items: center; padding: 0 16px; background: var(--surface-2); border-bottom: 1px solid var(--border); flex-shrink: 0; gap: 10px; }
+    .settings-dots { display: flex; gap: 7px; }
+    .settings-dot { width: 12px; height: 12px; border-radius: 50%; border: none; padding: 0; cursor: pointer; box-shadow: inset 0 -1px 1px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.08); transition: filter .12s; }
+    .settings-dot:hover { filter: brightness(1.15); }
+    .settings-dot.red { background: #FF5F57; }
+    .settings-dot.yellow { background: #FEBC2E; }
+    .settings-dot.green { background: #28C840; }
+    .settings-title { flex: 1; text-align: center; font-size: 13px; font-weight: 600; color: var(--text-secondary); letter-spacing: -.01em; }
+    .settings-body { display: flex; min-height: 500px; }
+    .settings-sidebar { width: 160px; flex-shrink: 0; padding: 12px 8px; background: var(--surface-2); border-right: 1px solid var(--border-light); display: flex; flex-direction: column; gap: 2px; }
+    .settings-nav-item { padding: 7px 12px; border-radius: 7px; cursor: pointer; font-size: 12.5px; font-weight: 500; color: var(--muted); transition: all .15s ease-out; border: 1px solid transparent; }
+    .settings-nav-item:hover { background: rgba(0,0,0,.03); color: var(--text); }
+    [data-theme="dark"] .settings-nav-item:hover { background: rgba(255,255,255,.05); }
+    .settings-nav-item.active { background: var(--accent-subtle); color: var(--accent); font-weight: 600; border-color: rgba(0,122,255,.08); box-shadow: 0 1px 3px rgba(0,122,255,.06); }
+    [data-theme="dark"] .settings-nav-item.active { background: rgba(10,132,255,.12); border-color: rgba(10,132,255,.15); }
+    .settings-content { flex: 1; padding: 20px 24px; overflow-y: auto; }
+    .settings-section { display: none; }
+    .settings-section.active { display: block; }
+    .settings-actions { border-top: 1px solid var(--border); padding: 14px 20px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--surface-2); }
     @media (max-width: 768px) {
       .brand-header { padding: 16px; }
       .app-container { padding: 16px 12px 24px; }
       .card { padding: 16px; }
+      .settings-body { flex-direction: column; min-height: auto; }
+      .settings-sidebar { width: auto; flex-direction: row; border-right: none; border-bottom: 1px solid var(--border-light); overflow-x: auto; }
     }
   </style>
 </head>
@@ -528,17 +552,28 @@
     <a href="/" class="small" style="font-weight:500;">← Dashboard</a>
   </div>
 
-  <!-- Section Tabs -->
-  <div class="section-tabs">
-    <button class="section-tab active" onclick="switchTab('products')">Productos</button>
-    <button class="section-tab" onclick="switchTab('extras')">Extras</button>
-    <button class="section-tab" onclick="switchTab('upsells')">Upsells</button>
-  </div>
-
   <div class="app-container">
+  <div id="menuPanel" class="settings-panel" style="background:var(--surface);margin-bottom:24px;">
+    <div class="settings-titlebar">
+      <div class="settings-dots">
+        <a href="/" class="settings-dot red" title="Volver al Dashboard"></a>
+        <span class="settings-dot yellow"></span>
+        <span class="settings-dot green"></span>
+      </div>
+      <div class="settings-title">Menu Manager</div>
+      <div style="width:50px;"></div>
+    </div>
+    <div class="settings-body">
+      <div class="settings-sidebar">
+        <div class="settings-nav-item active" onclick="switchMenuPanel('categorias')">Categorias</div>
+        <div class="settings-nav-item" onclick="switchMenuPanel('productos')">Productos</div>
+        <div class="settings-nav-item" onclick="switchMenuPanel('extras')">Extras</div>
+        <div class="settings-nav-item" onclick="switchMenuPanel('upsells')">Upsells</div>
+      </div>
+      <div class="settings-content">
 
-  <!-- ═══ TAB: Products ═══ -->
-  <div id="tab-products" class="section-panel active">
+  <!-- ═══ SECTION: Categorias ═══ -->
+  <div class="settings-section active" data-section="categorias">
 
   <!-- Categories -->
   <div class="card">
@@ -555,7 +590,10 @@
     </table>
   </div>
 
-  <!-- Items -->
+  </div><!-- /settings-section categorias -->
+
+  <!-- ═══ SECTION: Productos ═══ -->
+  <div class="settings-section" data-section="productos">
   <div class="card">
     <h3>Productos del Menu</h3>
     <div class="helper">Cada producto necesita nombre, precio y categoria. Agrega <strong>alias</strong> para que el bot reconozca variaciones (ej: "coca" para "Coca Cola").</div>
@@ -573,10 +611,10 @@
     </table>
   </div>
 
-  </div><!-- /tab-products -->
+  </div><!-- /settings-section productos -->
 
-  <!-- ═══ TAB: Extras ═══ -->
-  <div id="tab-extras" class="section-panel">
+  <!-- ═══ SECTION: Extras ═══ -->
+  <div class="settings-section" data-section="extras">
     <div class="card">
       <h3>Nuevo Extra</h3>
       <div class="helper">Un extra se suma al producto base (ej: queso extra +$1.50, tocineta +$2.00). El precio se agrega al del producto.</div>
@@ -614,8 +652,8 @@
     </div>
   </div>
 
-  <!-- ═══ TAB: Upsells ═══ -->
-  <div id="tab-upsells" class="section-panel">
+  <!-- ═══ SECTION: Upsells ═══ -->
+  <div class="settings-section" data-section="upsells">
     <div class="card">
       <h3>Nueva Regla de Upsell</h3>
       <div class="helper">Cuando un cliente ordena de una categoria, el bot puede sugerir un producto adicional para aumentar el ticket (ej: "hamburguesa" → sugerir "bebida").</div>
@@ -662,8 +700,11 @@
         <div class="small muted">Los upsells sugieren productos adicionales para aumentar el ticket.<br>Crea la primera regla arriba para empezar.</div>
       </div>
     </div>
-  </div>
+  </div><!-- /settings-section upsells -->
 
+      </div><!-- /.settings-content -->
+    </div><!-- /.settings-body -->
+  </div><!-- /#menuPanel -->
   </div><!-- /.app-container -->
 
 <script>
@@ -1161,16 +1202,19 @@ function showToast(msg){
   setTimeout(()=>{t.style.opacity='0';setTimeout(()=>t.remove(),300);},3500);
 }
 
-// ═══ Tab switching ═══
-var _activeTab='products';
-function switchTab(tab){
-  _activeTab=tab;
-  document.querySelectorAll('.section-tab').forEach(function(t){ t.classList.remove('active'); });
-  document.querySelectorAll('.section-panel').forEach(function(p){ p.classList.remove('active'); });
-  document.querySelector('.section-tab[onclick*="\''+tab+'\'"]').classList.add('active');
-  document.getElementById('tab-'+tab).classList.add('active');
-  if(tab==='extras' && bid()) loadExtras();
-  if(tab==='upsells' && bid()) loadUpsells();
+// ═══ Section switching ═══
+var _activeTab='categorias';
+function switchMenuPanel(section){
+  _activeTab=section;
+  document.querySelectorAll('#menuPanel .settings-section').forEach(function(s){ s.classList.remove('active'); });
+  document.querySelectorAll('#menuPanel .settings-nav-item').forEach(function(n){ n.classList.remove('active'); });
+  var target = document.querySelector('#menuPanel .settings-section[data-section="'+section+'"]');
+  if(target) target.classList.add('active');
+  document.querySelectorAll('#menuPanel .settings-nav-item').forEach(function(n){
+    if(n.getAttribute('onclick') && n.getAttribute('onclick').indexOf("'"+section+"'") !== -1) n.classList.add('active');
+  });
+  if(section==='extras' && bid()) loadExtras();
+  if(section==='upsells' && bid()) loadUpsells();
 }
 function setLoading(btnId,loading){
   var btn=document.getElementById(btnId);
