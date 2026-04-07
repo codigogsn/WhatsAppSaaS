@@ -1658,59 +1658,6 @@
       .assist-dock { width: calc(100vw - 24px); right: 12px; bottom: 12px; max-height: 85vh; border-radius: 16px; }
       .assist-launcher { bottom: 16px; right: 16px; }
     }
-
-    /* ═══ Left Nav Shell ═══ */
-    .dash-layout { display: flex; min-height: 0; }
-    .dash-sidebar {
-      width: 220px; flex-shrink: 0; padding: 16px 10px;
-      display: flex; flex-direction: column; gap: 2px;
-    }
-    .dash-sidebar-inner {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: var(--radius, 16px);
-      padding: 14px 10px;
-      box-shadow: var(--shadow);
-      position: sticky; top: 12px;
-    }
-    /* Profile block */
-    .ds-profile { display: flex; align-items: center; gap: 10px; padding: 4px 8px 12px; border-bottom: 1px solid var(--border-light); margin-bottom: 8px; }
-    .ds-avatar {
-      width: 36px; height: 36px; border-radius: 50%;
-      background: var(--accent-subtle); color: var(--accent);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 14px; font-weight: 700; flex-shrink: 0;
-    }
-    .ds-profile-info { min-width: 0; }
-    .ds-profile-name { font-size: 13px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .ds-profile-role { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; font-weight: 500; }
-    /* Nav items */
-    .ds-nav-item {
-      display: flex; align-items: center; gap: 8px; padding: 7px 10px;
-      border-radius: 8px; cursor: pointer; font-size: 12.5px; font-weight: 500;
-      color: var(--text-secondary); border: none; background: none; box-shadow: none;
-      text-align: left; width: 100%; transition: background .15s, color .15s;
-      white-space: nowrap;
-    }
-    .ds-nav-item:hover { background: var(--accent-subtle); color: var(--text); transform: none; }
-    .ds-nav-item.active { background: var(--accent-subtle); color: var(--accent); font-weight: 600; }
-    .ds-nav-icon { width: 18px; text-align: center; font-size: 13px; flex-shrink: 0; }
-    .ds-nav-separator { height: 1px; background: var(--border-light); margin: 6px 8px; }
-    .ds-biz-status { display:block; padding:4px 10px; font-size:10.5px; color:var(--muted); font-weight:500; }
-    .ds-nav-item .ds-badge {
-      margin-left: auto; font-size: 10px; font-weight: 600; padding: 1px 6px;
-      border-radius: 99px; background: var(--success-bg); color: var(--success);
-    }
-    /* Dark mode refinements */
-    [data-theme="dark"] .dash-sidebar-inner {
-      background: var(--card); border-color: var(--border);
-      box-shadow: var(--shadow);
-    }
-    /* Responsive: hide sidebar on small screens */
-    @media (max-width: 900px) {
-      .dash-sidebar { display: none; }
-      .dash-layout { display: block; }
-    }
   </style>
 </head>
 <body>
@@ -1733,7 +1680,7 @@
     </div>
   </div>
 
-  <!-- Nav Bar: Business Selector + Operational Controls -->
+  <!-- Nav Bar: Business Selector -->
   <div class="nav-bar">
     <label>Negocio:</label>
     <div class="biz-selector-area">
@@ -1742,15 +1689,15 @@
       </select>
       <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:16px;padding:4px 8px;">&#x21bb;</button>
     </div>
+    <button class="primary" onclick="openCreateBiz()" id="btnNewBiz">+ Nuevo Negocio</button>
+    <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
+    <button onclick="openMenuManager()" id="btnMenuMgr" style="display:none;">Menu Manager</button>
+    <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
+    <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
     <span id="selectedBizStatus" class="small"></span>
-    <!-- Hidden: keep old button refs so existing JS doesn't break -->
-    <button id="btnNewBiz" style="display:none;"></button>
-    <button id="btnBizAdmin" style="display:none;"></button>
-    <button id="btnMenuMgr" style="display:none;"></button>
-    <button id="btnUsersAdmin" style="display:none;"></button>
-    <button id="btnCustomers" style="display:none;"></button>
-    <button id="btnDashConfig" style="display:none;"></button>
+    <button onclick="openDashboardConfig()" id="btnDashConfig" title="Personalizar dashboard" style="font-size:14px;padding:4px 10px;">&#9881;</button>
     <span style="flex:1;"></span>
+    <span class="muted small">API: <code id="baseUrl"></code></span>
     <label class="toggle-switch" title="Auto-refresh cada 10s">
       <input type="checkbox" id="autoRefreshToggle" onchange="onAutoToggle(this.checked)">
       <span class="toggle-track"></span>
@@ -1762,34 +1709,13 @@
   </div>
 
   <div class="layout-edit-banner">Modo edicion de layout activo — arrastra los modulos para reordenar. <a href="#" onclick="toggleEditMode();return false;" style="margin-left:8px;">Finalizar</a></div>
-  <div class="dash-layout">
-  <div class="dash-sidebar">
-    <div class="dash-sidebar-inner">
-      <div class="ds-profile">
-        <div class="ds-avatar" id="dsAvatar">?</div>
-        <div class="ds-profile-info">
-          <div class="ds-profile-name" id="dsName">—</div>
-          <div class="ds-profile-role" id="dsRole">—</div>
-        </div>
-      </div>
-      <button class="ds-nav-item active" onclick="dsNavigate(this,'dashboard')" data-dsnav="dashboard"><span class="ds-nav-icon">&#9632;</span>Dashboard</button>
-      <button class="ds-nav-item" onclick="dsNavigate(this,'newbiz');openCreateBiz();" data-dsnav="newbiz"><span class="ds-nav-icon">+</span>Nuevo Negocio</button>
-      <button class="ds-nav-item" onclick="dsNavigate(this,'bizadmin')" id="dsBtnBizAdmin" style="display:none;" data-dsnav="bizadmin"><span class="ds-nav-icon">&#9881;</span>Administrar</button>
-      <button class="ds-nav-item" onclick="dsNavigate(this,'menu');openMenuManager();" id="dsBtnMenuMgr" style="display:none;" data-dsnav="menu"><span class="ds-nav-icon">&#9776;</span>Menu Manager</button>
-      <button class="ds-nav-item" onclick="dsNavigate(this,'users')" id="dsBtnUsers" style="display:none;" data-dsnav="users"><span class="ds-nav-icon">&#9679;</span>Usuarios</button>
-      <button class="ds-nav-item" onclick="dsNavigate(this,'customers')" data-dsnav="customers"><span class="ds-nav-icon">&#9734;</span>Customers</button>
-      <div class="ds-nav-separator"></div>
-      <span class="ds-biz-status" id="dsBizStatus"></span>
-      <button class="ds-nav-item" onclick="openDashboardConfig()" data-dsnav="settings"><span class="ds-nav-icon">&#9881;</span>Settings</button>
-    </div>
-  </div>
-  <div class="app-container" style="flex:1;min-width:0;">
+  <div class="app-container">
 
   <!-- Business Admin Panel (collapsible) -->
-  <div id="bizPanel" class="biz-panel" data-section="bizadmin" style="display:none;">
+  <div id="bizPanel" class="biz-panel" style="display:none;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
       <h3 id="bizPanelTitle">Perfil del Negocio</h3>
-      <button onclick="dsGoHome()" style="border:none; background:none; font-size:18px; cursor:pointer; color:#888;">&times;</button>
+      <button onclick="toggleBizPanel()" style="border:none; background:none; font-size:18px; cursor:pointer; color:#888;">&times;</button>
     </div>
 
     <!-- Profile section -->
@@ -1973,12 +1899,12 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Users Management Panel -->
-  <div id="usersPanel" class="biz-panel" data-section="users" style="display:none;">
+  <div id="usersPanel" class="biz-panel" style="display:none;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
       <h3 style="margin:0;">Usuarios</h3>
       <div style="display:flex;gap:8px;align-items:center;">
         <button class="primary" onclick="openCreateUser()" style="font-size:12px;padding:6px 14px;">+ Nuevo Usuario</button>
-        <button onclick="dsGoHome()" style="border:none;background:none;font-size:18px;cursor:pointer;color:var(--muted);">&times;</button>
+        <button onclick="toggleUsersPanel()" style="border:none;background:none;font-size:18px;cursor:pointer;color:var(--muted);">&times;</button>
       </div>
     </div>
     <div style="overflow-x:auto;">
@@ -2120,9 +2046,6 @@ Tipo: burger"></textarea>
 
   </div>
 
-  <!-- Dashboard Home Section -->
-  <div id="dashboardHome" data-section="dashboard">
-
   <!-- Hero KPI Area -->
   <div id="heroKpi" class="hero-kpi" data-module="heroKpi">
     <!-- LEFT: Revenue focus -->
@@ -2253,10 +2176,10 @@ Tipo: burger"></textarea>
   </details>
 
   <!-- Customers CRM Panel -->
-  <div id="customersPanel" class="biz-panel" data-module="customers" data-section="customers" style="display:none;">
+  <div id="customersPanel" class="biz-panel" data-module="customers" style="display:none;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
       <h3>Customers</h3>
-      <button onclick="dsGoHome()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>
+      <button onclick="toggleCustomersPanel()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>
     </div>
     <div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap;">
       <input id="crmSearch" placeholder="Search name or phone..." style="flex:1;min-width:160px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;" onkeyup="if(event.key==='Enter')loadCrm()">
@@ -2333,9 +2256,7 @@ Tipo: burger"></textarea>
     <tbody id="tbody"></tbody>
   </table>
 
-  </div><!-- /#dashboardHome -->
   </div><!-- /.app-container -->
-  </div><!-- /.dash-layout -->
 
 <script>
 // ═══ Auth Gate ═══
@@ -2738,23 +2659,6 @@ function updateBizAdminButton(){
       : '';
   } else {
     statusEl.innerHTML = '';
-  }
-  // Sync sidebar nav visibility
-  var dsBiz = document.getElementById('dsBtnBizAdmin');
-  var dsMenu = document.getElementById('dsBtnMenuMgr');
-  var dsUsers = document.getElementById('dsBtnUsers');
-  if (dsBiz) dsBiz.style.display = (hasBiz && admin) ? '' : 'none';
-  if (dsMenu) dsMenu.style.display = (admin || role === 'Manager') && businessList.length > 0 ? '' : 'none';
-  if (dsUsers) dsUsers.style.display = (admin || role === 'Manager') ? '' : 'none';
-  // Sidebar business status
-  var dsBizStatus = document.getElementById('dsBizStatus');
-  if (dsBizStatus) {
-    if (hasBiz) {
-      var biz = businessList.find(function(b){ return b.id === bid; });
-      dsBizStatus.innerHTML = biz ? '<span style="color:var(--success);">&#9679;</span> ' + (biz.name||'').split(' - ').pop() : '';
-    } else {
-      dsBizStatus.textContent = '';
-    }
   }
 }
 
@@ -5080,57 +4984,6 @@ document.getElementById('baseUrl').textContent = location.origin;
 if (isStaffMode()) { localStorage.removeItem('ADMIN_KEY'); }
 applyRoleBadge();
 updateLoginUI();
-// Sidebar navigation — section switching
-var _activeSection = 'dashboard';
-function dsNavigate(btn, section) {
-  // Update active state on sidebar
-  document.querySelectorAll('.ds-nav-item').forEach(function(b){ b.classList.remove('active'); });
-  if (btn) btn.classList.add('active');
-
-  // "newbiz" and "menu" are actions, not sections — don't switch view
-  if (section === 'newbiz' || section === 'menu' || section === 'settings') return;
-
-  _activeSection = section;
-
-  // Hide all sections
-  document.querySelectorAll('[data-section]').forEach(function(el) {
-    el.style.display = 'none';
-  });
-
-  // Show target section
-  var target = document.querySelector('[data-section="'+section+'"]');
-  if (target) {
-    target.style.display = '';
-    // Load section data if needed
-    if (section === 'bizadmin') {
-      var bid = getBusinessId();
-      if (bid) loadBizProfile(bid);
-    } else if (section === 'users') {
-      loadUsers();
-    } else if (section === 'customers') {
-      loadCrm();
-    }
-  }
-}
-
-function dsGoHome() {
-  var homeBtn = document.querySelector('[data-dsnav="dashboard"]');
-  dsNavigate(homeBtn, 'dashboard');
-}
-
-// Populate sidebar profile
-(function initSidebarProfile(){
-  var u = getJwtUser();
-  var avatar = document.getElementById('dsAvatar');
-  var nameEl = document.getElementById('dsName');
-  var roleEl = document.getElementById('dsRole');
-  if (u && nameEl) {
-    var displayName = u.name || u.email || '?';
-    nameEl.textContent = displayName;
-    roleEl.textContent = u.role || '—';
-    if (avatar) avatar.textContent = displayName.charAt(0).toUpperCase();
-  }
-})();
 
 // Set default date filter to today
 const today = new Date().toISOString().slice(0,10);
