@@ -1177,6 +1177,52 @@
     .biz-section-toggle:hover { color: var(--accent); }
     .biz-section { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border-light); }
 
+    /* ═══ Settings Panel (DCP-style) ═══ */
+    .settings-panel { display: flex; flex-direction: column; overflow: hidden; padding: 0; }
+    .settings-titlebar {
+      height: 42px; display: flex; align-items: center; padding: 0 16px;
+      border-bottom: 1px solid var(--border-light); flex-shrink: 0; gap: 10px;
+    }
+    .settings-dots { display: flex; gap: 7px; }
+    .settings-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      border: none; padding: 0; cursor: pointer; box-shadow: none;
+    }
+    .settings-dot:hover { filter: brightness(1.2); }
+    .settings-dot.red { background: #FF5F57; }
+    .settings-dot.yellow { background: #FEBC2E; }
+    .settings-dot.green { background: #28C840; }
+    .settings-title {
+      flex: 1; text-align: center; font-size: 13px; font-weight: 600;
+      color: var(--text); letter-spacing: -.01em;
+    }
+    .settings-body { display: flex; min-height: 380px; }
+    .settings-sidebar {
+      width: 160px; flex-shrink: 0; padding: 12px 8px;
+      border-right: 1px solid var(--border-light);
+      display: flex; flex-direction: column; gap: 2px;
+    }
+    .settings-nav-item {
+      padding: 7px 12px; border-radius: 8px; cursor: pointer;
+      font-size: 12.5px; font-weight: 500; color: var(--text-secondary);
+      transition: background .15s, color .15s;
+    }
+    .settings-nav-item:hover { background: var(--accent-subtle); color: var(--text); }
+    .settings-nav-item.active { background: var(--accent-subtle); color: var(--accent); font-weight: 600; }
+    .settings-content { flex: 1; padding: 20px 24px; overflow-y: auto; }
+    .settings-section { display: none; }
+    .settings-section.active { display: block; }
+    .settings-section .form-grid { margin-top: 0; }
+    .settings-section h4 { margin: 0 0 12px; }
+    .settings-actions {
+      border-top: 1px solid var(--border-light); padding: 12px 20px;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    }
+    @media (max-width: 768px) {
+      .settings-body { flex-direction: column; }
+      .settings-sidebar { width: auto; flex-direction: row; border-right: none; border-bottom: 1px solid var(--border-light); overflow-x: auto; }
+    }
+
     /* ═══ Modals — frosted glass ═══ */
     .modal-overlay { display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,.45); backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px); z-index:100; justify-content:center; align-items:flex-start; padding:60px 16px; }
     .modal-overlay.open { display:flex; }
@@ -1785,93 +1831,100 @@
 
   <div class="app-container">
 
-  <!-- Business Admin Panel (collapsible) -->
-  <div id="bizPanel" class="biz-panel" style="display:none;">
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
-      <h3 id="bizPanelTitle">Perfil del Negocio</h3>
-      <button onclick="toggleBizPanel()" style="border:none; background:none; font-size:18px; cursor:pointer; color:#888;">&times;</button>
+  <!-- Business Admin Panel (DCP settings style) -->
+  <div id="bizPanel" class="biz-panel settings-panel" style="display:none;">
+    <div class="settings-titlebar">
+      <div class="settings-dots">
+        <div class="settings-dot red" onclick="toggleBizPanel()"></div>
+        <div class="settings-dot yellow"></div>
+        <div class="settings-dot green"></div>
+      </div>
+      <div id="bizPanelTitle" class="settings-title">Perfil del Negocio</div>
+      <div style="width:50px;"></div>
     </div>
-
-    <!-- Profile section -->
-    <div class="form-grid">
-      <div>
-        <label>Nombre</label>
-        <input id="bizName" placeholder="Nombre del restaurante" />
+    <div class="settings-body">
+      <div class="settings-sidebar">
+        <div class="settings-nav-item active" onclick="bizPanelNav('perfil')">Perfil</div>
+        <div class="settings-nav-item" onclick="bizPanelNav('pagos')">Pagos</div>
+        <div class="settings-nav-item" onclick="bizPanelNav('notif')">Notificaciones</div>
+        <div class="settings-nav-item" onclick="bizPanelNav('menu')">Menu</div>
       </div>
-      <div>
-        <label>Phone Number ID</label>
-        <input id="bizPhone" disabled class="readonly-field" />
-      </div>
-      <div class="full">
-        <label>Saludo personalizado</label>
-        <input id="bizGreeting" placeholder="Ej: Bienvenido a Mi Restaurante" />
-      </div>
-      <div>
-        <label>Direccion</label>
-        <input id="bizAddress" placeholder="Direccion del local" />
-      </div>
-      <div>
-        <label>Horario</label>
-        <input id="bizSchedule" placeholder="Ej: Lun-Vie 8am-6pm" />
-      </div>
-      <div class="full">
-        <label>Logo URL</label>
-        <input id="bizLogoUrl" placeholder="https://..." />
-      </div>
-    </div>
-
-    <!-- Payment config section -->
-    <div style="margin-top:16px; padding-top:12px; border-top:1px solid #eee;">
-      <div class="biz-section-toggle" onclick="document.getElementById('paymentSection').style.display = document.getElementById('paymentSection').style.display === 'none' ? 'grid' : 'none';">
-        <span style="font-size:12px;">&#9654;</span>
-        <span style="font-size:13px; font-weight:600;">Configuracion de Pago Movil</span>
-      </div>
-      <div id="paymentSection" class="form-grid" style="display:none; margin-top:8px;">
-        <div>
-          <label>Banco</label>
-          <input id="bizPmBank" placeholder="Ej: Banesco" />
+      <div class="settings-content">
+        <div class="settings-section active" data-section="perfil">
+          <div class="form-grid">
+            <div>
+              <label>Nombre</label>
+              <input id="bizName" placeholder="Nombre del restaurante" />
+            </div>
+            <div>
+              <label>Phone Number ID</label>
+              <input id="bizPhone" disabled class="readonly-field" />
+            </div>
+            <div class="full">
+              <label>Saludo personalizado</label>
+              <input id="bizGreeting" placeholder="Ej: Bienvenido a Mi Restaurante" />
+            </div>
+            <div>
+              <label>Direccion</label>
+              <input id="bizAddress" placeholder="Direccion del local" />
+            </div>
+            <div>
+              <label>Horario</label>
+              <input id="bizSchedule" placeholder="Ej: Lun-Vie 8am-6pm" />
+            </div>
+            <div class="full">
+              <label>Logo URL</label>
+              <input id="bizLogoUrl" placeholder="https://..." />
+            </div>
+          </div>
         </div>
-        <div>
-          <label>C.I. / RIF</label>
-          <input id="bizPmId" placeholder="Ej: V-12345678" />
+        <div class="settings-section" data-section="pagos">
+          <h4>Configuracion de Pago Movil</h4>
+          <div id="paymentSection" class="form-grid">
+            <div>
+              <label>Banco</label>
+              <input id="bizPmBank" placeholder="Ej: Banesco" />
+            </div>
+            <div>
+              <label>C.I. / RIF</label>
+              <input id="bizPmId" placeholder="Ej: V-12345678" />
+            </div>
+            <div>
+              <label>Telefono Pago Movil</label>
+              <input id="bizPmPhone" placeholder="Ej: 0414-1234567" />
+            </div>
+          </div>
         </div>
-        <div>
-          <label>Telefono Pago Movil</label>
-          <input id="bizPmPhone" placeholder="Ej: 0414-1234567" />
+        <div class="settings-section" data-section="notif">
+          <h4>Notificaciones al Staff</h4>
+          <div>
+            <label style="font-size:11px;color:var(--muted);font-weight:500;text-transform:uppercase;letter-spacing:.03em;display:block;margin-bottom:4px;">Numero WhatsApp para notificaciones</label>
+            <input id="bizNotifPhone" placeholder="Ej: +584141234567 (formato E.164)" />
+            <small class="muted">Recibira alertas de pedidos nuevos y solicitudes de atencion humana</small>
+          </div>
+        </div>
+        <div class="settings-section" data-section="menu">
+          <h4>Menu PDF (visual para el cliente)</h4>
+          <small class="muted" style="display:block;margin-bottom:8px;">Este PDF se envia al cliente por WhatsApp al iniciar una conversacion.</small>
+          <div>
+            <span id="bizMenuPdfStatus" class="small muted"></span>
+            <input id="bizMenuPdf" type="file" accept="application/pdf" style="margin:6px 0;" />
+            <button onclick="uploadBizMenuPdf()">Subir PDF</button>
+            <button onclick="deleteBizMenuPdf()" style="color:#c00;">Eliminar PDF</button>
+            <span id="bizMenuPdfMsg" class="small"></span>
+          </div>
+          <div style="margin-top:10px; padding:8px 12px; background:var(--accent-subtle); border-radius:6px; border:1px solid var(--border);">
+            <small><strong>Menu del Bot:</strong> Configura productos y precios en el <a href="/menu.html">Menu Manager</a>.</small>
+          </div>
         </div>
       </div>
     </div>
-
-    <div class="biz-section">
-      <h4>Notificaciones al Staff</h4>
-      <div>
-        <label>Numero WhatsApp para notificaciones</label>
-        <input id="bizNotifPhone" placeholder="Ej: +584141234567 (formato E.164)" />
-        <small class="muted">Recibira alertas de pedidos nuevos y solicitudes de atencion humana</small>
-      </div>
-    </div>
-
-    <div class="biz-section">
-      <h4>Menu PDF (visual para el cliente)</h4>
-      <small class="muted" style="display:block;margin-bottom:8px;">Este PDF se envia al cliente por WhatsApp al iniciar una conversacion. Es la carta visual de tu negocio.</small>
-      <div>
-        <span id="bizMenuPdfStatus" class="small muted"></span>
-        <input id="bizMenuPdf" type="file" accept="application/pdf" style="margin:6px 0;" />
-        <button onclick="uploadBizMenuPdf()">Subir PDF</button>
-        <button onclick="deleteBizMenuPdf()" style="color:#c00;">Eliminar PDF</button>
-        <span id="bizMenuPdfMsg" class="small"></span>
-      </div>
-      <div style="margin-top:10px; padding:8px 12px; background:var(--accent-subtle); border-radius:6px; border:1px solid var(--border);">
-        <small><strong>Menu del Bot (productos y precios):</strong> Para que el bot interprete pedidos correctamente, configura categorias, productos, precios y alias en el <a href="/menu.html">Menu Manager</a>.</small>
-      </div>
-    </div>
-
-    <div class="biz-actions">
-      <button class="success" onclick="saveBizProfile()">Guardar Cambios</button>
-      <button id="btnToggleActive" onclick="toggleBizActive()">Desactivar</button>
+    <div class="settings-actions">
       <span id="bizSaveMsg" class="small muted"></span>
-      <span style="flex:1;"></span>
       <span class="small muted" id="bizAdminKey"></span>
+      <span style="flex:1;"></span>
+      <button id="btnToggleActive" onclick="toggleBizActive()">Desactivar</button>
+      <button class="success" onclick="saveBizProfile()">Guardar Cambios</button>
     </div>
   </div>
 
@@ -2870,6 +2923,16 @@ function openMenuManager(){
 function closeAllPanels(except) {
   ['bizPanel','usersPanel','customersPanel'].forEach(function(id) {
     if (id !== except) document.getElementById(id).style.display = 'none';
+  });
+}
+
+function bizPanelNav(section) {
+  document.querySelectorAll('#bizPanel .settings-section').forEach(function(s){ s.classList.remove('active'); });
+  document.querySelectorAll('#bizPanel .settings-nav-item').forEach(function(n){ n.classList.remove('active'); });
+  var target = document.querySelector('#bizPanel .settings-section[data-section="'+section+'"]');
+  if (target) target.classList.add('active');
+  document.querySelectorAll('#bizPanel .settings-nav-item').forEach(function(n){
+    if (n.getAttribute('onclick') && n.getAttribute('onclick').indexOf("'"+section+"'") !== -1) n.classList.add('active');
   });
 }
 
