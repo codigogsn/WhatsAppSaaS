@@ -4137,7 +4137,6 @@ function openDashboardConfig() {
   var modal = document.getElementById('dashConfigModal');
   var list = document.getElementById('dashConfigList');
   list.innerHTML = '';
-  // Build module list from current layout or DOM
   var moduleIds = [];
   document.querySelectorAll('[data-module]').forEach(function(el) {
     var mid = el.getAttribute('data-module');
@@ -4149,24 +4148,51 @@ function openDashboardConfig() {
     var isVisible = el.style.display !== 'none';
     var label = _moduleLabels[mid] || mid;
     var row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border-light,#f2f2f7);';
-    row.innerHTML = '<span style="font-size:13px;font-weight:500;">'+label+'</span>'
-      + '<label class="toggle-switch" style="margin:0;">'
+    row.className = 'dcp-row';
+    row.innerHTML = '<span class="dcp-row-label">'+label+'</span>'
+      + '<label class="dcp-toggle">'
       + '<input type="checkbox" '+(isVisible?'checked':'')+' onchange="toggleDashModule(\''+mid+'\',this.checked)">'
-      + '<span class="toggle-track"></span></label>';
+      + '<span class="dcp-toggle-track"></span></label>';
     list.appendChild(row);
   });
-  // Add reorder button at end
-  var reorderRow = document.createElement('div');
-  reorderRow.style.cssText = 'padding:12px 0 4px;text-align:center;';
-  reorderRow.innerHTML = '<button id="btnEditLayout" onclick="toggleEditMode();closeDashboardConfig();" style="font-size:12px;padding:6px 16px;">'
-    + (_editMode ? 'Finalizar edicion' : 'Reordenar modulos') + '</button>';
-  list.appendChild(reorderRow);
+  var btn = document.getElementById('btnEditLayout');
+  if (btn) btn.innerHTML = (_editMode ? '&#9776; Finalizar edicion' : '&#9776; Reordenar modulos');
+  // Show layout section by default
+  dcpNav(document.querySelector('.dcp-nav-item.active') || document.querySelector('.dcp-nav-item'), 'layout');
   modal.style.display = 'flex';
 }
 
 function closeDashboardConfig() {
   document.getElementById('dashConfigModal').style.display = 'none';
+}
+
+function dcpNav(btn, section) {
+  document.querySelectorAll('.dcp-nav-item').forEach(function(b){ b.classList.remove('active'); });
+  btn.classList.add('active');
+  ['layout','appearance','branding'].forEach(function(s){
+    var el = document.getElementById('dcpSection' + s.charAt(0).toUpperCase() + s.slice(1));
+    if (el) el.style.display = s === section ? '' : 'none';
+  });
+}
+
+function resetDashboardLayout() {
+  document.querySelectorAll('[data-module]').forEach(function(el){
+    el.style.removeProperty('display');
+    el.style.removeProperty('order');
+  });
+  _dashboardLayout = null;
+  var jwt = getJwt();
+  if (jwt && getBusinessId()) {
+    var defaultModules = [
+      {id:'heroKpi',visible:true,position:1},{id:'revenue',visible:true,position:2},
+      {id:'performance',visible:true,position:3},{id:'alerts',visible:true,position:4},
+      {id:'statusStrip',visible:true,position:5},{id:'analytics',visible:true,position:6},
+      {id:'handoffs',visible:true,position:7},{id:'customers',visible:true,position:8}
+    ];
+    fetch('/api/dashboard/layout', { method:'POST', headers:jwtHeaders(), body:JSON.stringify({modules:defaultModules}) })
+      .catch(function(e){ console.warn('Reset save failed',e); });
+  }
+  closeDashboardConfig();
 }
 
 function toggleDashModule(moduleId, visible) {
@@ -5159,16 +5185,170 @@ async function sendPromotion(){
 
 <div id="toastStack" class="toast-stack"></div>
 
-<!-- Dashboard Config Modal -->
-<div id="dashConfigModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9000;align-items:center;justify-content:center;backdrop-filter:blur(3px);">
-  <div style="background:var(--card,#fff);border:1px solid var(--border,#e8e8ed);border-radius:var(--radius,16px);padding:24px 28px;width:380px;max-width:92vw;box-shadow:var(--shadow-md);">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h3 style="margin:0;font-size:16px;font-weight:700;">Personalizar Dashboard</h3>
-      <button onclick="closeDashboardConfig()" style="font-size:18px;background:none;border:none;color:var(--muted);cursor:pointer;box-shadow:none;padding:0;">&times;</button>
+<!-- Dashboard Config Panel (macOS-style) -->
+<style>
+  .dcp-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:9000; align-items:center; justify-content:center; -webkit-backdrop-filter:blur(6px); backdrop-filter:blur(6px); }
+  .dcp-window {
+    width:660px; max-width:94vw; max-height:85vh;
+    border-radius:14px; overflow:hidden; display:flex; flex-direction:column;
+    background:rgba(42,42,46,.92); color:#f0f0f0;
+    border:1px solid rgba(255,255,255,.12);
+    box-shadow: 0 24px 80px rgba(0,0,0,.55), 0 8px 30px rgba(0,0,0,.35), inset 0 0 0 1px rgba(255,255,255,.06);
+    -webkit-backdrop-filter:blur(40px) saturate(160%); backdrop-filter:blur(40px) saturate(160%);
+    font-family:var(--font); font-size:13px;
+  }
+  /* Title bar */
+  .dcp-titlebar {
+    height:42px; display:flex; align-items:center; padding:0 16px;
+    background:rgba(52,52,56,.6); border-bottom:1px solid rgba(255,255,255,.07);
+    -webkit-app-region:drag; flex-shrink:0; gap:10px;
+  }
+  .dcp-dots { display:flex; gap:7px; }
+  .dcp-dot { width:12px; height:12px; border-radius:50%; cursor:pointer; border:none; padding:0; box-shadow:none; }
+  .dcp-dot-red { background:#FF5F57; }
+  .dcp-dot-yellow { background:#FEBC2E; }
+  .dcp-dot-green { background:#28C840; }
+  .dcp-dot:hover { filter:brightness(1.2); }
+  .dcp-title { flex:1; text-align:center; font-size:13px; font-weight:600; color:rgba(255,255,255,.7); letter-spacing:-.01em; }
+  /* Body */
+  .dcp-body { display:flex; flex:1; min-height:0; overflow:hidden; }
+  /* Sidebar */
+  .dcp-sidebar {
+    width:170px; flex-shrink:0; padding:12px 8px;
+    background:rgba(32,32,36,.5); border-right:1px solid rgba(255,255,255,.06);
+    display:flex; flex-direction:column; gap:2px;
+  }
+  .dcp-nav-item {
+    display:flex; align-items:center; gap:8px; padding:7px 12px;
+    border-radius:8px; cursor:pointer; font-size:12.5px; font-weight:500;
+    color:rgba(255,255,255,.6); border:none; background:none; box-shadow:none;
+    text-align:left; width:100%; transition:all .15s;
+  }
+  .dcp-nav-item:hover { background:rgba(255,255,255,.06); color:rgba(255,255,255,.8); transform:none; }
+  .dcp-nav-item.active { background:rgba(255,255,255,.10); color:#fff; font-weight:600; }
+  .dcp-nav-icon { font-size:15px; width:20px; text-align:center; }
+  /* Content */
+  .dcp-content { flex:1; padding:20px 24px; overflow-y:auto; }
+  .dcp-content::-webkit-scrollbar { width:5px; }
+  .dcp-content::-webkit-scrollbar-thumb { background:rgba(255,255,255,.1); border-radius:3px; }
+  .dcp-section-title { font-size:15px; font-weight:700; color:#fff; margin-bottom:4px; }
+  .dcp-section-desc { font-size:12px; color:rgba(255,255,255,.4); margin-bottom:16px; }
+  /* Toggle rows */
+  .dcp-row {
+    display:flex; align-items:center; justify-content:space-between;
+    padding:9px 0; border-bottom:1px solid rgba(255,255,255,.05);
+  }
+  .dcp-row:last-of-type { border-bottom:none; }
+  .dcp-row-label { font-size:13px; font-weight:500; color:rgba(255,255,255,.8); }
+  /* macOS-style toggle */
+  .dcp-toggle { position:relative; width:36px; height:20px; display:inline-block; }
+  .dcp-toggle input { opacity:0; width:0; height:0; position:absolute; }
+  .dcp-toggle-track {
+    position:absolute; inset:0; border-radius:10px; cursor:pointer;
+    background:rgba(255,255,255,.12); transition:background .2s;
+  }
+  .dcp-toggle-track::after {
+    content:''; position:absolute; left:2px; top:2px; width:16px; height:16px;
+    border-radius:50%; background:#fff; transition:transform .2s;
+    box-shadow:0 1px 3px rgba(0,0,0,.3);
+  }
+  .dcp-toggle input:checked + .dcp-toggle-track { background:#34C759; }
+  .dcp-toggle input:checked + .dcp-toggle-track::after { transform:translateX(16px); }
+  /* Action buttons */
+  .dcp-btn {
+    display:inline-flex; align-items:center; gap:6px; padding:7px 16px;
+    border-radius:8px; font-size:12px; font-weight:500; cursor:pointer;
+    border:1px solid rgba(255,255,255,.10); background:rgba(255,255,255,.08);
+    color:rgba(255,255,255,.75); box-shadow:none; transition:all .15s;
+  }
+  .dcp-btn:hover { background:rgba(255,255,255,.14); color:#fff; transform:none; }
+  .dcp-actions { display:flex; gap:8px; margin-top:16px; }
+  .dcp-autosave { font-size:11px; color:rgba(255,255,255,.3); margin-top:12px; }
+  /* Placeholder section */
+  .dcp-placeholder { text-align:center; padding:30px 0; }
+  .dcp-placeholder-icon { font-size:28px; margin-bottom:6px; }
+  .dcp-placeholder-text { font-size:12px; color:rgba(255,255,255,.3); }
+  /* Light mode overrides */
+  :root:not([data-theme="dark"]) .dcp-window,
+  [data-theme="light"] .dcp-window { background:rgba(245,245,247,.95); color:#1d1d1f; border-color:rgba(0,0,0,.12); box-shadow:0 24px 80px rgba(0,0,0,.18), 0 8px 30px rgba(0,0,0,.12), inset 0 0 0 1px rgba(255,255,255,.5); }
+  :root:not([data-theme="dark"]) .dcp-titlebar,
+  [data-theme="light"] .dcp-titlebar { background:rgba(230,230,234,.7); border-bottom-color:rgba(0,0,0,.06); }
+  :root:not([data-theme="dark"]) .dcp-title,
+  [data-theme="light"] .dcp-title { color:rgba(0,0,0,.5); }
+  :root:not([data-theme="dark"]) .dcp-sidebar,
+  [data-theme="light"] .dcp-sidebar { background:rgba(235,235,238,.5); border-right-color:rgba(0,0,0,.06); }
+  :root:not([data-theme="dark"]) .dcp-nav-item,
+  [data-theme="light"] .dcp-nav-item { color:rgba(0,0,0,.5); }
+  :root:not([data-theme="dark"]) .dcp-nav-item:hover,
+  [data-theme="light"] .dcp-nav-item:hover { background:rgba(0,0,0,.04); color:rgba(0,0,0,.7); }
+  :root:not([data-theme="dark"]) .dcp-nav-item.active,
+  [data-theme="light"] .dcp-nav-item.active { background:rgba(0,0,0,.07); color:#1d1d1f; }
+  :root:not([data-theme="dark"]) .dcp-section-title,
+  [data-theme="light"] .dcp-section-title { color:#1d1d1f; }
+  :root:not([data-theme="dark"]) .dcp-section-desc,
+  [data-theme="light"] .dcp-section-desc { color:rgba(0,0,0,.35); }
+  :root:not([data-theme="dark"]) .dcp-row,
+  [data-theme="light"] .dcp-row { border-bottom-color:rgba(0,0,0,.06); }
+  :root:not([data-theme="dark"]) .dcp-row-label,
+  [data-theme="light"] .dcp-row-label { color:rgba(0,0,0,.7); }
+  :root:not([data-theme="dark"]) .dcp-toggle-track,
+  [data-theme="light"] .dcp-toggle-track { background:rgba(0,0,0,.12); }
+  :root:not([data-theme="dark"]) .dcp-btn,
+  [data-theme="light"] .dcp-btn { border-color:rgba(0,0,0,.10); background:rgba(0,0,0,.05); color:rgba(0,0,0,.6); }
+  :root:not([data-theme="dark"]) .dcp-btn:hover,
+  [data-theme="light"] .dcp-btn:hover { background:rgba(0,0,0,.09); color:#1d1d1f; }
+  :root:not([data-theme="dark"]) .dcp-autosave,
+  [data-theme="light"] .dcp-autosave { color:rgba(0,0,0,.3); }
+  :root:not([data-theme="dark"]) .dcp-placeholder-text,
+  [data-theme="light"] .dcp-placeholder-text { color:rgba(0,0,0,.3); }
+  @media(max-width:600px) { .dcp-sidebar { display:none; } .dcp-window { width:96vw; } }
+</style>
+<div id="dashConfigModal" class="dcp-overlay">
+  <div class="dcp-window">
+    <div class="dcp-titlebar">
+      <div class="dcp-dots">
+        <button class="dcp-dot dcp-dot-red" onclick="closeDashboardConfig()" title="Cerrar"></button>
+        <span class="dcp-dot dcp-dot-yellow"></span>
+        <span class="dcp-dot dcp-dot-green"></span>
+      </div>
+      <div class="dcp-title">Personalizar Dashboard</div>
+      <div style="width:50px;"></div>
     </div>
-    <p class="muted small" style="margin-bottom:14px;">Activa o desactiva los modulos visibles en tu dashboard.</p>
-    <div id="dashConfigList"></div>
-    <p class="muted small" style="margin-top:12px;">Los cambios se guardan automaticamente.</p>
+    <div class="dcp-body">
+      <div class="dcp-sidebar">
+        <button class="dcp-nav-item active" onclick="dcpNav(this,'layout')"><span class="dcp-nav-icon">&#9638;</span>Layout</button>
+        <button class="dcp-nav-item" onclick="dcpNav(this,'appearance')"><span class="dcp-nav-icon">&#9788;</span>Apariencia</button>
+        <button class="dcp-nav-item" onclick="dcpNav(this,'branding')"><span class="dcp-nav-icon">&#9733;</span>Branding</button>
+      </div>
+      <div class="dcp-content">
+        <div id="dcpSectionLayout">
+          <div class="dcp-section-title">Modulos del Dashboard</div>
+          <div class="dcp-section-desc">Activa o desactiva los modulos visibles.</div>
+          <div id="dashConfigList"></div>
+          <div class="dcp-actions">
+            <button class="dcp-btn" id="btnEditLayout" onclick="toggleEditMode();closeDashboardConfig();">&#9776; Reordenar modulos</button>
+            <button class="dcp-btn" onclick="resetDashboardLayout()">&#8635; Restaurar layout</button>
+          </div>
+          <div class="dcp-autosave">Los cambios se guardan automaticamente.</div>
+        </div>
+        <div id="dcpSectionAppearance" style="display:none;">
+          <div class="dcp-section-title">Apariencia</div>
+          <div class="dcp-section-desc">Personaliza colores y estilo visual.</div>
+          <div class="dcp-placeholder">
+            <div class="dcp-placeholder-icon">&#127912;</div>
+            <div class="dcp-placeholder-text">Proximamente: temas, colores y tipografia.</div>
+          </div>
+        </div>
+        <div id="dcpSectionBranding" style="display:none;">
+          <div class="dcp-section-title">Branding</div>
+          <div class="dcp-section-desc">Logo y colores de tu negocio.</div>
+          <div class="dcp-placeholder">
+            <div class="dcp-placeholder-icon">&#9733;</div>
+            <div class="dcp-placeholder-text">Proximamente: sube tu logo y elige tu color de marca.</div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 </body>
