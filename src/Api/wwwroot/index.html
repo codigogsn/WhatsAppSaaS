@@ -1655,21 +1655,25 @@
     }
 
     /* ── Assistant Dock ── */
-    /* ═══ Business Assistant — Premium DCP Panel ═══ */
-    .assist-launcher {
-      position: fixed; bottom: 24px; right: 24px; z-index: 900;
-      width: 52px; height: 52px; border-radius: 50%;
-      background: var(--accent); color: #fff; border: none;
-      font-size: 21px; cursor: pointer; display: flex; align-items: center;
-      justify-content: center;
-      box-shadow: 0 4px 20px rgba(0,122,255,.3), 0 2px 8px rgba(0,0,0,.15);
-      transition: transform .15s ease-out, box-shadow .15s ease-out;
+    /* ═══ Business Assistant — Intelligence Panel ═══ */
+    /* Navbar intelligence indicator */
+    .intel-indicator {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 5px 12px; border-radius: 8px; cursor: pointer;
+      font-size: 12px; font-weight: 600; letter-spacing: .02em;
+      border: 1px solid var(--border); background: var(--surface-2);
+      color: var(--text-secondary); transition: all .15s ease-out;
+      white-space: nowrap;
     }
-    .assist-launcher:hover {
-      transform: scale(1.08);
-      box-shadow: 0 6px 28px rgba(0,122,255,.4), 0 4px 12px rgba(0,0,0,.2);
+    .intel-indicator:hover { background: var(--accent-subtle); color: var(--text); }
+    .intel-indicator.open { background: var(--accent-subtle); border-color: rgba(0,122,255,.15); color: var(--accent); }
+    .intel-indicator .intel-dot {
+      width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
     }
-    .assist-launcher.hidden { display: none; }
+    .intel-indicator .intel-dot.stable { background: var(--success); }
+    .intel-indicator .intel-dot.friction { background: var(--warning); }
+    .intel-indicator .intel-dot.risk { background: var(--danger); }
+    .intel-indicator.hidden { display: none; }
 
     .assist-dock {
       position: fixed; bottom: 24px; right: 24px; z-index: 901;
@@ -1884,7 +1888,6 @@
 
     @media (max-width: 500px) {
       .assist-dock { width: calc(100vw - 24px); right: 12px; bottom: 12px; max-height: 85vh; border-radius: 14px; }
-      .assist-launcher { bottom: 16px; right: 16px; width: 48px; height: 48px; font-size: 19px; }
     }
   </style>
 </head>
@@ -1923,6 +1926,10 @@
     <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
     <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
     <span id="selectedBizStatus" class="small"></span>
+    <div class="intel-indicator hidden" id="intelIndicator" onclick="toggleAssistDock()">
+      <span class="intel-dot stable" id="intelDot"></span>
+      <span id="intelLabel">Estable</span>
+    </div>
     <button onclick="openDashboardConfig()" id="btnDashConfig" title="Personalizar dashboard" style="font-size:14px;padding:4px 10px;">&#9881;</button>
     <span style="flex:1;"></span>
     <span class="muted small">API: <code id="baseUrl"></code></span>
@@ -3908,12 +3915,37 @@ var _founderInsightLabels = {
 function founderAlertLabel(t) { return _founderAlertLabels[t] || (t ? t.replace(/_/g, ' ') : 'Alerta'); }
 function founderInsightLabel(t) { return _founderInsightLabels[t] || (t ? t.replace(/_/g, ' ') : 'Insight'); }
 
+// ── Intelligence Indicator ──
+function updateIntelIndicator(data) {
+  var dot = document.getElementById('intelDot');
+  var label = document.getElementById('intelLabel');
+  if (!dot || !label) return;
+  var title = (data && data.businessStateTitle) || '';
+  var t = title.toLowerCase();
+  if (t.indexOf('fricci') !== -1) {
+    dot.className = 'intel-dot friction';
+    label.textContent = 'Fricci\u00f3n';
+  } else if (t.indexOf('riesgo') !== -1 || t.indexOf('inicial') !== -1) {
+    dot.className = 'intel-dot risk';
+    label.textContent = t.indexOf('inicial') !== -1 ? 'Inicial' : 'Riesgo';
+  } else if (t.indexOf('fuerte') !== -1 || t.indexOf('estable') !== -1) {
+    dot.className = 'intel-dot stable';
+    label.textContent = 'Estable';
+  } else if (t.indexOf('crecimiento') !== -1 || t.indexOf('desarrollo') !== -1) {
+    dot.className = 'intel-dot stable';
+    label.textContent = 'Creciendo';
+  } else {
+    dot.className = 'intel-dot stable';
+    label.textContent = 'Activo';
+  }
+}
+
 // ── Assistant Dock ──
 function toggleAssistDock() {
   var dock = document.getElementById('assistDock');
-  var launcher = document.getElementById('assistLauncher');
+  var indicator = document.getElementById('intelIndicator');
   var isOpen = dock.classList.toggle('open');
-  launcher.classList.toggle('hidden', isOpen);
+  if (indicator) indicator.classList.toggle('open', isOpen);
   localStorage.setItem('assist_dock_open_' + (getBusinessId() || 'global'), isOpen ? '1' : '0');
 }
 
@@ -3921,7 +3953,7 @@ function initAssistDock() {
   if (window._assistInit) return;
   window._assistInit = true;
   var role = getAuthRole();
-  var launcher = document.getElementById('assistLauncher');
+  var indicator = document.getElementById('intelIndicator');
   var dock = document.getElementById('assistDock');
   var titleEl = document.getElementById('assistTitle');
   var iconEl = document.getElementById('assistIcon');
@@ -3932,10 +3964,11 @@ function initAssistDock() {
   var isBizOwner = (role === 'Owner' || role === 'Manager') && !!getBusinessId();
 
   if (!isFounder && !isBizOwner) {
-    launcher.classList.add('hidden');
+    if (indicator) indicator.classList.add('hidden');
     dock.classList.remove('open');
     return;
   }
+  if (indicator) indicator.classList.remove('hidden');
 
   // Configure dock for role
   if (isFounder) {
@@ -3964,9 +3997,7 @@ function initAssistDock() {
   var wasOpen = localStorage.getItem('assist_dock_open_' + (getBusinessId() || 'global')) === '1';
   if (wasOpen) {
     dock.classList.add('open');
-    launcher.classList.add('hidden');
-  } else {
-    launcher.classList.remove('hidden');
+    if (indicator) indicator.classList.add('open');
   }
 
   initSuggestions();
@@ -4163,6 +4194,9 @@ async function loadBusinessInsights() {
     if (secEl) secEl.innerHTML = secHtml;
     var scrollZone = document.getElementById('bizScrollZone');
     if (scrollZone) scrollZone.style.display = '';
+
+    // Update navbar intelligence indicator
+    updateIntelIndicator(data);
 
   } catch (e) {
     console.warn('Business insights load error:', e);
@@ -5213,7 +5247,6 @@ async function sendPromotion(){
 }
 </script>
 <!-- ── Assistant Dock ── -->
-<button class="assist-launcher hidden" id="assistLauncher" onclick="toggleAssistDock()">&#x1f4ac;</button>
 <div class="assist-dock" id="assistDock">
   <div class="assist-dock-header">
     <div class="assist-dock-dots">
