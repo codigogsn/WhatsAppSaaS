@@ -1675,6 +1675,51 @@
     .intel-indicator .intel-dot.risk { background: var(--danger); }
     .intel-indicator.hidden { display: none; }
 
+    /* ═══ Inline Intelligence Strip ═══ */
+    .intel-strip {
+      display: none; margin-bottom: 16px;
+      background: var(--card); border: 1px solid var(--border-light);
+      border-radius: 14px; padding: 16px 20px;
+      box-shadow: var(--shadow);
+    }
+    .intel-strip.visible { display: flex; align-items: flex-start; gap: 16px; }
+    .intel-strip-badge {
+      flex-shrink: 0; padding: 4px 10px; border-radius: 6px;
+      font-size: 11px; font-weight: 700; letter-spacing: .03em;
+      text-transform: uppercase; white-space: nowrap; margin-top: 2px;
+    }
+    .intel-strip-badge.stable { background: var(--success-bg); color: var(--success); }
+    .intel-strip-badge.attention { background: var(--warning-bg); color: var(--warning); }
+    .intel-strip-badge.risk { background: var(--danger-bg); color: var(--danger); }
+    .intel-strip-badge.growth { background: var(--info-bg); color: var(--info); }
+    .intel-strip-body { flex: 1; min-width: 0; }
+    .intel-strip-title {
+      font-size: 14px; font-weight: 700; color: var(--text);
+      letter-spacing: -.01em; margin-bottom: 3px; line-height: 1.3;
+    }
+    .intel-strip-action {
+      font-size: 12.5px; color: var(--text-secondary); line-height: 1.4;
+      margin-bottom: 2px;
+    }
+    .intel-strip-support {
+      font-size: 11.5px; color: var(--muted); line-height: 1.35;
+    }
+    .intel-strip-btn {
+      flex-shrink: 0; align-self: center;
+      padding: 7px 16px; border-radius: 8px; font-size: 12px; font-weight: 600;
+      background: var(--accent-subtle); color: var(--accent);
+      border: 1px solid rgba(0,122,255,.12); cursor: pointer;
+      transition: all .15s ease-out; white-space: nowrap;
+    }
+    .intel-strip-btn:hover {
+      background: rgba(0,122,255,.12); border-color: rgba(0,122,255,.2);
+      transform: translateY(-1px); box-shadow: 0 2px 8px rgba(0,122,255,.1);
+    }
+    @media (max-width: 768px) {
+      .intel-strip.visible { flex-direction: column; gap: 10px; }
+      .intel-strip-btn { align-self: flex-start; }
+    }
+
     /* ═══ Intelligence Panel — flagship surface ═══ */
     .assist-dock {
       position: fixed; top: 100px; right: 20px; bottom: 20px; z-index: 901;
@@ -2387,6 +2432,17 @@ Tipo: burger"></textarea>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--accent);">En Camino</div><div class="status-chip-value" style="color:var(--accent);" id="kpiOut">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--success);">Completed</div><div class="status-chip-value" style="color:var(--success);" id="kpiCompleted">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--danger);">Cancelled</div><div class="status-chip-value" style="color:var(--danger);" id="kpiCancelled">0</div></div>
+  </div>
+
+  <!-- Inline Intelligence Strip -->
+  <div class="intel-strip" id="intelStrip">
+    <div class="intel-strip-badge stable" id="intelStripBadge">Estable</div>
+    <div class="intel-strip-body">
+      <div class="intel-strip-title" id="intelStripTitle">—</div>
+      <div class="intel-strip-action" id="intelStripAction"></div>
+      <div class="intel-strip-support" id="intelStripSupport"></div>
+    </div>
+    <button class="intel-strip-btn" onclick="toggleAssistDock()">Explorar</button>
   </div>
 
   <!-- Extended Analytics -->
@@ -3917,6 +3973,35 @@ var _founderInsightLabels = {
 function founderAlertLabel(t) { return _founderAlertLabels[t] || (t ? t.replace(/_/g, ' ') : 'Alerta'); }
 function founderInsightLabel(t) { return _founderInsightLabels[t] || (t ? t.replace(/_/g, ' ') : 'Insight'); }
 
+// ── Inline Intelligence Strip ──
+function updateIntelStrip(data) {
+  var strip = document.getElementById('intelStrip');
+  if (!strip) return;
+  if (!data || !data.businessStateTitle) {
+    strip.className = 'intel-strip';
+    return;
+  }
+  strip.className = 'intel-strip visible';
+  var badge = document.getElementById('intelStripBadge');
+  var title = document.getElementById('intelStripTitle');
+  var action = document.getElementById('intelStripAction');
+  var support = document.getElementById('intelStripSupport');
+  if (title) title.textContent = data.businessStateTitle;
+  if (action) action.textContent = data.primaryRecommendation ? data.primaryRecommendation.action || '' : '';
+  if (support) support.textContent = data.businessStateSummary || '';
+  // Map badge
+  if (badge) {
+    var t = data.businessStateTitle.toLowerCase();
+    if (t.indexOf('fricci') !== -1) { badge.className = 'intel-strip-badge attention'; badge.textContent = 'Atenci\u00f3n'; }
+    else if (t.indexOf('riesgo') !== -1) { badge.className = 'intel-strip-badge risk'; badge.textContent = 'Riesgo'; }
+    else if (t.indexOf('inicial') !== -1) { badge.className = 'intel-strip-badge attention'; badge.textContent = 'Inicio'; }
+    else if (t.indexOf('fuerte') !== -1) { badge.className = 'intel-strip-badge stable'; badge.textContent = 'Fuerte'; }
+    else if (t.indexOf('crecimiento') !== -1) { badge.className = 'intel-strip-badge growth'; badge.textContent = 'Crecimiento'; }
+    else if (t.indexOf('estable') !== -1) { badge.className = 'intel-strip-badge stable'; badge.textContent = 'Estable'; }
+    else { badge.className = 'intel-strip-badge stable'; badge.textContent = 'Activo'; }
+  }
+}
+
 // ── Intelligence Indicator ──
 function updateIntelIndicator(data) {
   var dot = document.getElementById('intelDot');
@@ -4135,6 +4220,7 @@ async function loadBusinessInsights() {
 
     if (!hasData) {
       content.innerHTML = '<div class="insights-empty">No hay suficientes datos para generar insights.</div>';
+      updateIntelStrip(null);
       return;
     }
 
@@ -4203,8 +4289,9 @@ async function loadBusinessInsights() {
     var scrollZone = document.getElementById('bizScrollZone');
     if (scrollZone) scrollZone.style.display = '';
 
-    // Update navbar intelligence indicator
+    // Update visible intelligence surfaces
     updateIntelIndicator(data);
+    updateIntelStrip(data);
 
   } catch (e) {
     console.warn('Business insights load error:', e);
