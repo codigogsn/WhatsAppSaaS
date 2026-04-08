@@ -1685,29 +1685,33 @@
     }
     .assist-dock.open { display: flex; }
 
-    /* Titlebar */
+    /* Titlebar — DCP chrome */
     .assist-dock-header {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 0 16px; height: 42px; flex-shrink: 0;
+      display: flex; align-items: center;
+      padding: 0 16px; height: 42px; flex-shrink: 0; gap: 10px;
       background: var(--surface-2); border-bottom: 1px solid var(--border);
     }
-    .assist-dock-title { display: flex; align-items: center; gap: 8px; }
-    .assist-dock-title-main {
-      display: flex; align-items: center; gap: 7px;
-      font-size: 13px; font-weight: 600; color: var(--text);
+    .assist-dock-dots { display: flex; gap: 7px; }
+    .assist-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      border: none; padding: 0; cursor: pointer;
+      box-shadow: inset 0 -1px 1px rgba(0,0,0,.12), 0 1px 2px rgba(0,0,0,.08);
+      transition: filter .12s;
+    }
+    .assist-dot:hover { filter: brightness(1.15); }
+    .assist-dot.red { background: #FF5F57; }
+    .assist-dot.yellow { background: #FEBC2E; }
+    .assist-dot.green { background: #28C840; }
+    .assist-dock-title-center {
+      flex: 1; display: flex; align-items: center; justify-content: center; gap: 6px;
+      font-size: 13px; font-weight: 600; color: var(--text-secondary);
       letter-spacing: -.01em;
     }
-    .assist-dock-title-icon { font-size: 15px; }
+    .assist-dock-title-icon { font-size: 14px; }
     .assist-dock-title-sub {
       font-size: 10px; color: var(--muted); font-weight: 400;
-      letter-spacing: .02em;
+      letter-spacing: .02em; margin-left: 4px;
     }
-    .assist-dock-close {
-      background: none; border: none; color: var(--muted); font-size: 18px;
-      cursor: pointer; padding: 4px 8px; border-radius: 6px;
-      transition: all .12s;
-    }
-    .assist-dock-close:hover { color: var(--text); background: var(--accent-subtle); }
 
     /* Body — scrollable insights area */
     .assist-dock-body {
@@ -5205,14 +5209,17 @@ async function sendPromotion(){
 <button class="assist-launcher hidden" id="assistLauncher" onclick="toggleAssistDock()">&#x1f4ac;</button>
 <div class="assist-dock" id="assistDock">
   <div class="assist-dock-header">
-    <div class="assist-dock-title">
-      <div class="assist-dock-title-main">
-        <span class="assist-dock-title-icon" id="assistIcon">&#x1f4ca;</span>
-        <span id="assistTitle">Asistente del Negocio</span>
-      </div>
-      <span class="assist-dock-title-sub" id="assistSubtitle">Inteligencia operativa</span>
+    <div class="assist-dock-dots">
+      <div class="assist-dot red" onclick="toggleAssistDock()"></div>
+      <div class="assist-dot yellow"></div>
+      <div class="assist-dot green"></div>
     </div>
-    <button class="assist-dock-close" onclick="toggleAssistDock()">&times;</button>
+    <div class="assist-dock-title-center">
+      <span class="assist-dock-title-icon" id="assistIcon">&#x1f4ca;</span>
+      <span id="assistTitle">Asistente del Negocio</span>
+      <span class="assist-dock-title-sub" id="assistSubtitle"></span>
+    </div>
+    <div style="width:50px;"></div>
   </div>
   <div class="assist-dock-body">
     <!-- Business insights content (Owner/Manager) -->
