@@ -4038,7 +4038,13 @@ document.addEventListener('keydown', function(e) {
 });
 
 // ── Business Insights ──
+var _lastInsightsLoad = 0;
 async function loadBusinessInsights() {
+  // Throttle: max once per 60 seconds
+  var now = Date.now();
+  if (now - _lastInsightsLoad < 60000) return;
+  _lastInsightsLoad = now;
+
   var panel = document.getElementById('businessInsights');
   var content = document.getElementById('insightsContent');
   if (!panel || !content) return;

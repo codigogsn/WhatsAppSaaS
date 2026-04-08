@@ -33,6 +33,7 @@ public sealed class InsightsChatService : IInsightsChatService
         3. ACCIÓN: una sola cosa concreta que hacer hoy.
         No des múltiples opciones. No expliques de más. No repitas métricas sin interpretar.
         Usa tono decisivo: "Activa", "Corrige", "Enfócate en".
+        NUNCA recomiendes cambios de precios, contrataciones, despidos, inversiones o decisiones estratégicas irreversibles. SOLO sugiere acciones operativas inmediatas basadas directamente en los datos visibles.
         Si no hay datos suficientes, responde: "No hay suficiente información para tomar una decisión todavía."
         """;
 

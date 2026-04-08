@@ -60,7 +60,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
             .GroupBy(i => i.Name!.Trim().ToLowerInvariant())
             .Select(g => new ItemPerformance
             {
-                Name = g.Key,
+                Name = g.First().Name!.Trim(),
                 TotalQuantity = g.Sum(x => x.Quantity),
                 TotalRevenue = g.Sum(x => (x.UnitPrice ?? 0m) * x.Quantity)
             })
@@ -70,10 +70,10 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         var lowPerforming = productGroups.Where(p => p.TotalQuantity > 0)
             .OrderBy(p => p.TotalQuantity).Take(5).ToList();
 
-        // ── 4. Peak hours ──
+        // ── 4. Peak hours (converted to VE local time, UTC-4) ──
         var hourCounts = new int[24];
         foreach (var o in orders)
-            hourCounts[o.CreatedAtUtc.Hour]++;
+            hourCounts[o.CreatedAtUtc.AddHours(-4).Hour]++;
 
         var peakHours = hourCounts
             .Select((count, hour) => new HourVolume { Hour = hour, OrderCount = count })
@@ -82,9 +82,10 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
             .Take(5)
             .ToList();
 
-        // ── 5. Repeat customer rate ──
+        // ── 5. Repeat customer rate (windowed to match order period) ──
         var customers = await _db.Customers.AsNoTracking()
-            .Where(c => c.BusinessId == businessId)
+            .Where(c => c.BusinessId == businessId
+                && c.LastPurchaseAtUtc != null && c.LastPurchaseAtUtc >= windowStart)
             .OrderBy(c => c.Id)
             .Select(c => new { c.OrdersCount })
             .Take(50_000)
@@ -141,7 +142,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         }
 
         // Low performing product
-        if (lowPerforming.Count > 0 && productGroups.Count >= 3)
+        if (lowPerforming.Count > 0 && productGroups.Count >= 5)
         {
             insights.Add(new InsightEntry
             {
@@ -284,7 +285,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         if (orders < 5) return "";
 
         if (peakHours.Count > 0 && topSelling.Count > 0)
-            return $"Impulsar combos de {topSelling[0].Name} en hora pico ({peakHours[0].Hour:D2}:00) para maximizar ticket promedio.";
+            return $"Impulsar promociones de {topSelling[0].Name} en hora pico ({peakHours[0].Hour:D2}:00) para maximizar ticket promedio.";
 
         if (repeatRate < _t.RepeatRateLowPercent * 1.3m)
             return "Activar mensajes de seguimiento a clientes recientes para mejorar tasa de recompra.";
@@ -353,7 +354,7 @@ public sealed class BusinessInsightsService : IBusinessInsightsService
         if (peakHours.Count > 0 && topSelling.Count > 0)
             return new ActionableRecommendation
             {
-                Title = "Impulsar combos en hora pico",
+                Title = "Impulsar promociones en hora pico",
                 Action = $"Crea un combo con {topSelling[0].Name} para las {peakHours[0].Hour:D2}:00 hrs.",
                 Impact = "Aumenta ticket promedio en el momento de mayor demanda."
             };
