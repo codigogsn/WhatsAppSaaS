@@ -1713,23 +1713,23 @@
       letter-spacing: .02em; margin-left: 4px;
     }
 
-    /* Body — scrollable insights area */
-    .assist-dock-body {
-      flex: 1; overflow-y: auto; padding: 16px 20px;
+    /* Fixed top — brain status + primary action */
+    .assist-dock-fixed-top {
+      flex-shrink: 0; padding: 16px 20px 8px;
+      border-bottom: 1px solid var(--border-light);
+    }
+    /* Scrollable middle — details + suggestions + response */
+    .assist-dock-scroll {
+      flex: 1; overflow-y: auto; padding: 12px 20px;
       scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.2) transparent;
       min-height: 0;
     }
-    .assist-dock-body::-webkit-scrollbar { width: 5px; }
-    .assist-dock-body::-webkit-scrollbar-thumb { background: rgba(128,128,128,.2); border-radius: 3px; }
-
-    /* Composer / chat footer — anchored */
-    .assist-dock-chat {
-      padding: 14px 20px; border-top: 1px solid var(--border); flex-shrink: 0;
+    .assist-dock-scroll::-webkit-scrollbar { width: 5px; }
+    .assist-dock-scroll::-webkit-scrollbar-thumb { background: rgba(128,128,128,.2); border-radius: 3px; }
+    /* Fixed bottom composer */
+    .assist-dock-composer {
+      padding: 12px 20px; border-top: 1px solid var(--border); flex-shrink: 0;
       background: var(--surface-2);
-    }
-    .assist-chat-label {
-      font-size: 11px; font-weight: 500; text-transform: uppercase;
-      letter-spacing: .03em; color: var(--muted); margin-bottom: 10px;
     }
     /* Suggestion pills */
     .assist-suggestions {
@@ -3941,19 +3941,23 @@ function initAssistDock() {
   if (isFounder) {
     titleEl.textContent = 'Asistente Global';
     iconEl.textContent = '\ud83c\udf0e';
-    if (subEl) subEl.textContent = 'Visi\u00f3n ejecutiva de toda la plataforma';
+    if (subEl) subEl.textContent = 'Visi\u00f3n ejecutiva';
     document.getElementById('founderInsights').style.display = '';
     document.getElementById('founderChatArea').style.display = '';
+    document.getElementById('founderScrollZone').style.display = '';
     document.getElementById('businessInsights').style.display = 'none';
     document.getElementById('bizChatArea').style.display = 'none';
+    document.getElementById('bizScrollZone').style.display = 'none';
   } else {
     titleEl.textContent = 'Asistente del Negocio';
     iconEl.textContent = '\ud83d\udcca';
-    if (subEl) subEl.textContent = 'Analiza tu operaci\u00f3n en tiempo real';
+    if (subEl) subEl.textContent = 'Inteligencia operativa';
     document.getElementById('businessInsights').style.display = '';
     document.getElementById('bizChatArea').style.display = '';
+    document.getElementById('bizScrollZone').style.display = '';
     document.getElementById('founderInsights').style.display = 'none';
     document.getElementById('founderChatArea').style.display = 'none';
+    document.getElementById('founderScrollZone').style.display = 'none';
   }
 
   // Restore open/closed state
@@ -4095,67 +4099,70 @@ async function loadBusinessInsights() {
       return;
     }
 
-    var html = '';
-
-    // ── DECISION BLOCK (top) ──
+    // ── FIXED TOP: Brain State + Primary Action ──
+    var topHtml = '';
     if (data.businessStateTitle) {
-      html += '<div class="insights-state">';
-      html += '<div class="insights-state-title">' + esc(data.businessStateTitle) + '</div>';
+      topHtml += '<div class="insights-state">';
+      topHtml += '<div class="insights-state-title">' + esc(data.businessStateTitle) + '</div>';
       if (data.businessStateSummary)
-        html += '<div class="insights-state-summary">' + esc(data.businessStateSummary) + '</div>';
-      html += '<div class="insights-state-signals">';
+        topHtml += '<div class="insights-state-summary">' + esc(data.businessStateSummary) + '</div>';
+      topHtml += '<div class="insights-state-signals">';
       if (data.mainOpportunity)
-        html += '<div class="insights-state-signal"><span class="insights-state-signal-icon">\ud83d\ude80</span><span>' + esc(data.mainOpportunity) + '</span></div>';
+        topHtml += '<div class="insights-state-signal"><span class="insights-state-signal-icon">\ud83d\ude80</span><span>' + esc(data.mainOpportunity) + '</span></div>';
       if (data.mainRisk)
-        html += '<div class="insights-state-signal"><span class="insights-state-signal-icon">\u26a0\ufe0f</span><span>' + esc(data.mainRisk) + '</span></div>';
-      html += '</div></div>';
+        topHtml += '<div class="insights-state-signal"><span class="insights-state-signal-icon">\u26a0\ufe0f</span><span>' + esc(data.mainRisk) + '</span></div>';
+      topHtml += '</div></div>';
     }
-
-    // ── PRIMARY ACTION (strongest visual) ──
     if (data.primaryRecommendation && data.primaryRecommendation.title) {
       var pr = data.primaryRecommendation;
-      html += '<div class="insights-primary-action">';
-      html += '<div class="insights-primary-action-label">\ud83d\udc49 Acci\u00f3n principal</div>';
-      html += '<div class="insights-primary-action-title">' + esc(pr.title) + '</div>';
-      html += '<div class="insights-primary-action-body">' + esc(pr.action) + '</div>';
+      topHtml += '<div class="insights-primary-action">';
+      topHtml += '<div class="insights-primary-action-label">\ud83d\udc49 Acci\u00f3n principal</div>';
+      topHtml += '<div class="insights-primary-action-title">' + esc(pr.title) + '</div>';
+      topHtml += '<div class="insights-primary-action-body">' + esc(pr.action) + '</div>';
       if (pr.impact)
-        html += '<div class="insights-primary-action-impact">' + esc(pr.impact) + '</div>';
-      html += '</div>';
+        topHtml += '<div class="insights-primary-action-impact">' + esc(pr.impact) + '</div>';
+      topHtml += '</div>';
     }
+    content.innerHTML = topHtml || '<div class="insights-empty">Sin insights disponibles.</div>';
 
+    // ── SCROLLABLE: Secondary Details ──
+    var secHtml = '';
     // ── SECONDARY INSIGHTS (collapsed weight) ──
     var hasSecondary = (data.alerts && data.alerts.length > 0) ||
                        (data.insights && data.insights.length > 0) ||
                        (data.recommendations && data.recommendations.length > 0);
     if (hasSecondary) {
-      html += '<div class="insights-secondary">';
-      html += '<div class="insights-secondary-label">Detalles</div>';
+      secHtml += '<div class="insights-secondary">';
+      secHtml += '<div class="insights-secondary-label">Detalles</div>';
 
       if (data.alerts && data.alerts.length > 0) {
-        html += '<div class="insights-section"><div class="insights-section-title" data-kind="alerts">\u26a0\ufe0f Alertas</div><div class="insights-grid">';
+        secHtml += '<div class="insights-section"><div class="insights-section-title" data-kind="alerts">\u26a0\ufe0f Alertas</div><div class="insights-grid">';
         var alerts = data.alerts.slice(0, 3);
-        for (var i = 0; i < alerts.length; i++) html += insightCard(alerts[i], 'critical', insightLabel(null, alerts[i]));
-        html += '</div></div>';
+        for (var i = 0; i < alerts.length; i++) secHtml += insightCard(alerts[i], 'critical', insightLabel(null, alerts[i]));
+        secHtml += '</div></div>';
       }
 
       if (data.insights && data.insights.length > 0) {
-        html += '<div class="insights-section"><div class="insights-section-title" data-kind="insights">\ud83d\udcca Insights</div><div class="insights-grid">';
+        secHtml += '<div class="insights-section"><div class="insights-section-title" data-kind="insights">\ud83d\udcca Insights</div><div class="insights-grid">';
         var ins = data.insights.slice(0, 3);
-        for (var i = 0; i < ins.length; i++) html += insightCard(ins[i].message, ins[i].severity || 'info', insightLabel(ins[i].type, ins[i].message));
-        html += '</div></div>';
+        for (var i = 0; i < ins.length; i++) secHtml += insightCard(ins[i].message, ins[i].severity || 'info', insightLabel(ins[i].type, ins[i].message));
+        secHtml += '</div></div>';
       }
 
       if (data.recommendations && data.recommendations.length > 0) {
-        html += '<div class="insights-section"><div class="insights-section-title" data-kind="recommendations">\ud83d\udca1 M\u00e1s acciones</div><div class="insights-grid">';
+        secHtml += '<div class="insights-section"><div class="insights-section-title" data-kind="recommendations">\ud83d\udca1 M\u00e1s acciones</div><div class="insights-grid">';
         var recs = data.recommendations.slice(0, 3);
-        for (var i = 0; i < recs.length; i++) html += insightCard(recs[i], 'info', 'Acci\u00f3n Sugerida');
-        html += '</div></div>';
+        for (var i = 0; i < recs.length; i++) secHtml += insightCard(recs[i], 'info', 'Acci\u00f3n Sugerida');
+        secHtml += '</div></div>';
       }
 
-      html += '</div>';
+      secHtml += '</div>';
     }
 
-    content.innerHTML = html || '<div class="insights-empty">Sin insights disponibles.</div>';
+    var secEl = document.getElementById('bizSecondaryContent');
+    if (secEl) secEl.innerHTML = secHtml;
+    var scrollZone = document.getElementById('bizScrollZone');
+    if (scrollZone) scrollZone.style.display = '';
 
   } catch (e) {
     console.warn('Business insights load error:', e);
@@ -5221,41 +5228,46 @@ async function sendPromotion(){
     </div>
     <div style="width:50px;"></div>
   </div>
-  <div class="assist-dock-body">
-    <!-- Business insights content (Owner/Manager) -->
+  <!-- Fixed top: brain status + primary action -->
+  <div class="assist-dock-fixed-top">
     <div id="businessInsights" style="display:none;">
       <div id="insightsContent"><div class="insights-empty">Cargando insights del negocio...</div></div>
     </div>
-    <!-- Founder insights content -->
     <div id="founderInsights" style="display:none;">
       <div id="founderInsightsContent"><div class="insights-empty">Cargando insights globales...</div></div>
     </div>
   </div>
-  <div class="assist-dock-chat">
-    <!-- Business chat -->
-    <div id="bizChatArea" style="display:none;">
-      <div class="assist-chat-label">Pregunta sobre tu negocio</div>
+  <!-- Scrollable middle: details + suggestions + response -->
+  <div class="assist-dock-scroll">
+    <div id="bizScrollZone" style="display:none;">
+      <div id="bizSecondaryContent"></div>
       <div class="assist-suggestions" id="bizSuggestions"></div>
-      <div class="assist-chat-row">
-        <input type="text" id="bizChatInput" placeholder="Escribe tu pregunta..." maxlength="500">
-        <button id="bizChatSend" onclick="sendInsightsChat('business','bizChatInput','bizChatAnswer','bizChatSend')">Preguntar</button>
-      </div>
       <div class="assist-chat-answer" id="bizChatAnswer">
         <div class="assist-chat-answer-label">Respuesta</div>
         <div id="bizChatAnswerText"></div>
       </div>
     </div>
-    <!-- Founder chat -->
-    <div id="founderChatArea" style="display:none;">
-      <div class="assist-chat-label">Pregunta sobre la plataforma</div>
+    <div id="founderScrollZone" style="display:none;">
+      <div id="founderSecondaryContent"></div>
       <div class="assist-suggestions" id="founderSuggestions"></div>
-      <div class="assist-chat-row">
-        <input type="text" id="founderChatInput" placeholder="Escribe tu pregunta..." maxlength="500">
-        <button id="founderChatSend" onclick="sendInsightsChat('founder','founderChatInput','founderChatAnswer','founderChatSend')">Preguntar</button>
-      </div>
       <div class="assist-chat-answer" id="founderChatAnswer">
         <div class="assist-chat-answer-label">Respuesta</div>
         <div id="founderChatAnswerText"></div>
+      </div>
+    </div>
+  </div>
+  <!-- Fixed bottom: composer only -->
+  <div class="assist-dock-composer">
+    <div id="bizChatArea" style="display:none;">
+      <div class="assist-chat-row">
+        <input type="text" id="bizChatInput" placeholder="Pregunta sobre tu negocio..." maxlength="500">
+        <button id="bizChatSend" onclick="sendInsightsChat('business','bizChatInput','bizChatAnswer','bizChatSend')">Preguntar</button>
+      </div>
+    </div>
+    <div id="founderChatArea" style="display:none;">
+      <div class="assist-chat-row">
+        <input type="text" id="founderChatInput" placeholder="Pregunta sobre la plataforma..." maxlength="500">
+        <button id="founderChatSend" onclick="sendInsightsChat('founder','founderChatInput','founderChatAnswer','founderChatSend')">Preguntar</button>
       </div>
     </div>
   </div>
