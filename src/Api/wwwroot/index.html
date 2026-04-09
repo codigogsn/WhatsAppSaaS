@@ -2008,6 +2008,31 @@
       .assist-dock-scroll { padding: 14px 16px; }
       .assist-dock-composer { padding: 12px 16px 14px; }
     }
+
+    /* ═══ View Tabs ═══ */
+    .view-tabs {
+      display: inline-flex; gap: 2px; margin-right: 8px;
+      background: var(--surface-2); border-radius: 8px; padding: 2px;
+      border: 1px solid var(--border-light);
+    }
+    .view-tab {
+      padding: 5px 14px; border-radius: 6px; font-size: 12px; font-weight: 550;
+      border: none; cursor: pointer; color: var(--muted);
+      background: transparent; transition: all .15s ease; letter-spacing: -.005em;
+      font-family: var(--font);
+    }
+    .view-tab:hover { color: var(--text); }
+    .view-tab.active {
+      background: var(--card); color: var(--text);
+      box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    [data-theme="dark"] .view-tabs {
+      background: rgba(255,255,255,.04); border-color: rgba(255,255,255,.06);
+    }
+    [data-theme="dark"] .view-tab.active {
+      background: rgba(255,255,255,.08);
+      box-shadow: 0 1px 3px rgba(0,0,0,.2);
+    }
   </style>
 </head>
 <body>
@@ -2062,6 +2087,10 @@
 
   <!-- Nav Bar: Module actions -->
   <div class="nav-bar">
+    <div class="view-tabs" id="viewTabs">
+      <button class="view-tab active" id="tabOverview" onclick="setDashboardView('overview')">Overview</button>
+      <button class="view-tab" id="tabOrders" onclick="setDashboardView('orders')">Pedidos</button>
+    </div>
     <button class="primary" onclick="openCreateBiz()" id="btnNewBiz">+ Nuevo Negocio</button>
     <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
     <button onclick="openMenuManager()" id="btnMenuMgr" style="display:none;">Menu Manager</button>
@@ -2688,6 +2717,43 @@ function toggleTheme(){
   const next = current === 'dark' ? 'light' : 'dark';
   localStorage.setItem('THEME', next);
   applyTheme(next);
+}
+
+// ═══ Dashboard View Controller ═══
+var _currentView = 'overview';
+
+function setDashboardView(view) {
+  _currentView = view;
+  var overview = document.getElementById('viewOverview');
+  var orders = document.getElementById('viewOrders');
+  var tabO = document.getElementById('tabOverview');
+  var tabP = document.getElementById('tabOrders');
+  if (!overview || !orders) return;
+
+  if (view === 'orders') {
+    overview.style.display = 'none';
+    orders.style.display = '';
+    if (tabO) tabO.classList.remove('active');
+    if (tabP) tabP.classList.add('active');
+  } else {
+    overview.style.display = '';
+    orders.style.display = 'none';
+    if (tabO) tabO.classList.add('active');
+    if (tabP) tabP.classList.remove('active');
+  }
+}
+
+// Initialize default view (called after page load)
+function initDashboardView() {
+  // In global/all-business mode, hide both view wrappers (existing logic handles internal elements)
+  if (typeof getBusinessId === 'function' && !getBusinessId()) {
+    var overview = document.getElementById('viewOverview');
+    var orders = document.getElementById('viewOrders');
+    if (overview) overview.style.display = 'none';
+    if (orders) orders.style.display = 'none';
+    return;
+  }
+  setDashboardView('overview');
 }
 
 // ═══ System Toast (replaces browser alerts) ═══
@@ -3896,6 +3962,8 @@ function applyGlobalModeUI() {
     var msg = document.getElementById('msg');
     if (msg) msg.textContent = '';
   }
+  // Sync view wrappers with business mode
+  initDashboardView();
 }
 
 // ── Founder dashboard data loader ──
