@@ -2424,6 +2424,9 @@ Tipo: burger"></textarea>
 
   </div>
 
+  <!-- ═══ View: Overview ═══ -->
+  <div id="viewOverview">
+
   <!-- Hero KPI Area -->
   <div id="heroKpi" class="hero-kpi">
     <!-- LEFT: Revenue focus -->
@@ -2564,7 +2567,9 @@ Tipo: burger"></textarea>
     </div>
   </details>
 
-  <!-- Customers CRM Panel -->
+  </div><!-- /#viewOverview -->
+
+  <!-- Customers CRM Panel (standalone toggle panel) -->
   <div id="customersPanel" class="biz-panel" style="display:none;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
       <h3>Customers</h3>
@@ -2581,6 +2586,9 @@ Tipo: burger"></textarea>
     </div>
     <div id="crmBody" style="font-size:13px;color:var(--muted);text-align:center;padding:24px 0;">Sin datos de clientes. Presiona <b>Load</b> para cargar.</div>
   </div>
+
+  <!-- ═══ View: Orders ═══ -->
+  <div id="viewOrders">
 
   <!-- Human Handoff Inbox -->
   <details id="handoffInbox" class="section-panel handoff-panel" ontoggle="if(this.open)acknowledgeHandoff('inbox_open')">
@@ -2646,6 +2654,8 @@ Tipo: burger"></textarea>
     </thead>
     <tbody id="tbody"></tbody>
   </table>
+
+  </div><!-- /#viewOrders -->
 
   </div><!-- /.app-container -->
 
