@@ -139,6 +139,14 @@
         inset 0 -1px 3px rgba(0,0,0,.15),
         0 2px 10px rgba(0,0,0,.35);
     }
+    [data-theme="dark"] .shell-topbar button {
+      border: none; box-shadow: none;
+      background: rgba(255,255,255,.06);
+    }
+    [data-theme="dark"] .shell-topbar button:hover {
+      background: rgba(255,255,255,.12);
+      border: none; box-shadow: none;
+    }
     /* Header glass — edge perimeter */
     [data-theme="dark"] .brand-header {
       -webkit-backdrop-filter: blur(28px) saturate(150%);
@@ -762,10 +770,10 @@
     .shell-topbar .freshness-bar { padding: 0; gap: 5px; display: flex; align-items: center; }
     .shell-topbar .topbar-group { display: flex; align-items: center; gap: 6px; }
     .shell-topbar button {
-      background: var(--surface-2);
+      background: var(--surface-2); border: none;
       color: var(--text-secondary); padding: 4px 10px; border-radius: var(--radius-sm); font-size: 11px;
       cursor: pointer; font-weight: 500; transition: all var(--transition);
-      font-family: var(--font);
+      font-family: var(--font); box-shadow: none;
     }
     .shell-topbar button:hover { background: var(--border-light); color: var(--text); }
     .shell-topbar .role-badge {
@@ -823,6 +831,10 @@
       z-index: 100;
     }
     .shell-sidebar .sb-btn:hover .sb-tooltip { opacity: 1; }
+    .shell-sidebar .sb-btn.sb-disabled {
+      opacity: .35; pointer-events: none; cursor: not-allowed;
+    }
+    .shell-sidebar .sb-btn.sb-disabled:hover { background: transparent; }
     [data-theme="dark"] .shell-sidebar {
       background: rgba(28,28,30,.82);
       border-right-color: rgba(255,255,255,.08);
@@ -3028,6 +3040,38 @@ const ENABLE_SIDEBAR = true;
   // Theme icon sync now handled directly in applyTheme()
 })();
 
+// ═══ Sidebar Global State & Active States ═══
+function updateSidebarGlobalState() {
+  var hasBiz = !!getBusinessId();
+  var ids = ['sbCustomers', 'sbBizAdmin', 'sbMenuMgr', 'sbUsersAdmin'];
+  for (var i = 0; i < ids.length; i++) {
+    var btn = document.getElementById(ids[i]);
+    if (!btn) continue;
+    if (hasBiz) { btn.classList.remove('sb-disabled'); }
+    else { btn.classList.add('sb-disabled'); }
+  }
+  // Assist: disable only if not founder in global mode
+  var sbAssist = document.getElementById('sbAssist');
+  if (sbAssist) {
+    var founderGlobal = !hasBiz && isFounderUser();
+    if (hasBiz || founderGlobal) { sbAssist.classList.remove('sb-disabled'); }
+    else { sbAssist.classList.add('sb-disabled'); }
+  }
+}
+
+function clearSidebarActiveStates() {
+  var ids = ['sbCustomers', 'sbBizAdmin', 'sbUsersAdmin', 'sbAssist'];
+  for (var i = 0; i < ids.length; i++) {
+    var btn = document.getElementById(ids[i]);
+    if (btn) btn.classList.remove('active');
+  }
+}
+
+function setSidebarActive(id, isActive) {
+  var btn = document.getElementById(id);
+  if (btn) btn.classList.toggle('active', !!isActive);
+}
+
 // ═══ Theme System ═══
 (function initTheme(){
   const saved = localStorage.getItem('THEME');
@@ -3428,6 +3472,12 @@ function onBusinessSelect(){
     document.getElementById('usersPanel').style.display = 'none';
     document.getElementById('customersPanel').style.display = 'none';
   }
+  // Reset assist dock init guard so it reconfigures for new mode
+  window._assistInit = false;
+  // Update sidebar disabled states for global vs business mode
+  updateSidebarGlobalState();
+  // Clear sidebar active states for panels being closed
+  clearSidebarActiveStates();
   load();
 }
 
@@ -3594,8 +3644,13 @@ function openMenuManager(){
 // ── Business Admin Panel ──
 
 function closeAllPanels(except) {
+  var panelToSb = {bizPanel:'sbBizAdmin', usersPanel:'sbUsersAdmin', customersPanel:'sbCustomers'};
   ['bizPanel','usersPanel','customersPanel'].forEach(function(id) {
-    if (id !== except) document.getElementById(id).style.display = 'none';
+    if (id !== except) {
+      document.getElementById(id).style.display = 'none';
+      var sbId = panelToSb[id];
+      if (sbId) setSidebarActive(sbId, false);
+    }
   });
 }
 
@@ -3615,10 +3670,13 @@ function toggleBizPanel(){
     const bid = getBusinessId();
     if (!bid) { showToast('Select a business first', 'warn'); return; }
     closeAllPanels('bizPanel');
+    clearSidebarActiveStates();
     loadBizProfile(bid);
     panel.style.display = '';
+    setSidebarActive('sbBizAdmin', true);
   } else {
     panel.style.display = 'none';
+    setSidebarActive('sbBizAdmin', false);
   }
 }
 
@@ -4317,6 +4375,8 @@ function applyGlobalModeUI() {
   }
   // Sync view wrappers with business mode
   initDashboardView();
+  // Update sidebar disabled states for global vs business mode
+  if (typeof updateSidebarGlobalState === 'function') updateSidebarGlobalState();
 }
 
 // ── Founder dashboard data loader ──
@@ -4535,6 +4595,7 @@ function toggleAssistDock() {
   var isOpen = dock.classList.toggle('open');
   if (indicator) indicator.classList.toggle('open', isOpen);
   if (indicator2) indicator2.classList.toggle('open', isOpen);
+  setSidebarActive('sbAssist', isOpen);
   localStorage.setItem('assist_dock_open_' + (getBusinessId() || 'global'), isOpen ? '1' : '0');
 }
 
@@ -4591,6 +4652,7 @@ function initAssistDock() {
     dock.classList.add('open');
     if (indicator) indicator.classList.add('open');
   }
+  setSidebarActive('sbAssist', wasOpen);
 
   initSuggestions();
 }
@@ -4887,6 +4949,8 @@ async function load() {
   // Global mode: founder gets global dashboard, others get nothing
   if (!getBusinessId()) {
     if (isFounderUser()) { await loadFounderDashboard(); }
+    _lastDataUpdate = Date.now();
+    updateFreshnessDisplay();
     return;
   }
 
@@ -5462,10 +5526,13 @@ async function toggleUsersPanel(){
   const panel = document.getElementById('usersPanel');
   if (panel.style.display === 'none') {
     closeAllPanels('usersPanel');
+    clearSidebarActiveStates();
     panel.style.display = '';
+    setSidebarActive('sbUsersAdmin', true);
     await loadUsers();
   } else {
     panel.style.display = 'none';
+    setSidebarActive('sbUsersAdmin', false);
   }
 }
 
@@ -5475,10 +5542,13 @@ function toggleCustomersPanel(){
   const panel = document.getElementById('customersPanel');
   if (panel.style.display === 'none') {
     closeAllPanels('customersPanel');
+    clearSidebarActiveStates();
     panel.style.display = '';
+    setSidebarActive('sbCustomers', true);
     loadCrm();
   } else {
     panel.style.display = 'none';
+    setSidebarActive('sbCustomers', false);
   }
 }
 
