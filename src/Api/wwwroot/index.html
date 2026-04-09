@@ -2180,7 +2180,7 @@
     <span class="topbar-logo">CODIGO</span>
     <span class="topbar-sep"></span>
     <div class="biz-selector-area">
-      <select id="businessSelect_topbar" onchange="onBusinessSelect()">
+      <select id="businessSelect_topbar" onchange="document.getElementById('businessSelect').value=this.value; onBusinessSelect()">
         <option value="">(Todos los negocios)</option>
       </select>
       <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:14px;padding:3px 6px;">&#x21bb;</button>
@@ -2206,10 +2206,7 @@
       </button>
     </div>
     <div id="roleBadge_topbar" class="role-badge"></div>
-    <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
-      <span id="themeIcon_topbar">&#9790;</span>
-    </button>
-    <button onclick="logout()" title="Cerrar sesion">Salir</button>
+    <span style="display:none;"><span id="themeIcon_topbar">&#9790;</span></span>
     <span class="muted small" style="display:none;">API: <code id="baseUrl_topbar"></code></span>
   </div>
 
@@ -2944,40 +2941,26 @@ const ENABLE_SIDEBAR = true;
   var ctx = document.getElementById('contextBar');
   if (ctx) ctx.style.display = 'none';
 
-  // Mirror legacy elements → topbar twins so existing JS keeps working unchanged
+  // Mirror remaining legacy elements → topbar twins (selectedBizStatus, baseUrl)
+  // Most critical elements (select, freshness, role, theme, sound, intel) are now
+  // synced directly in their update functions. This observer covers the rest.
   var mirrors = [
-    ['roleBadge','roleBadge_topbar'],
-    ['themeIcon','themeIcon_topbar'],
-    ['businessSelect','businessSelect_topbar'],
     ['selectedBizStatus','selectedBizStatus_topbar'],
-    ['intelIndicator','intelIndicator_topbar'],
-    ['intelDot','intelDot_topbar'],
-    ['intelLabel','intelLabel_topbar'],
-    ['freshnessBar','freshnessBar_topbar'],
-    ['freshnessDot','freshnessDot_topbar'],
-    ['freshnessText','freshnessText_topbar'],
-    ['autoRefreshToggle','autoRefreshToggle_topbar'],
-    ['soundToggle','soundToggle_topbar'],
-    ['soundIcon','soundIcon_topbar'],
     ['baseUrl','baseUrl_topbar']
   ];
-  var observer = new MutationObserver(function(){
+  function syncMirrors(){
     mirrors.forEach(function(pair){
       var src = document.getElementById(pair[0]);
       var dst = document.getElementById(pair[1]);
       if (!src || !dst) return;
-      if (src.tagName === 'SELECT') {
-        if (dst.innerHTML !== src.innerHTML) dst.innerHTML = src.innerHTML;
-        if (dst.value !== src.value) dst.value = src.value;
-      } else if (src.tagName === 'INPUT') {
-        dst.checked = src.checked;
-      } else {
-        if (dst.innerHTML !== src.innerHTML) dst.innerHTML = src.innerHTML;
-        if (dst.className !== src.className) dst.className = src.className;
-      }
+      if (dst.innerHTML !== src.innerHTML) dst.innerHTML = src.innerHTML;
     });
-  });
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+  }
+  var legacyCtx = document.getElementById('contextBar');
+  if (legacyCtx) {
+    var observer = new MutationObserver(syncMirrors);
+    observer.observe(legacyCtx, { childList: true, subtree: true, attributes: true, characterData: true });
+  }
 
   // Also sync topbar select → legacy select on change
   var topSelect = document.getElementById('businessSelect_topbar');
@@ -3042,15 +3025,7 @@ const ENABLE_SIDEBAR = true;
   setTimeout(syncSidebarVisibility, 500);
   setTimeout(syncSidebarVisibility, 2000);
 
-  // Sync sidebar theme icon with main theme icon
-  var themeObserver = new MutationObserver(function(){
-    var mainIcon = document.getElementById('themeIcon');
-    var sbIcon = document.getElementById('sbThemeIcon');
-    if (mainIcon && sbIcon && sbIcon.textContent !== mainIcon.textContent) {
-      sbIcon.textContent = mainIcon.textContent;
-    }
-  });
-  themeObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+  // Theme icon sync now handled directly in applyTheme()
 })();
 
 // ═══ Theme System ═══
@@ -3062,8 +3037,13 @@ const ENABLE_SIDEBAR = true;
 })();
 function applyTheme(t){
   document.documentElement.setAttribute('data-theme', t);
-  const icon = document.getElementById('themeIcon');
-  if (icon) icon.textContent = t === 'dark' ? '\u2600' : '\u263E';
+  var glyph = t === 'dark' ? '\u2600' : '\u263E';
+  var icon = document.getElementById('themeIcon');
+  var icon2 = document.getElementById('themeIcon_topbar');
+  var icon3 = document.getElementById('sbThemeIcon');
+  if (icon) icon.textContent = glyph;
+  if (icon2) icon2.textContent = glyph;
+  if (icon3) icon3.textContent = glyph;
 }
 function toggleTheme(){
   const current = document.documentElement.getAttribute('data-theme') || 'light';
@@ -3147,18 +3127,21 @@ function toggleSound() {
   updateSoundIcon();
 }
 function updateSoundIcon() {
-  const btn = document.getElementById('soundToggle');
-  const icon = document.getElementById('soundIcon');
-  if (!btn || !icon) return;
-  if (_soundEnabled) {
-    icon.textContent = '\u{1F50A}';
-    btn.classList.remove('muted-sound');
-    btn.title = 'Sonido activado';
-  } else {
-    icon.textContent = '\u{1F507}';
-    btn.classList.add('muted-sound');
-    btn.title = 'Sonido silenciado';
-  }
+  var ids = [['soundToggle','soundIcon'],['soundToggle_topbar','soundIcon_topbar']];
+  ids.forEach(function(pair){
+    var btn = document.getElementById(pair[0]);
+    var icon = document.getElementById(pair[1]);
+    if (!btn || !icon) return;
+    if (_soundEnabled) {
+      icon.textContent = '\u{1F50A}';
+      btn.classList.remove('muted-sound');
+      btn.title = 'Sonido activado';
+    } else {
+      icon.textContent = '\u{1F507}';
+      btn.classList.add('muted-sound');
+      btn.title = 'Sonido silenciado';
+    }
+  });
 }
 
 // ── Auto-refresh toggle ──
@@ -3167,8 +3150,10 @@ function onAutoToggle(checked) {
   else stopAutoRefresh();
 }
 function syncAutoToggleUI() {
-  const cb = document.getElementById('autoRefreshToggle');
+  var cb = document.getElementById('autoRefreshToggle');
+  var cb2 = document.getElementById('autoRefreshToggle_topbar');
   if (cb) cb.checked = _autoRefreshActive;
+  if (cb2) cb2.checked = _autoRefreshActive;
 }
 
 // ── New order notification ──
@@ -3400,18 +3385,21 @@ function isAdminUser(){ var r = getAuthRole(); return !isStaffMode() && (!!getAd
 // ── Role badge in header ──
 function applyRoleBadge() {
   var badge = document.getElementById('roleBadge');
-  if (!badge) return;
+  var badge2 = document.getElementById('roleBadge_topbar');
   var role = getAuthRole();
+  var cls, txt;
   if (isStaffMode()) {
-    badge.className = 'role-badge operator';
-    badge.textContent = 'Operador \u00b7 Acceso restringido';
+    cls = 'role-badge operator';
+    txt = 'Operador \u00b7 Acceso restringido';
   } else if (role === 'Founder') {
-    badge.className = 'role-badge founder';
-    badge.textContent = 'Founder \u00b7 Acceso total';
+    cls = 'role-badge founder';
+    txt = 'Founder \u00b7 Acceso total';
   } else {
-    badge.className = 'role-badge owner';
-    badge.textContent = 'Propietario \u00b7 Acceso completo';
+    cls = 'role-badge owner';
+    txt = 'Propietario \u00b7 Acceso completo';
   }
+  if (badge) { badge.className = cls; badge.textContent = txt; }
+  if (badge2) { badge2.className = cls; badge2.textContent = txt; }
 }
 
 function logout(){
@@ -3587,6 +3575,9 @@ async function loadBusinesses(){
       ? visibleList.length + ' negocio(s)' + (junkCount > 0 ? ' <span class="muted">(' + junkCount + ' ocultos)</span>' : '')
       : '0 negocios visibles';
     if(statusEl) statusEl.innerHTML = '<span class="ok">' + statusMsg + '</span>';
+    // Sync topbar select with legacy select
+    var topSel = document.getElementById('businessSelect_topbar');
+    if (topSel && sel) { topSel.innerHTML = sel.innerHTML; topSel.value = sel.value; }
     updateBizAdminButton();
   } catch(e) {
     console.error('loadBusinesses error:', e);
@@ -3963,6 +3954,8 @@ async function submitCreateBiz(){
     await loadBusinesses();
     const sel = document.getElementById('businessSelect');
     sel.value = result.id;
+    var topSel2 = document.getElementById('businessSelect_topbar');
+    if (topSel2) topSel2.value = result.id;
     localStorage.setItem('BUSINESS_ID', result.id);
     updateBizAdminButton();
 
@@ -4516,41 +4509,32 @@ function updateIntelStrip(data) {
 
 // ── Intelligence Indicator ──
 function updateIntelIndicator(data) {
-  var dot = document.getElementById('intelDot');
-  var label = document.getElementById('intelLabel');
-  if (!dot || !label) return;
   var title = (data && data.businessStateTitle) || '';
   var t = title.toLowerCase();
-  if (t.indexOf('fricci') !== -1) {
-    dot.className = 'intel-dot friction';
-    label.textContent = 'Atenci\u00f3n';
-  } else if (t.indexOf('riesgo') !== -1) {
-    dot.className = 'intel-dot risk';
-    label.textContent = 'Riesgo';
-  } else if (t.indexOf('inicial') !== -1) {
-    dot.className = 'intel-dot friction';
-    label.textContent = 'Inicio';
-  } else if (t.indexOf('fuerte') !== -1) {
-    dot.className = 'intel-dot stable';
-    label.textContent = 'Fuerte';
-  } else if (t.indexOf('estable') !== -1) {
-    dot.className = 'intel-dot stable';
-    label.textContent = 'Estable';
-  } else if (t.indexOf('crecimiento') !== -1) {
-    dot.className = 'intel-dot stable';
-    label.textContent = 'Crecimiento';
-  } else {
-    dot.className = 'intel-dot stable';
-    label.textContent = 'Activo';
-  }
+  var cls, txt;
+  if (t.indexOf('fricci') !== -1) { cls = 'intel-dot friction'; txt = 'Atenci\u00f3n'; }
+  else if (t.indexOf('riesgo') !== -1) { cls = 'intel-dot risk'; txt = 'Riesgo'; }
+  else if (t.indexOf('inicial') !== -1) { cls = 'intel-dot friction'; txt = 'Inicio'; }
+  else if (t.indexOf('fuerte') !== -1) { cls = 'intel-dot stable'; txt = 'Fuerte'; }
+  else if (t.indexOf('estable') !== -1) { cls = 'intel-dot stable'; txt = 'Estable'; }
+  else if (t.indexOf('crecimiento') !== -1) { cls = 'intel-dot stable'; txt = 'Crecimiento'; }
+  else { cls = 'intel-dot stable'; txt = 'Activo'; }
+  [['intelDot','intelLabel'],['intelDot_topbar','intelLabel_topbar']].forEach(function(pair){
+    var dot = document.getElementById(pair[0]);
+    var label = document.getElementById(pair[1]);
+    if (dot) dot.className = cls;
+    if (label) label.textContent = txt;
+  });
 }
 
 // ── Assistant Dock ──
 function toggleAssistDock() {
   var dock = document.getElementById('assistDock');
   var indicator = document.getElementById('intelIndicator');
+  var indicator2 = document.getElementById('intelIndicator_topbar');
   var isOpen = dock.classList.toggle('open');
   if (indicator) indicator.classList.toggle('open', isOpen);
+  if (indicator2) indicator2.classList.toggle('open', isOpen);
   localStorage.setItem('assist_dock_open_' + (getBusinessId() || 'global'), isOpen ? '1' : '0');
 }
 
@@ -4568,12 +4552,15 @@ function initAssistDock() {
   var isFounder = role === 'Founder' && !getBusinessId();
   var isBizOwner = (role === 'Owner' || role === 'Manager') && !!getBusinessId();
 
+  var indicator2 = document.getElementById('intelIndicator_topbar');
   if (!isFounder && !isBizOwner) {
     if (indicator) indicator.classList.add('hidden');
+    if (indicator2) indicator2.classList.add('hidden');
     dock.classList.remove('open');
     return;
   }
   if (indicator) indicator.classList.remove('hidden');
+  if (indicator2) indicator2.classList.remove('hidden');
 
   // Configure dock for role
   if (isFounder) {
@@ -4913,7 +4900,9 @@ async function load() {
 
   // Show loading state
   var ft = document.getElementById('freshnessText');
+  var ft2 = document.getElementById('freshnessText_topbar');
   if (ft) ft.textContent = 'Cargando...';
+  if (ft2) ft2.textContent = 'Cargando...';
 
   try {
   const status = document.getElementById('status').value;
@@ -5676,14 +5665,24 @@ async function submitCreateUser(){
 // ═══ Data Freshness Display ═══
 function updateFreshnessDisplay() {
   var el = document.getElementById('freshnessText');
+  var el2 = document.getElementById('freshnessText_topbar');
   var dot = document.getElementById('freshnessDot');
-  if (!el || !_lastDataUpdate) { if (el) el.textContent = '—'; return; }
+  var dot2 = document.getElementById('freshnessDot_topbar');
+  if (!_lastDataUpdate) {
+    if (el) el.textContent = '—';
+    if (el2) el2.textContent = '—';
+    return;
+  }
   var ago = Math.round((Date.now() - _lastDataUpdate) / 1000);
   var stale = ago > 60;
-  if (ago < 10) el.textContent = 'Actualizado ahora';
-  else if (ago < 60) el.textContent = 'Actualizado hace ' + ago + ' seg';
-  else el.textContent = 'Actualizado hace ' + Math.round(ago / 60) + ' min';
-  if (dot) { dot.classList.toggle('stale', stale); }
+  var txt;
+  if (ago < 10) txt = 'Actualizado ahora';
+  else if (ago < 60) txt = 'Actualizado hace ' + ago + ' seg';
+  else txt = 'Actualizado hace ' + Math.round(ago / 60) + ' min';
+  if (el) el.textContent = txt;
+  if (el2) el2.textContent = txt;
+  if (dot) dot.classList.toggle('stale', stale);
+  if (dot2) dot2.classList.toggle('stale', stale);
 }
 setInterval(updateFreshnessDisplay, 15000);
 
