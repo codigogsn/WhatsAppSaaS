@@ -128,6 +128,17 @@
         inset 0 0 8px 2px rgba(0,0,0,.12);
     }
 
+    /* Shell topbar glass — dark */
+    [data-theme="dark"] .shell-topbar {
+      -webkit-backdrop-filter: blur(28px) saturate(150%);
+      backdrop-filter: blur(28px) saturate(150%);
+      background: rgba(28,28,30,.82);
+      border-bottom: 1px solid rgba(255,255,255,.10);
+      box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,.05),
+        inset 0 -1px 3px rgba(0,0,0,.15),
+        0 2px 10px rgba(0,0,0,.35);
+    }
     /* Header glass — edge perimeter */
     [data-theme="dark"] .brand-header {
       -webkit-backdrop-filter: blur(28px) saturate(150%);
@@ -725,7 +736,47 @@
     .ok { color: var(--success); }
     code { background: var(--accent-subtle); color: var(--accent); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; }
 
-    /* ═══ Header — brand identity row ═══ */
+    /* ═══ Shell Topbar — unified fixed bar (Phase 1) ═══ */
+    .shell-topbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 48px;
+      z-index: 20;
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      background: var(--header-bg);
+      border-bottom: 1px solid var(--header-border);
+      transition: background var(--transition), border var(--transition);
+      gap: 12px;
+      color: var(--text);
+    }
+    .shell-topbar .topbar-logo { font-size: 14px; font-weight: 800; letter-spacing: 3px; color: var(--logo-color); }
+    .shell-topbar .topbar-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
+    .shell-topbar .topbar-spacer { flex: 1; }
+    .shell-topbar label { font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+    .shell-topbar .biz-selector-area { display: flex; align-items: center; gap: 5px; }
+    .shell-topbar .biz-selector-area select { font-size: 12px; padding: 4px 8px; }
+    .shell-topbar .freshness-bar { padding: 0; gap: 5px; display: flex; align-items: center; }
+    .shell-topbar .topbar-group { display: flex; align-items: center; gap: 6px; }
+    .shell-topbar button {
+      background: var(--surface-2);
+      color: var(--text-secondary); padding: 4px 10px; border-radius: var(--radius-sm); font-size: 11px;
+      cursor: pointer; font-weight: 500; transition: all var(--transition);
+      font-family: var(--font);
+    }
+    .shell-topbar button:hover { background: var(--border-light); color: var(--text); }
+    .shell-topbar .role-badge {
+      padding: 4px 12px; border-radius: 999px; font-size: 10px; font-weight: 600;
+      letter-spacing: .03em; text-transform: uppercase;
+      border: 1px solid var(--border); background: var(--surface-2); color: var(--text);
+      display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+    }
+    body.topbar-active { padding-top: 48px; }
+
+    /* ═══ Header — brand identity row (legacy) ═══ */
     .brand-header {
       background: var(--header-bg);
       padding: 10px 24px; color: var(--text);
@@ -1499,6 +1550,7 @@
       display: flex; flex-direction: column; gap: 10px;
       pointer-events: none; max-width: 340px; width: 100%;
     }
+    body.topbar-active .toast-stack { top: 56px; }
     .order-toast {
       background: var(--card); color: var(--text);
       border-left: 3px solid var(--success);
@@ -1797,6 +1849,7 @@
       box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.08), 0 24px 80px rgba(0,0,0,.12);
       display: none; flex-direction: column; overflow: hidden;
     }
+    body.topbar-active .assist-dock { top: 86px; }
     [data-theme="dark"] .assist-dock {
       box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 8px 24px rgba(0,0,0,.3), 0 24px 80px rgba(0,0,0,.45), inset 0 0 0 1px rgba(255,255,255,.05);
     }
@@ -2056,8 +2109,46 @@
   </style>
 </head>
 <body>
-  <!-- Row A: Brand / Identity -->
-  <div class="brand-header">
+  <!-- ═══ Shell Topbar (Phase 1 — feature-flagged) ═══ -->
+  <div class="shell-topbar" id="shellTopbar" style="display:none;">
+    <span class="topbar-logo">CODIGO</span>
+    <span class="topbar-sep"></span>
+    <div class="biz-selector-area">
+      <select id="businessSelect_topbar" onchange="onBusinessSelect()">
+        <option value="">(Todos los negocios)</option>
+      </select>
+      <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:14px;padding:3px 6px;">&#x21bb;</button>
+    </div>
+    <span id="selectedBizStatus_topbar" class="small"></span>
+    <div class="intel-indicator hidden" id="intelIndicator_topbar" onclick="toggleAssistDock()">
+      <span class="intel-dot stable" id="intelDot_topbar"></span>
+      <span id="intelLabel_topbar">Estable</span>
+    </div>
+    <span class="topbar-spacer"></span>
+    <div class="freshness-bar" id="freshnessBar_topbar">
+      <span class="freshness-dot" id="freshnessDot_topbar"></span>
+      <span class="freshness-text" id="freshnessText_topbar">Cargando...</span>
+    </div>
+    <div class="topbar-group">
+      <label class="toggle-switch" title="Auto-refresh cada 10s">
+        <input type="checkbox" id="autoRefreshToggle_topbar" onchange="onAutoToggle(this.checked)">
+        <span class="toggle-track"></span>
+        <span class="toggle-label">Auto</span>
+      </label>
+      <button class="sound-toggle" id="soundToggle_topbar" onclick="toggleSound()" title="Sonido de notificaciones">
+        <span id="soundIcon_topbar">&#128264;</span>
+      </button>
+    </div>
+    <div id="roleBadge_topbar" class="role-badge"></div>
+    <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
+      <span id="themeIcon_topbar">&#9790;</span>
+    </button>
+    <button onclick="logout()" title="Cerrar sesion">Salir</button>
+    <span class="muted small" style="display:none;">API: <code id="baseUrl_topbar"></code></span>
+  </div>
+
+  <!-- Row A: Brand / Identity (legacy — hidden when topbar active) -->
+  <div class="brand-header" id="legacyBrandHeader">
     <div class="brand-left">
       <div class="brand-logo">CODIGO</div>
       <div class="brand-divider"></div>
@@ -2075,7 +2166,7 @@
     </div>
   </div>
 
-  <!-- Row B: Business Context / Status -->
+  <!-- Row B: Business Context / Status (legacy — hidden when topbar active) -->
   <div id="contextBar" class="context-bar">
     <label>Negocio</label>
     <div class="biz-selector-area">
@@ -2713,6 +2804,9 @@ Tipo: burger"></textarea>
   </div><!-- /.app-container -->
 
 <script>
+// ═══ Feature Flags ═══
+const ENABLE_FIXED_TOPBAR = true;
+
 // ═══ Auth Gate ═══
 // Require login token OR admin key to access dashboard.
 (function authGate(){
@@ -2721,6 +2815,70 @@ Tipo: burger"></textarea>
   if (!hasToken && !hasAdminKey) {
     window.location.href = '/login.html';
     return;
+  }
+})();
+
+// ═══ Topbar Shell Activation ═══
+(function initTopbar(){
+  if (!ENABLE_FIXED_TOPBAR) return;
+  document.body.classList.add('topbar-active');
+  var topbar = document.getElementById('shellTopbar');
+  if (topbar) topbar.style.display = 'flex';
+  var legacy = document.getElementById('legacyBrandHeader');
+  if (legacy) legacy.style.display = 'none';
+  var ctx = document.getElementById('contextBar');
+  if (ctx) ctx.style.display = 'none';
+
+  // Mirror legacy elements → topbar twins so existing JS keeps working unchanged
+  var mirrors = [
+    ['roleBadge','roleBadge_topbar'],
+    ['themeIcon','themeIcon_topbar'],
+    ['businessSelect','businessSelect_topbar'],
+    ['selectedBizStatus','selectedBizStatus_topbar'],
+    ['intelIndicator','intelIndicator_topbar'],
+    ['intelDot','intelDot_topbar'],
+    ['intelLabel','intelLabel_topbar'],
+    ['freshnessBar','freshnessBar_topbar'],
+    ['freshnessDot','freshnessDot_topbar'],
+    ['freshnessText','freshnessText_topbar'],
+    ['autoRefreshToggle','autoRefreshToggle_topbar'],
+    ['soundToggle','soundToggle_topbar'],
+    ['soundIcon','soundIcon_topbar'],
+    ['baseUrl','baseUrl_topbar']
+  ];
+  var observer = new MutationObserver(function(){
+    mirrors.forEach(function(pair){
+      var src = document.getElementById(pair[0]);
+      var dst = document.getElementById(pair[1]);
+      if (!src || !dst) return;
+      if (src.tagName === 'SELECT') {
+        if (dst.innerHTML !== src.innerHTML) dst.innerHTML = src.innerHTML;
+        if (dst.value !== src.value) dst.value = src.value;
+      } else if (src.tagName === 'INPUT') {
+        dst.checked = src.checked;
+      } else {
+        if (dst.innerHTML !== src.innerHTML) dst.innerHTML = src.innerHTML;
+        if (dst.className !== src.className) dst.className = src.className;
+      }
+    });
+  });
+  observer.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+
+  // Also sync topbar select → legacy select on change
+  var topSelect = document.getElementById('businessSelect_topbar');
+  if (topSelect) {
+    topSelect.addEventListener('change', function(){
+      var legacySel = document.getElementById('businessSelect');
+      if (legacySel) { legacySel.value = topSelect.value; }
+    });
+  }
+  // Sync topbar auto-refresh toggle → legacy
+  var topAuto = document.getElementById('autoRefreshToggle_topbar');
+  if (topAuto) {
+    topAuto.addEventListener('change', function(){
+      var legacyCb = document.getElementById('autoRefreshToggle');
+      if (legacyCb) { legacyCb.checked = topAuto.checked; }
+    });
   }
 })();
 
