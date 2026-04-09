@@ -776,6 +776,68 @@
     }
     body.topbar-active { padding-top: 48px; }
 
+    /* ═══ Shell Sidebar — icon dock (Phase 2) ═══ */
+    .shell-sidebar {
+      position: fixed;
+      top: 48px;
+      left: 0;
+      bottom: 0;
+      width: 56px;
+      background: var(--header-bg);
+      border-right: 1px solid var(--header-border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 12px 0;
+      z-index: 15;
+      transition: background var(--transition), border var(--transition);
+    }
+    body.sidebar-active { padding-left: 56px; }
+    .shell-sidebar .sb-group {
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+      width: 100%;
+    }
+    .shell-sidebar .sb-spacer { flex: 1; }
+    .shell-sidebar .sb-sep {
+      width: 28px; height: 1px; background: var(--border); margin: 6px 0; opacity: .5;
+    }
+    .shell-sidebar .sb-btn {
+      width: 38px; height: 38px; border-radius: 10px; border: none;
+      background: transparent; color: var(--text-secondary);
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; font-size: 17px; position: relative;
+      transition: all .15s ease; font-family: var(--font);
+    }
+    .shell-sidebar .sb-btn:hover {
+      background: var(--surface-2); color: var(--text);
+    }
+    .shell-sidebar .sb-btn.active {
+      background: var(--accent-subtle); color: var(--accent);
+    }
+    .shell-sidebar .sb-btn .sb-tooltip {
+      position: absolute; left: 62px; top: 50%; transform: translateY(-50%);
+      background: var(--card); color: var(--text); font-size: 11px; font-weight: 600;
+      padding: 4px 10px; border-radius: 6px; white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0,0,0,.15); border: 1px solid var(--border);
+      pointer-events: none; opacity: 0; transition: opacity .12s ease;
+      z-index: 100;
+    }
+    .shell-sidebar .sb-btn:hover .sb-tooltip { opacity: 1; }
+    [data-theme="dark"] .shell-sidebar {
+      background: rgba(28,28,30,.82);
+      border-right-color: rgba(255,255,255,.08);
+    }
+
+    /* Nav-bar button hiding when sidebar active */
+    body.sidebar-active .nav-bar > button,
+    body.sidebar-active .nav-bar > .toolbar-sep,
+    body.sidebar-active .nav-bar > .view-tabs {
+      opacity: 0; pointer-events: none; position: absolute; width: 1px; height: 1px; overflow: hidden;
+    }
+    body.sidebar-active .nav-bar {
+      min-height: 0; padding: 0; border: none; overflow: hidden; height: 0;
+    }
+
     /* ═══ Header — brand identity row (legacy) ═══ */
     .brand-header {
       background: var(--header-bg);
@@ -1725,6 +1787,10 @@
       .context-bar-group { gap: 4px; }
       .nav-bar { padding: 5px 14px; }
       .toolbar-sep { display: none; }
+      /* Sidebar: collapse on mobile */
+      .shell-sidebar { width: 44px; }
+      body.sidebar-active { padding-left: 44px; }
+      .shell-sidebar .sb-btn { width: 32px; height: 32px; font-size: 15px; }
       /* Filters: stack vertically on small screens */
       .filters .row { flex-direction: column; align-items: stretch; gap: 8px; }
       .filters .row label { margin-top: 4px; }
@@ -2145,6 +2211,54 @@
     </button>
     <button onclick="logout()" title="Cerrar sesion">Salir</button>
     <span class="muted small" style="display:none;">API: <code id="baseUrl_topbar"></code></span>
+  </div>
+
+  <!-- ═══ Shell Sidebar (Phase 2 — feature-flagged) ═══ -->
+  <div class="shell-sidebar" id="shellSidebar" style="display:none;">
+    <!-- Navigation -->
+    <div class="sb-group">
+      <button class="sb-btn active" id="sbOverview" onclick="setDashboardView('overview')" title="Overview">
+        <span>&#9634;</span><span class="sb-tooltip">Overview</span>
+      </button>
+      <button class="sb-btn" id="sbOrders" onclick="setDashboardView('orders')" title="Pedidos">
+        <span>&#128230;</span><span class="sb-tooltip">Pedidos</span>
+      </button>
+      <button class="sb-btn" id="sbCustomers" onclick="toggleCustomersPanel()" title="Customers">
+        <span>&#128101;</span><span class="sb-tooltip">Customers</span>
+      </button>
+    </div>
+    <div class="sb-sep"></div>
+    <!-- Management -->
+    <div class="sb-group">
+      <button class="sb-btn" id="sbNewBiz" onclick="openCreateBiz()" title="Nuevo Negocio">
+        <span>&#43;</span><span class="sb-tooltip">Nuevo Negocio</span>
+      </button>
+      <button class="sb-btn" id="sbBizAdmin" onclick="toggleBizPanel()" title="Administrar Negocio" style="display:none;">
+        <span>&#127970;</span><span class="sb-tooltip">Negocio</span>
+      </button>
+      <button class="sb-btn" id="sbMenuMgr" onclick="openMenuManager()" title="Menu Manager" style="display:none;">
+        <span>&#128221;</span><span class="sb-tooltip">Menu</span>
+      </button>
+      <button class="sb-btn" id="sbUsersAdmin" onclick="toggleUsersPanel()" title="Usuarios" style="display:none;">
+        <span>&#128100;</span><span class="sb-tooltip">Usuarios</span>
+      </button>
+    </div>
+    <div class="sb-spacer"></div>
+    <!-- Utilities -->
+    <div class="sb-group">
+      <button class="sb-btn" id="sbAssist" onclick="toggleAssistDock()" title="Intelligence">
+        <span>&#9733;</span><span class="sb-tooltip">Intel</span>
+      </button>
+      <button class="sb-btn" id="sbDashConfig" onclick="openDashboardConfig()" title="Settings">
+        <span>&#9881;</span><span class="sb-tooltip">Settings</span>
+      </button>
+      <button class="sb-btn" id="sbTheme" onclick="toggleTheme()" title="Tema">
+        <span id="sbThemeIcon">&#9790;</span><span class="sb-tooltip">Tema</span>
+      </button>
+      <button class="sb-btn" onclick="logout()" title="Salir">
+        <span>&#9211;</span><span class="sb-tooltip">Salir</span>
+      </button>
+    </div>
   </div>
 
   <!-- Row A: Brand / Identity (legacy — hidden when topbar active) -->
@@ -2806,6 +2920,7 @@ Tipo: burger"></textarea>
 <script>
 // ═══ Feature Flags ═══
 const ENABLE_FIXED_TOPBAR = true;
+const ENABLE_SIDEBAR = true;
 
 // ═══ Auth Gate ═══
 // Require login token OR admin key to access dashboard.
@@ -2882,6 +2997,62 @@ const ENABLE_FIXED_TOPBAR = true;
   }
 })();
 
+// ═══ Sidebar Shell Activation ═══
+(function initSidebar(){
+  if (!ENABLE_SIDEBAR) return;
+  document.body.classList.add('sidebar-active');
+  var sidebar = document.getElementById('shellSidebar');
+  if (sidebar) sidebar.style.display = 'flex';
+
+  // Sync sidebar active state with view switching
+  var origSetView = window.setDashboardView;
+  if (origSetView) {
+    // Will be patched after setDashboardView is defined — defer
+  }
+
+  // Mirror nav-bar button visibility → sidebar buttons
+  // Map: nav-bar button ID → sidebar button ID
+  var btnMap = [
+    ['btnNewBiz', 'sbNewBiz'],
+    ['btnBizAdmin', 'sbBizAdmin'],
+    ['btnMenuMgr', 'sbMenuMgr'],
+    ['btnUsersAdmin', 'sbUsersAdmin'],
+    ['btnCustomers', 'sbCustomers']
+  ];
+
+  function syncSidebarVisibility(){
+    btnMap.forEach(function(pair){
+      var navBtn = document.getElementById(pair[0]);
+      var sbBtn = document.getElementById(pair[1]);
+      if (!navBtn || !sbBtn) return;
+      // If nav button is hidden by role system, hide sidebar equivalent
+      var navHidden = navBtn.style.display === 'none';
+      sbBtn.style.display = navHidden ? 'none' : '';
+    });
+  }
+
+  // Observe nav-bar for attribute changes (style.display set by applyRoleVisibility)
+  var navBar = document.querySelector('.nav-bar');
+  if (navBar) {
+    var navObserver = new MutationObserver(syncSidebarVisibility);
+    navObserver.observe(navBar, { attributes: true, subtree: true, attributeFilter: ['style'] });
+  }
+  // Initial sync after a tick (wait for applyRoleVisibility)
+  setTimeout(syncSidebarVisibility, 100);
+  setTimeout(syncSidebarVisibility, 500);
+  setTimeout(syncSidebarVisibility, 2000);
+
+  // Sync sidebar theme icon with main theme icon
+  var themeObserver = new MutationObserver(function(){
+    var mainIcon = document.getElementById('themeIcon');
+    var sbIcon = document.getElementById('sbThemeIcon');
+    if (mainIcon && sbIcon && sbIcon.textContent !== mainIcon.textContent) {
+      sbIcon.textContent = mainIcon.textContent;
+    }
+  });
+  themeObserver.observe(document.body, { childList: true, subtree: true, characterData: true });
+})();
+
 // ═══ Theme System ═══
 (function initTheme(){
   const saved = localStorage.getItem('THEME');
@@ -2922,6 +3093,13 @@ function setDashboardView(view) {
     orders.style.display = 'none';
     if (tabO) tabO.classList.add('active');
     if (tabP) tabP.classList.remove('active');
+  }
+  // Sync sidebar active state
+  if (typeof ENABLE_SIDEBAR !== 'undefined' && ENABLE_SIDEBAR) {
+    var sbO = document.getElementById('sbOverview');
+    var sbP = document.getElementById('sbOrders');
+    if (sbO) sbO.classList.toggle('active', view === 'overview');
+    if (sbP) sbP.classList.toggle('active', view === 'orders');
   }
 }
 
