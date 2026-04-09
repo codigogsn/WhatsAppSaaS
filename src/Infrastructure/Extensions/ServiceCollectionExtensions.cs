@@ -84,6 +84,17 @@ public static class ServiceCollectionExtensions
         });
         services.AddScoped<IExchangeRateProvider, ExchangeRateProvider>();
 
+        // ── Gmail + Email AI ────────────────────────────
+        services.AddHttpClient<GmailService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+        });
+        services.AddHttpClient<EmailAIService>(client =>
+        {
+            client.Timeout = TimeSpan.FromSeconds(30);
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+        });
+
         return services;
     }
 

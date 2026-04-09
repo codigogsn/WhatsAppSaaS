@@ -26,6 +26,7 @@ public class AppDbContext : DbContext
     public DbSet<ExtraMenuCategory> ExtraMenuCategories => Set<ExtraMenuCategory>();
     public DbSet<UpsellRule> UpsellRules => Set<UpsellRule>();
     public DbSet<DashboardLayout> DashboardLayouts => Set<DashboardLayout>();
+    public DbSet<EmailRecord> EmailRecords => Set<EmailRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -402,6 +403,20 @@ public class AppDbContext : DbContext
             b.Property(x => x.UpdatedAtUtc).IsRequired();
 
             b.HasIndex(x => x.BusinessId).IsUnique();
+        });
+
+        modelBuilder.Entity<EmailRecord>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.BusinessId).IsRequired();
+            b.Property(x => x.FromEmail).IsRequired().HasMaxLength(500);
+            b.Property(x => x.Subject).IsRequired().HasMaxLength(1000);
+            b.Property(x => x.Body).IsRequired();
+            b.Property(x => x.GmailMessageId).HasMaxLength(500);
+
+            b.HasIndex(x => x.BusinessId);
+            b.HasIndex(x => new { x.BusinessId, x.GmailMessageId }).IsUnique()
+                .HasFilter(null);
         });
     }
 }
