@@ -725,26 +725,26 @@
     .ok { color: var(--success); }
     code { background: var(--accent-subtle); color: var(--accent); padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; }
 
-    /* ═══ Header — minimal, white ═══ */
+    /* ═══ Header — brand identity row ═══ */
     .brand-header {
       background: var(--header-bg);
-      padding: 14px 28px; color: var(--text);
+      padding: 10px 24px; color: var(--text);
       display: flex; justify-content: space-between; align-items: center;
-      flex-wrap: wrap; gap: 14px;
+      gap: 14px;
       border-bottom: 1px solid var(--header-border);
       transition: background var(--transition), border var(--transition);
       position: relative; z-index: 10;
     }
-    .brand-left { display: flex; align-items: center; gap: 14px; }
-    .brand-logo { font-size: 17px; font-weight: 800; letter-spacing: 3px; color: var(--logo-color); }
-    .brand-divider { width: 1px; height: 24px; background: var(--border); }
+    .brand-left { display: flex; align-items: center; gap: 12px; }
+    .brand-logo { font-size: 15px; font-weight: 800; letter-spacing: 3px; color: var(--logo-color); }
+    .brand-divider { width: 1px; height: 20px; background: var(--border); }
     .brand-product { display: flex; flex-direction: column; gap: 0; }
-    .brand-product-name { font-size: 13px; font-weight: 600; color: var(--text); }
-    .brand-product-sub { font-size: 10px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
-    .brand-right { display: flex; align-items: center; gap: 8px; }
+    .brand-product-name { font-size: 12px; font-weight: 600; color: var(--text); }
+    .brand-product-sub { font-size: 9px; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
+    .brand-right { display: flex; align-items: center; gap: 6px; }
     .brand-right button {
       background: var(--surface-2);
-      color: var(--text-secondary); padding: 7px 14px; border-radius: var(--radius-sm); font-size: 13px;
+      color: var(--text-secondary); padding: 5px 12px; border-radius: var(--radius-sm); font-size: 12px;
       cursor: pointer; font-weight: 500; transition: all var(--transition);
       font-family: var(--font);
     }
@@ -772,9 +772,9 @@
     /* Theme toggle */
     .theme-toggle {
       background: var(--surface-2);
-      color: var(--muted); width: 34px; height: 34px; border-radius: 50%;
+      color: var(--muted); width: 30px; height: 30px; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
-      cursor: pointer; font-size: 15px; transition: all var(--transition);
+      cursor: pointer; font-size: 14px; transition: all var(--transition);
       padding: 0; line-height: 1;
     }
     .theme-toggle:hover { background: var(--border-light); color: var(--text); transform: scale(1.05); }
@@ -782,8 +782,8 @@
 
     /* ═══ Context Bar — business context row ═══ */
     .context-bar {
-      display: flex; align-items: center; gap: 14px;
-      padding: 8px 24px;
+      display: flex; align-items: center; gap: 12px;
+      padding: 7px 24px;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
       transition: background var(--transition), border var(--transition);
@@ -793,20 +793,29 @@
       background: rgba(28,28,30,.85);
       border-bottom-color: rgba(255,255,255,.07);
     }
-    .context-bar label { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .3px; }
-    .context-bar .biz-selector-area { display: flex; align-items: center; gap: 6px; }
+    .context-bar label { font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+    .context-bar .biz-selector-area { display: flex; align-items: center; gap: 5px; }
+    .context-bar .biz-selector-area select { font-size: 12px; padding: 5px 10px; }
     .context-bar-spacer { flex: 1; }
-    .context-bar .freshness-bar { padding: 0; gap: 6px; }
+    .context-bar .freshness-bar { padding: 0; gap: 5px; }
+    .context-bar-group {
+      display: flex; align-items: center; gap: 6px;
+    }
 
-    /* ═══ Nav bar — module actions ═══ */
+    /* ═══ Toolbar — module actions ═══ */
     .nav-bar {
       background: var(--surface-2); border-bottom: 1px solid var(--border-light);
-      padding: 8px 24px;
-      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+      padding: 6px 24px;
+      display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
       transition: background var(--transition), border var(--transition);
       position: relative; z-index: 7;
     }
     .nav-bar label { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .3px; }
+    .nav-bar button { font-size: 12px; }
+    .toolbar-sep {
+      width: 1px; height: 20px; background: var(--border-light); margin: 0 4px; flex-shrink: 0;
+    }
+    [data-theme="dark"] .toolbar-sep { background: rgba(255,255,255,.06); }
 
     /* ═══ Cards / KPI ═══ */
     .card {
@@ -1657,9 +1666,11 @@
       .biz-panel .form-grid, .modal .form-grid { grid-template-columns: 1fr; }
       .status-actions { flex-direction: column; }
       .status-actions select { min-width: 100%; }
-      .context-bar { padding: 8px 14px; gap: 10px; }
-      .context-bar .biz-selector-area select { min-width: 180px; }
-      .nav-bar { padding: 6px 14px; }
+      .context-bar { padding: 6px 14px; gap: 8px; }
+      .context-bar .biz-selector-area select { min-width: 160px; }
+      .context-bar-group { gap: 4px; }
+      .nav-bar { padding: 5px 14px; }
+      .toolbar-sep { display: none; }
       /* Filters: stack vertically on small screens */
       .filters .row { flex-direction: column; align-items: stretch; gap: 8px; }
       .filters .row label { margin-top: 4px; }
@@ -2036,7 +2047,7 @@
   </style>
 </head>
 <body>
-  <!-- Branded Header -->
+  <!-- Row A: Brand / Identity -->
   <div class="brand-header">
     <div class="brand-left">
       <div class="brand-logo">CODIGO</div>
@@ -2048,29 +2059,21 @@
     </div>
     <div class="brand-right">
       <div id="roleBadge" class="role-badge"></div>
-      <label class="toggle-switch" title="Auto-refresh cada 10s">
-        <input type="checkbox" id="autoRefreshToggle" onchange="onAutoToggle(this.checked)">
-        <span class="toggle-track"></span>
-        <span class="toggle-label">Auto</span>
-      </label>
-      <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Sonido de notificaciones">
-        <span id="soundIcon">&#128264;</span>
-      </button>
       <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
         <span id="themeIcon">&#9790;</span>
       </button>
-      <button onclick="logout()" title="Cerrar sesion" style="font-size:12px;padding:6px 12px;">Salir</button>
+      <button onclick="logout()" title="Cerrar sesion" style="font-size:11px;padding:5px 10px;">Salir</button>
     </div>
   </div>
 
-  <!-- Context Bar: Business context + status -->
+  <!-- Row B: Business Context / Status -->
   <div id="contextBar" class="context-bar">
-    <label>Negocio:</label>
+    <label>Negocio</label>
     <div class="biz-selector-area">
       <select id="businessSelect" onchange="onBusinessSelect()">
         <option value="">(Todos los negocios)</option>
       </select>
-      <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:16px;padding:4px 8px;">&#x21bb;</button>
+      <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:14px;padding:3px 6px;">&#x21bb;</button>
     </div>
     <span id="selectedBizStatus" class="small"></span>
     <div class="intel-indicator hidden" id="intelIndicator" onclick="toggleAssistDock()">
@@ -2082,21 +2085,33 @@
       <span class="freshness-dot" id="freshnessDot"></span>
       <span class="freshness-text" id="freshnessText">Cargando...</span>
     </div>
+    <div class="context-bar-group">
+      <label class="toggle-switch" title="Auto-refresh cada 10s">
+        <input type="checkbox" id="autoRefreshToggle" onchange="onAutoToggle(this.checked)">
+        <span class="toggle-track"></span>
+        <span class="toggle-label">Auto</span>
+      </label>
+      <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Sonido de notificaciones">
+        <span id="soundIcon">&#128264;</span>
+      </button>
+    </div>
     <span class="muted small" style="display:none;">API: <code id="baseUrl"></code></span>
   </div>
 
-  <!-- Nav Bar: Module actions -->
+  <!-- Row C: Toolbar / Module Actions -->
   <div class="nav-bar">
     <div class="view-tabs" id="viewTabs">
       <button class="view-tab active" id="tabOverview" onclick="setDashboardView('overview')">Overview</button>
       <button class="view-tab" id="tabOrders" onclick="setDashboardView('orders')">Pedidos</button>
     </div>
+    <div class="toolbar-sep"></div>
     <button class="primary" onclick="openCreateBiz()" id="btnNewBiz">+ Nuevo Negocio</button>
     <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
     <button onclick="openMenuManager()" id="btnMenuMgr" style="display:none;">Menu Manager</button>
     <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
     <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
-    <button onclick="openDashboardConfig()" id="btnDashConfig" title="Personalizar dashboard" style="font-size:14px;padding:4px 10px;">&#9881;</button>
+    <div class="toolbar-sep"></div>
+    <button onclick="openDashboardConfig()" id="btnDashConfig" title="Personalizar dashboard" style="font-size:13px;padding:4px 8px;">&#9881;</button>
   </div>
 
   <div class="app-container">
