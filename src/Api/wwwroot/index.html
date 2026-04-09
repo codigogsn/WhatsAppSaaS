@@ -780,11 +780,31 @@
     .theme-toggle:hover { background: var(--border-light); color: var(--text); transform: scale(1.05); }
     .theme-toggle:active { transform: scale(.95); }
 
-    /* ═══ Nav bar ═══ */
+    /* ═══ Context Bar — persistent business context ═══ */
+    .context-bar {
+      position: sticky; top: 0; z-index: 11;
+      display: flex; align-items: center; gap: 14px;
+      padding: 8px 24px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      transition: background var(--transition), border var(--transition);
+    }
+    [data-theme="dark"] .context-bar {
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      backdrop-filter: blur(20px) saturate(140%);
+      background: rgba(22,22,26,.82);
+      border-bottom-color: rgba(255,255,255,.07);
+    }
+    .context-bar label { font-size: 11px; font-weight: 600; color: var(--muted); letter-spacing: .3px; }
+    .context-bar .biz-selector-area { display: flex; align-items: center; gap: 6px; }
+    .context-bar-spacer { flex: 1; }
+    .context-bar .freshness-bar { padding: 0; gap: 6px; }
+
+    /* ═══ Nav bar — module actions ═══ */
     .nav-bar {
-      background: var(--surface); border-bottom: 1px solid var(--border);
-      padding: 10px 24px; margin-bottom: 24px;
-      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      background: var(--surface-2); border-bottom: 1px solid var(--border-light);
+      padding: 8px 24px;
+      display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
       transition: background var(--transition), border var(--transition);
       position: relative; z-index: 9;
     }
@@ -1639,7 +1659,9 @@
       .biz-panel .form-grid, .modal .form-grid { grid-template-columns: 1fr; }
       .status-actions { flex-direction: column; }
       .status-actions select { min-width: 100%; }
-      .nav-bar { padding: 10px 14px; }
+      .context-bar { padding: 8px 14px; gap: 10px; }
+      .context-bar .biz-selector-area select { min-width: 180px; }
+      .nav-bar { padding: 6px 14px; }
       /* Filters: stack vertically on small screens */
       .filters .row { flex-direction: column; align-items: stretch; gap: 8px; }
       .filters .row label { margin-top: 4px; }
@@ -2003,6 +2025,14 @@
     </div>
     <div class="brand-right">
       <div id="roleBadge" class="role-badge"></div>
+      <label class="toggle-switch" title="Auto-refresh cada 10s">
+        <input type="checkbox" id="autoRefreshToggle" onchange="onAutoToggle(this.checked)">
+        <span class="toggle-track"></span>
+        <span class="toggle-label">Auto</span>
+      </label>
+      <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Sonido de notificaciones">
+        <span id="soundIcon">&#128264;</span>
+      </button>
       <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
         <span id="themeIcon">&#9790;</span>
       </button>
@@ -2010,8 +2040,8 @@
     </div>
   </div>
 
-  <!-- Nav Bar: Business Selector -->
-  <div class="nav-bar">
+  <!-- Context Bar: Business context + status -->
+  <div id="contextBar" class="context-bar">
     <label>Negocio:</label>
     <div class="biz-selector-area">
       <select id="businessSelect" onchange="onBusinessSelect()">
@@ -2019,27 +2049,27 @@
       </select>
       <button onclick="loadBusinesses()" title="Recargar negocios" style="font-size:16px;padding:4px 8px;">&#x21bb;</button>
     </div>
-    <button class="primary" onclick="openCreateBiz()" id="btnNewBiz">+ Nuevo Negocio</button>
-    <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
-    <button onclick="openMenuManager()" id="btnMenuMgr" style="display:none;">Menu Manager</button>
-    <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
-    <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
     <span id="selectedBizStatus" class="small"></span>
     <div class="intel-indicator hidden" id="intelIndicator" onclick="toggleAssistDock()">
       <span class="intel-dot stable" id="intelDot"></span>
       <span id="intelLabel">Estable</span>
     </div>
+    <div class="context-bar-spacer"></div>
+    <div class="freshness-bar" id="freshnessBar">
+      <span class="freshness-dot" id="freshnessDot"></span>
+      <span class="freshness-text" id="freshnessText">Cargando...</span>
+    </div>
+    <span class="muted small" style="display:none;">API: <code id="baseUrl"></code></span>
+  </div>
+
+  <!-- Nav Bar: Module actions -->
+  <div class="nav-bar">
+    <button class="primary" onclick="openCreateBiz()" id="btnNewBiz">+ Nuevo Negocio</button>
+    <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
+    <button onclick="openMenuManager()" id="btnMenuMgr" style="display:none;">Menu Manager</button>
+    <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
+    <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
     <button onclick="openDashboardConfig()" id="btnDashConfig" title="Personalizar dashboard" style="font-size:14px;padding:4px 10px;">&#9881;</button>
-    <span style="flex:1;"></span>
-    <span class="muted small">API: <code id="baseUrl"></code></span>
-    <label class="toggle-switch" title="Auto-refresh cada 10s">
-      <input type="checkbox" id="autoRefreshToggle" onchange="onAutoToggle(this.checked)">
-      <span class="toggle-track"></span>
-      <span class="toggle-label">Auto</span>
-    </label>
-    <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Sonido de notificaciones">
-      <span id="soundIcon">&#128264;</span>
-    </button>
   </div>
 
   <div class="app-container">
@@ -2394,12 +2424,6 @@ Tipo: burger"></textarea>
       </tr></thead><tbody id="fdBizTable"></tbody></table>
     </div>
 
-  </div>
-
-  <!-- Data Freshness -->
-  <div class="freshness-bar" id="freshnessBar">
-    <span class="freshness-dot" id="freshnessDot"></span>
-    <span class="freshness-text" id="freshnessText">Cargando...</span>
   </div>
 
   <!-- Hero KPI Area -->
