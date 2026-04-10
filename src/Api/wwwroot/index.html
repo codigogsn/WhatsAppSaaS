@@ -2827,11 +2827,11 @@ Tipo: burger"></textarea>
   <!-- Order Status Strip -->
   <div id="statusStrip" class="status-strip">
     <div class="status-chip"><div class="status-chip-label">Cargados</div><div class="status-chip-value" id="kpiTotal">0</div></div>
-    <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pending</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
-    <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparing</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pendiente</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparando</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--accent);">En Camino</div><div class="status-chip-value" style="color:var(--accent);" id="kpiOut">0</div></div>
-    <div class="status-chip"><div class="status-chip-label" style="color:var(--success);">Completed</div><div class="status-chip-value" style="color:var(--success);" id="kpiCompleted">0</div></div>
-    <div class="status-chip"><div class="status-chip-label" style="color:var(--danger);">Cancelled</div><div class="status-chip-value" style="color:var(--danger);" id="kpiCancelled">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--success);">Completado</div><div class="status-chip-value" style="color:var(--success);" id="kpiCompleted">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--danger);">Cancelado</div><div class="status-chip-value" style="color:var(--danger);" id="kpiCancelled">0</div></div>
   </div>
 
   <!-- Inline Intelligence Strip -->
@@ -2963,7 +2963,7 @@ Tipo: burger"></textarea>
 
   <!-- Orders Table -->
   <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
-  <table id="ordersTable">
+  <table id="ordersTable" style="min-width:720px;">
     <thead>
       <tr>
         <th style="width:30px;"></th>
@@ -3525,8 +3525,9 @@ function onBusinessSelect(){
   updateBizAdminButton();
   // Close ALL module panels on any business switch — prevents stale data from previous business
   closeAllPanels();
-  // Reset assist dock init guard so it reconfigures for new mode
+  // Reset assist dock init guard and reconfigure immediately for new context
   window._assistInit = false;
+  initAssistDock();
   // Update sidebar disabled states for global vs business mode
   updateSidebarGlobalState();
   // Clear sidebar active states for panels being closed
@@ -4125,9 +4126,13 @@ async function loadSummary(){
   var bid = getBusinessId();
   var qs = new URLSearchParams({ts: Date.now()});
   if (bid) qs.set('businessId', bid);
+  // Clear any previous error state
+  var heroEl = document.getElementById('heroKpi');
+  var prevErr = heroEl ? heroEl.querySelector('.hero-error-msg') : null;
+  if (prevErr) prevErr.remove();
   try {
     var res = await fetch('/api/admin/analytics/summary?' + qs.toString(), { headers: jwtHeaders(), cache: 'no-store' });
-    if (!res.ok) { ids.forEach(function(id){ document.getElementById(id).textContent = '-'; }); return; }
+    if (!res.ok) { ids.forEach(function(id){ document.getElementById(id).textContent = '-'; }); showHeroError(); return; }
     var s = await res.json();
     document.getElementById('kpiOrdersTotal').textContent = s.totalOrders ?? 0;
     document.getElementById('kpiUniqueCustomers').textContent = s.uniqueCustomers ?? 0;
@@ -4139,7 +4144,16 @@ async function loadSummary(){
     document.getElementById('kpiReturning').textContent = (s.returningCustomersPct ?? 0) + '%';
     document.getElementById('kpiTopItem').textContent = s.topSellingItem || '-';
     document.getElementById('kpiPaymentsPending').textContent = s.paymentsPendingVerification ?? 0;
-  } catch(e) { console.warn('loadSummary error:', e); ids.forEach(function(id){ document.getElementById(id).textContent = '-'; }); }
+  } catch(e) { console.warn('loadSummary error:', e); ids.forEach(function(id){ document.getElementById(id).textContent = '-'; }); showHeroError(); }
+}
+function showHeroError(){
+  var hero = document.getElementById('heroKpi');
+  if (!hero || hero.querySelector('.hero-error-msg')) return;
+  var d = document.createElement('div');
+  d.className = 'hero-error-msg';
+  d.style.cssText = 'grid-column:1/-1;text-align:center;padding:12px 16px;color:var(--muted);font-size:12px;font-weight:500;';
+  d.textContent = 'No se pudieron cargar las m\u00e9tricas. Se actualizar\u00e1n en el pr\u00f3ximo ciclo.';
+  hero.appendChild(d);
 }
 
 async function loadExtended(){
