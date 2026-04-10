@@ -841,6 +841,14 @@
     /* Loading transition — suppress interaction during business switch */
     body.dash-loading .app-container { pointer-events: none; opacity: .55; transition: opacity .12s ease; }
     body.dash-loading .shell-sidebar .sb-btn { pointer-events: none; }
+    body.dash-loading .shell-topbar::after {
+      content: 'Cargando...';
+      position: absolute; right: 16px; top: 50%; transform: translateY(-50%);
+      font-size: 10.5px; font-weight: 500; color: var(--accent);
+      letter-spacing: .02em; opacity: 0;
+      animation: dash-load-in .2s ease forwards;
+    }
+    @keyframes dash-load-in { to { opacity: 1; } }
     [data-theme="dark"] .shell-sidebar {
       background: rgba(20,20,22,.92);
       border-right-color: rgba(255,255,255,.06);
@@ -3515,13 +3523,8 @@ function onBusinessSelect(){
   const bid = document.getElementById('businessSelect').value;
   if (bid) localStorage.setItem('BUSINESS_ID', bid); else localStorage.removeItem('BUSINESS_ID');
   updateBizAdminButton();
-  // Close all module panels when switching business
-  document.getElementById('bizPanel').style.display = 'none';
-  if (!bid) {
-    // "All businesses" selected — close business-scoped panels
-    document.getElementById('usersPanel').style.display = 'none';
-    document.getElementById('customersPanel').style.display = 'none';
-  }
+  // Close ALL module panels on any business switch — prevents stale data from previous business
+  closeAllPanels();
   // Reset assist dock init guard so it reconfigures for new mode
   window._assistInit = false;
   // Update sidebar disabled states for global vs business mode
@@ -5343,13 +5346,15 @@ async function load() {
   document.getElementById('msg').textContent = `${data.length} pedidos · ${now}`;
   console.log(`${tag} render complete — ${data.length} orders at ${now}`);
 
+  // Freshness: update only on successful load
+  _lastDataUpdate = Date.now();
+  updateFreshnessDisplay();
+
   } catch(err) {
     console.error('[AUTOREFRESH] load() error:', err);
     document.getElementById('msg').textContent = 'Error: ' + err.message;
   } finally {
     _loadInProgress = false;
-    _lastDataUpdate = Date.now();
-    updateFreshnessDisplay();
   }
 }
 
