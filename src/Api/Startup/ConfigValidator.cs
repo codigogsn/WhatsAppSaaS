@@ -16,6 +16,7 @@ public static class ConfigValidator
         {
             ["WHATSAPP_VERIFY_TOKEN"] = "webhook verification will reject all requests",
             ["WHATSAPP_PHONE_NUMBER_ID"] = "outbound messages will not work",
+            ["WHATSAPP_APP_SECRET"] = "webhook signature validation will reject ALL inbound messages (required in production)",
             ["ADMIN_KEY"] = "admin endpoints will reject all requests",
             ["JWT_SECRET"] = "founder login will not work",
         };

@@ -22,6 +22,7 @@ public class WebhookController : ControllerBase
     private readonly IMessageQueue _messageQueue;
     private readonly ISignatureValidator _signatureValidator;
     private readonly WhatsAppOptions _whatsAppOptions;
+    private readonly bool _isProduction;
 
     private const int MaxBodySize = 256 * 1024; // 256 KB
 
@@ -34,12 +35,14 @@ public class WebhookController : ControllerBase
         IBusinessResolver businessResolver,
         IMessageQueue messageQueue,
         ISignatureValidator signatureValidator,
-        IOptions<WhatsAppOptions> whatsAppOptions)
+        IOptions<WhatsAppOptions> whatsAppOptions,
+        IHostEnvironment hostEnvironment)
     {
         _businessResolver = businessResolver;
         _messageQueue = messageQueue;
         _signatureValidator = signatureValidator;
         _whatsAppOptions = whatsAppOptions.Value;
+        _isProduction = hostEnvironment.IsProduction();
     }
 
     // GET /webhook and /api/webhook -- Meta webhook verification
@@ -101,15 +104,16 @@ public class WebhookController : ControllerBase
         if (rawBody.Length > MaxBodySize)
             return BadRequest("Payload too large");
 
-        // Auto-enable signature validation when AppSecret is configured
-        var requireSig = _whatsAppOptions.RequireSignatureValidation
+        // Signature validation: ALWAYS required in production, auto-enabled in dev when AppSecret is set
+        var requireSig = _isProduction
+                         || _whatsAppOptions.RequireSignatureValidation
                          || !string.IsNullOrEmpty(_whatsAppOptions.AppSecret);
         if (requireSig)
         {
             var sig = Request.Headers["X-Hub-Signature-256"].FirstOrDefault();
             if (!_signatureValidator.IsValid(rawBody, sig ?? ""))
             {
-                Log.Warning("WEBHOOK REJECTED: invalid signature on {Path}", Request.Path);
+                Log.Warning("WEBHOOK REJECTED: invalid signature on {Path} (production={IsProduction})", Request.Path, _isProduction);
                 return Unauthorized();
             }
         }
@@ -191,9 +195,10 @@ public class WebhookController : ControllerBase
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "WEBHOOK ENQUEUE FAILED: accepted request but queue insert failed for businessId={BusinessId} messageId={MessageId}",
+            Log.Error(ex, "WEBHOOK ENQUEUE FAILED: queue insert failed for businessId={BusinessId} messageId={MessageId} — returning 500 so Meta retries",
                 businessContext.BusinessId, firstMessageId ?? "(none)");
             WhatsAppSaaS.Api.Diagnostics.AppMetrics.RecordEnqueueFailure();
+            return StatusCode(500);
         }
 
         return Ok();

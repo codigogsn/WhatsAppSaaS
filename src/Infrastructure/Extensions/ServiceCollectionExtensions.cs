@@ -20,7 +20,15 @@ public static class ServiceCollectionExtensions
     {
         // ── WhatsApp options ────────────────────────────
         services.AddOptions<WhatsAppOptions>()
-            .Bind(configuration.GetSection(WhatsAppOptions.SectionName));
+            .Bind(configuration.GetSection(WhatsAppOptions.SectionName))
+            .Configure(opts =>
+            {
+                // Env var override for AppSecret (consistent with other WhatsApp env var patterns)
+                var envSecret = Environment.GetEnvironmentVariable("WHATSAPP_APP_SECRET")
+                                ?? Environment.GetEnvironmentVariable("WhatsApp__AppSecret");
+                if (!string.IsNullOrWhiteSpace(envSecret))
+                    opts.AppSecret = envSecret;
+            });
 
         // ── AiParser options ────────────────────────────
         services.AddOptions<AiParserOptions>()
