@@ -191,7 +191,7 @@ public class WebhookController : ControllerBase
 
         try
         {
-            await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), ct);
+            await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), firstMessageId, ct);
         }
         catch (Exception ex)
         {

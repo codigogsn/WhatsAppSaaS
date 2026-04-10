@@ -32,22 +32,45 @@ public sealed class PostgresMessageQueue : IMessageQueue
 
     public async ValueTask EnqueueAsync(QueuedMessage message, CancellationToken cancellationToken = default)
     {
+        await EnqueueAsync(message, null, cancellationToken);
+    }
+
+    public async ValueTask EnqueueAsync(QueuedMessage message, string? messageId, CancellationToken cancellationToken = default)
+    {
         var payload = JsonSerializer.Serialize(message, JsonOpts);
 
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken);
 
         await using var cmd = conn.CreateCommand();
-        cmd.CommandText = """
-            INSERT INTO "WebhookQueue" ("Id", "Payload", "CreatedAtUtc", "AttemptCount")
-            VALUES (@id, @payload, @now, 0)
-        """;
+        // When messageId is provided, use ON CONFLICT to skip duplicates (enqueue-time dedup).
+        // The unique partial index IX_WebhookQueue_MessageId covers unprocessed rows only.
+        if (!string.IsNullOrWhiteSpace(messageId))
+        {
+            cmd.CommandText = """
+                INSERT INTO "WebhookQueue" ("Id", "Payload", "CreatedAtUtc", "AttemptCount", "MessageId")
+                VALUES (@id, @payload, @now, 0, @msgId)
+                ON CONFLICT ("MessageId") WHERE "MessageId" IS NOT NULL AND "ProcessedAtUtc" IS NULL
+                DO NOTHING
+            """;
+            cmd.Parameters.AddWithValue("msgId", messageId);
+        }
+        else
+        {
+            cmd.CommandText = """
+                INSERT INTO "WebhookQueue" ("Id", "Payload", "CreatedAtUtc", "AttemptCount")
+                VALUES (@id, @payload, @now, 0)
+            """;
+        }
         cmd.Parameters.AddWithValue("id", Guid.NewGuid());
         cmd.Parameters.AddWithValue("payload", payload);
         cmd.Parameters.AddWithValue("now", DateTime.UtcNow);
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
 
-        _logger.LogDebug("QUEUE ENQUEUED: item persisted to WebhookQueue");
+        var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
+        if (rows == 0)
+            _logger.LogInformation("QUEUE DEDUP: skipped duplicate enqueue for messageId={MessageId}", messageId);
+        else
+            _logger.LogDebug("QUEUE ENQUEUED: item persisted to WebhookQueue messageId={MessageId}", messageId ?? "(none)");
     }
 
     public async ValueTask<QueuedMessage?> DequeueAsync(CancellationToken cancellationToken = default)

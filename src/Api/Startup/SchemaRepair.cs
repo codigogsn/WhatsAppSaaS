@@ -39,8 +39,10 @@ public static class SchemaRepair
         ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_PasswordResetTokens_TokenHash" ON "PasswordResetTokens" ("TokenHash")""");
         ExecSql(conn, """CREATE TABLE IF NOT EXISTS "WebhookQueue" ("Id" uuid NOT NULL PRIMARY KEY, "Payload" text NOT NULL, "CreatedAtUtc" timestamp NOT NULL DEFAULT now(), "ClaimedAtUtc" timestamp, "ProcessedAtUtc" timestamp, "AttemptCount" integer NOT NULL DEFAULT 0, "LastError" text)""");
         ExecSql(conn, """ALTER TABLE "WebhookQueue" ADD COLUMN IF NOT EXISTS "NextRetryAtUtc" timestamp""");
+        ExecSql(conn, """ALTER TABLE "WebhookQueue" ADD COLUMN IF NOT EXISTS "MessageId" varchar(256)""");
         ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_WebhookQueue_Pending" ON "WebhookQueue" ("CreatedAtUtc") WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" < 5""");
         ExecSql(conn, """CREATE INDEX IF NOT EXISTS "IX_WebhookQueue_ProcessedAtUtc" ON "WebhookQueue" ("ProcessedAtUtc") WHERE "ProcessedAtUtc" IS NOT NULL""");
+        ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_WebhookQueue_MessageId" ON "WebhookQueue" ("MessageId") WHERE "MessageId" IS NOT NULL AND "ProcessedAtUtc" IS NULL""");
         Log.Information("QUEUE SCHEMA: WebhookQueue ensured");
         ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "InteractiveMenuEnabled" boolean NOT NULL DEFAULT false""");
     }

@@ -67,7 +67,8 @@ public class BusinessResolver : IBusinessResolver
 
         // Auto-create: resolve config from env vars
         var accessToken = EnvResolve("WHATSAPP_ACCESS_TOKEN", "WhatsApp__AccessToken") ?? "";
-        var adminKey = EnvResolve("WHATSAPP_ADMIN_KEY", "ADMIN_KEY", "WhatsApp__AdminKey") ?? "";
+        // Each auto-created business gets its own unique AdminKey — never reuse the global key
+        var adminKey = Guid.NewGuid().ToString("N")[..24];
         var bizName = EnvResolve("WHATSAPP_BUSINESS_NAME", "WhatsApp__BusinessName") ?? "Default Business";
 
         var currRef = EnvResolve("WHATSAPP_CURRENCY_REF", "WhatsApp__CurrencyReference") ?? "BCV_USD";
