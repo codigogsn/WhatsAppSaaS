@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +10,7 @@ namespace WhatsAppSaaS.Api.Controllers;
 
 [ApiController]
 [Route("api/gmail")]
+[Authorize]
 [EnableRateLimiting("admin")]
 public sealed class GmailController : ControllerBase
 {

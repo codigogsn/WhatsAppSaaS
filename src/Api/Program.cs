@@ -335,43 +335,24 @@ try
 
     app.MapControllers();
 
-    // Enhanced health endpoint
+    // Public health endpoint — minimal safe response for uptime checks
     var startTime = DateTime.UtcNow;
     app.MapGet("/health", async (AppDbContext db) =>
     {
-        var dbStatus = "Disconnected";
-        int queuePendingCount = 0, stuckQueueItems = 0;
+        var dbOk = false;
         try
         {
             var conn = db.Database.GetDbConnection();
             await conn.OpenAsync();
-            dbStatus = "Connected";
-
-            using var cmd = conn.CreateCommand();
-            cmd.CommandText = """
-                SELECT
-                    COUNT(*) FILTER (WHERE "ProcessedAtUtc" IS NULL) AS pending,
-                    COUNT(*) FILTER (WHERE "ProcessedAtUtc" IS NULL AND "AttemptCount" >= 5) AS stuck
-                FROM "WebhookQueue"
-            """;
-            using var reader = await cmd.ExecuteReaderAsync();
-            if (await reader.ReadAsync())
-            {
-                queuePendingCount = Convert.ToInt32(reader.GetInt64(0));
-                stuckQueueItems = Convert.ToInt32(reader.GetInt64(1));
-            }
-
+            dbOk = true;
             await conn.CloseAsync();
         }
         catch { }
 
         return Results.Ok(new
         {
-            status = "Healthy",
-            db = dbStatus,
-            queuePendingCount,
-            stuckQueueItems,
-            uptime = (DateTime.UtcNow - startTime).ToString(@"d\.hh\:mm\:ss")
+            status = dbOk ? "Healthy" : "Degraded",
+            timestamp = DateTime.UtcNow.ToString("O")
         });
     });
 
@@ -431,10 +412,20 @@ try
         });
     });
 
-    // Prometheus-compatible metrics endpoint (plain text)
+    // Prometheus-compatible metrics endpoint (plain text, admin-protected)
     var metricsConnString = npgsqlConnString;
-    app.MapGet("/metrics", async () =>
+    app.MapGet("/metrics", async (HttpContext ctx) =>
     {
+        var metricsAdminKey = Environment.GetEnvironmentVariable("ADMIN_KEY");
+        if (string.IsNullOrWhiteSpace(metricsAdminKey))
+            return Results.Json(new { error = "ADMIN_KEY not configured" }, statusCode: 500);
+
+        if (!ctx.Request.Headers.TryGetValue("X-Admin-Key", out var metricsHeaderKey)
+            || !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(metricsHeaderKey.ToString()),
+                Encoding.UTF8.GetBytes(metricsAdminKey)))
+            return Results.Json(new { error = "Missing or invalid X-Admin-Key" }, statusCode: 401);
+
         long queuePending = 0;
         if (metricsConnString is not null)
         {

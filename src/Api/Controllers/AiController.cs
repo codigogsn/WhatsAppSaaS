@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using WhatsAppSaaS.Application.DTOs;
@@ -9,10 +10,12 @@ namespace WhatsAppSaaS.Api.Controllers;
 /// Test endpoint to exercise the AI parser without needing a WhatsApp webhook.
 /// curl -X POST http://localhost:5000/ai/parse \
 ///   -H "Content-Type: application/json" \
+///   -H "Authorization: Bearer {jwt}" \
 ///   -d '{"message":"quiero 2 hamburguesas para llevar","from":"5215512345678","conversation_id":"test-123"}'
 /// </summary>
 [ApiController]
 [Route("ai")]
+[Authorize]
 [EnableRateLimiting("admin")]
 public sealed class AiController : ControllerBase
 {
