@@ -835,6 +835,9 @@
       opacity: .35; pointer-events: none; cursor: not-allowed;
     }
     .shell-sidebar .sb-btn.sb-disabled:hover { background: transparent; }
+    /* Loading transition — suppress interaction during business switch */
+    body.dash-loading .app-container { pointer-events: none; opacity: .6; transition: opacity .15s ease; }
+    body.dash-loading .shell-sidebar .sb-btn { pointer-events: none; }
     [data-theme="dark"] .shell-sidebar {
       background: rgba(28,28,30,.82);
       border-right-color: rgba(255,255,255,.08);
@@ -2906,6 +2909,7 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Orders Table -->
+  <div style="overflow-x:auto;-webkit-overflow-scrolling:touch;">
   <table id="ordersTable">
     <thead>
       <tr>
@@ -2921,6 +2925,7 @@ Tipo: burger"></textarea>
     </thead>
     <tbody id="tbody"></tbody>
   </table>
+  </div>
 
   </div><!-- /#viewOrders -->
 
@@ -3478,7 +3483,9 @@ function onBusinessSelect(){
   updateSidebarGlobalState();
   // Clear sidebar active states for panels being closed
   clearSidebarActiveStates();
-  load();
+  // Protect UI during async transition
+  document.body.classList.add('dash-loading');
+  load().finally(function(){ document.body.classList.remove('dash-loading'); });
 }
 
 function updateBizAdminButton(){
@@ -3683,6 +3690,7 @@ function toggleBizPanel(){
 async function loadBizProfile(bizId){
   try {
     const res = await fetch('/api/admin/businesses/' + bizId, { headers: jwtHeaders() });
+    if (bizId !== getBusinessId()) { console.log('[BIZPROFILE] business changed during fetch — discarding'); return; }
     if (!res.ok) {
       let detail = 'HTTP ' + res.status;
       try { const err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
@@ -4383,7 +4391,22 @@ function applyGlobalModeUI() {
 async function loadFounderDashboard() {
   try {
     var res = await fetch('/api/admin/analytics/founder-overview', { headers: jwtHeaders(), cache: 'no-store' });
-    if (!res.ok) { console.warn('Founder overview failed:', res.status); return; }
+    if (!res.ok) {
+      console.warn('Founder overview failed:', res.status);
+      showToast('Error cargando panel de fundador (HTTP ' + res.status + ')', 'error');
+      var fd = document.getElementById('founderDashboard');
+      if (fd && !fd.querySelector('.fd-error-fallback')) {
+        var msg = document.createElement('div');
+        msg.className = 'fd-error-fallback';
+        msg.style.cssText = 'text-align:center;padding:40px 20px;color:var(--muted);font-size:14px;';
+        msg.innerHTML = 'No se pudo cargar el panel de fundador.<br><span style="font-size:12px;">Intenta recargar la p\u00e1gina o verifica tu conexi\u00f3n.</span>';
+        fd.prepend(msg);
+      }
+      return;
+    }
+    // Clear any previous error fallback
+    var prevErr = document.querySelector('.fd-error-fallback');
+    if (prevErr) prevErr.remove();
     var d = await res.json();
 
     document.getElementById('fdBiz').textContent = d.totalBusinesses ?? '-';
@@ -4425,7 +4448,18 @@ async function loadFounderDashboard() {
     loadFounderInsights();
     initAssistDock();
 
-  } catch(e) { console.warn('Founder dashboard error:', e); }
+  } catch(e) {
+    console.warn('Founder dashboard error:', e);
+    showToast('Error de conexi\u00f3n al cargar panel de fundador', 'error');
+    var fd = document.getElementById('founderDashboard');
+    if (fd && !fd.querySelector('.fd-error-fallback')) {
+      var msg = document.createElement('div');
+      msg.className = 'fd-error-fallback';
+      msg.style.cssText = 'text-align:center;padding:40px 20px;color:var(--muted);font-size:14px;';
+      msg.innerHTML = 'No se pudo cargar el panel de fundador.<br><span style="font-size:12px;">Intenta recargar la p\u00e1gina o verifica tu conexi\u00f3n.</span>';
+      fd.prepend(msg);
+    }
+  }
 }
 
 async function loadFounderInsights() {
@@ -4945,6 +4979,16 @@ function dcpNav(btn, section) {
 }
 
 async function load() {
+  // Universal load guard — prevents overlapping refreshes in ALL modes
+  if (_loadInProgress) {
+    console.log('[LOAD] load() called but already in progress — skipping');
+    return;
+  }
+  _loadInProgress = true;
+  const isAuto = _autoRefreshActive;
+  const tag = isAuto ? '[AUTOREFRESH]' : '[MANUAL]';
+
+  try {
   applyGlobalModeUI();
   // Global mode: founder gets global dashboard, others get nothing
   if (!getBusinessId()) {
@@ -4954,21 +4998,11 @@ async function load() {
     return;
   }
 
-  if (_loadInProgress) {
-    console.log('[AUTOREFRESH] load() called but already in progress — skipping');
-    return;
-  }
-  _loadInProgress = true;
-  const isAuto = _autoRefreshActive;
-  const tag = isAuto ? '[AUTOREFRESH]' : '[MANUAL]';
-
   // Show loading state
   var ft = document.getElementById('freshnessText');
   var ft2 = document.getElementById('freshnessText_topbar');
   if (ft) ft.textContent = 'Cargando...';
   if (ft2) ft2.textContent = 'Cargando...';
-
-  try {
   const status = document.getElementById('status').value;
   const take = document.getElementById('take').value || 50;
   const phone = (document.getElementById('phone').value || '').trim();
@@ -5563,6 +5597,7 @@ async function loadCrm(){
   if (search) qs.set('search', search);
   try {
     const res = await fetch('/api/admin/customers/crm?' + qs.toString(), { headers: jwtHeaders() });
+    if (bid !== getBusinessId()) { console.log('[CRM] business changed during fetch — discarding'); return; }
     if (!res.ok) { body.textContent = 'Error loading customers'; return; }
     const data = await res.json();
     if (!data.customers || data.customers.length === 0) {
@@ -5603,11 +5638,13 @@ async function loadCrm(){
 var roleLabels = {Founder:'Founder',Owner:'Propietario',Manager:'Gerente',Operator:'Operador'};
 async function loadUsers(){
   var tbody = document.getElementById('usersTbody');
+  var bidAtStart = getBusinessId();
   tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
   try {
     // Global admin (admin key) or Founder role gets cross-business view; regular owners see their business only
     var url = (getAdminKey() || getAuthRole() === 'Founder') ? '/api/admin/users/all' : '/api/admin/users';
     var res = await fetch(url, { headers: jwtHeaders() });
+    if (bidAtStart !== getBusinessId()) { console.log('[USERS] business changed during fetch — discarding'); return; }
     if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" class="danger">Error cargando usuarios</td></tr>'; return; }
     var users = await res.json();
     if (users.length === 0) { tbody.innerHTML = '<tr><td colspan="6" class="muted">No hay usuarios creados</td></tr>'; return; }
