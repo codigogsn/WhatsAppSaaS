@@ -108,33 +108,27 @@ public sealed class OrderRepository : IOrderRepository
 
         try
         {
+            // Explicit transaction: Order persistence + Customer aggregate update succeed or fail together.
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+
             await _db.SaveChangesAsync(ct);
             _logger.LogInformation("ORDER CREATED: {OrderId} | {BusinessId} | {Total}",
                 order.Id, order.BusinessId, order.TotalAmount ?? 0m);
 
             // Atomic SQL increment for customer aggregates — immune to concurrent read-modify-write races.
-            // This runs after the order + customer are persisted so the FK is guaranteed to exist.
             if (order.CheckoutCompleted)
             {
                 var totalAmount = order.TotalAmount ?? 0m;
-                try
-                {
-                    await _db.Database.ExecuteSqlRawAsync("""
-                        UPDATE "Customers"
-                        SET "OrdersCount" = "OrdersCount" + 1,
-                            "TotalSpent" = "TotalSpent" + @p0,
-                            "LastPurchaseAtUtc" = @p1
-                        WHERE "Id" = @p2
-                        """, totalAmount, now, customer.Id);
-                }
-                catch (Exception aggEx)
-                {
-                    _logger.LogError(aggEx, "ORDER SAVE: atomic customer aggregate update failed for CustomerId={CustomerId} OrderId={OrderId}",
-                        customer.Id, order.Id);
-                    // Non-fatal: the order itself was already persisted successfully
-                }
+                await _db.Database.ExecuteSqlRawAsync("""
+                    UPDATE "Customers"
+                    SET "OrdersCount" = "OrdersCount" + 1,
+                        "TotalSpent" = "TotalSpent" + @p0,
+                        "LastPurchaseAtUtc" = @p1
+                    WHERE "Id" = @p2
+                    """, totalAmount, now, customer.Id);
             }
 
+            await transaction.CommitAsync(ct);
             _logger.LogInformation("ORDER SAVE: SUCCESS Id={Id}", order.Id);
         }
         catch (DbUpdateException dbEx)

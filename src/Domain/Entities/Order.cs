@@ -78,6 +78,9 @@ public class Order
     public DateTime? PreparingAtUtc { get; set; }
     public DateTime? DeliveredAtUtc { get; set; }
 
+    // Optimistic concurrency — prevents silent overwrites from concurrent dashboard edits
+    public uint RowVersion { get; set; }
+
     // Lista de items
     public List<OrderItem> Items { get; set; } = new();
 

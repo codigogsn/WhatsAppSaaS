@@ -82,6 +82,13 @@ public class AppDbContext : DbContext
             b.Property(x => x.PreparingAtUtc);
             b.Property(x => x.DeliveredAtUtc);
 
+            // Optimistic concurrency via PostgreSQL xmin system column
+            b.Property(x => x.RowVersion)
+                .HasColumnName("xmin")
+                .HasColumnType("xid")
+                .ValueGeneratedOnAddOrUpdate()
+                .IsConcurrencyToken();
+
             // 📊 Analytics indexes
             b.HasIndex(x => x.BusinessId);
             b.HasIndex(x => x.CreatedAtUtc);
