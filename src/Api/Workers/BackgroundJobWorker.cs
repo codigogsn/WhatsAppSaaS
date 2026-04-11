@@ -241,6 +241,48 @@ public sealed class BackgroundJobWorker : BackgroundService
         {
             _logger.LogWarning(ex, "QUEUE CLEANUP: failed to purge abandoned items (non-fatal)");
         }
+
+        // Purge stuck claimed items (claimed > 24h ago, never completed, not yet at max retries)
+        try
+        {
+            var conn3 = db.Database.GetDbConnection();
+            if (conn3.State != System.Data.ConnectionState.Open) await conn3.OpenAsync(ct);
+            using var cmd3 = conn3.CreateCommand();
+            cmd3.CommandText = """
+                DELETE FROM "WebhookQueue"
+                WHERE "ProcessedAtUtc" IS NULL
+                  AND "ClaimedAtUtc" IS NOT NULL
+                  AND "ClaimedAtUtc" < now() - interval '24 hours'
+                  AND "CreatedAtUtc" < now() - interval '7 days'
+            """;
+            var stuck = await cmd3.ExecuteNonQueryAsync(ct);
+            if (stuck > 0)
+                _logger.LogInformation("QUEUE CLEANUP: purged {Count} stuck claimed items older than 7 days", stuck);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "QUEUE CLEANUP: failed to purge stuck items (non-fatal)");
+        }
+
+        // Clean expired/used PasswordResetTokens older than 7 days
+        try
+        {
+            var conn4 = db.Database.GetDbConnection();
+            if (conn4.State != System.Data.ConnectionState.Open) await conn4.OpenAsync(ct);
+            using var cmd4 = conn4.CreateCommand();
+            cmd4.CommandText = """
+                DELETE FROM "PasswordResetTokens"
+                WHERE "ExpiresAtUtc" < now() - interval '7 days'
+                   OR ("UsedAtUtc" IS NOT NULL AND "UsedAtUtc" < now() - interval '7 days')
+            """;
+            var tokens = await cmd4.ExecuteNonQueryAsync(ct);
+            if (tokens > 0)
+                _logger.LogInformation("TOKEN CLEANUP: deleted {Count} expired/used password reset tokens", tokens);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "TOKEN CLEANUP: failed to clean PasswordResetTokens (non-fatal)");
+        }
     }
 
     private async Task ExecuteCleanupAbandonedOrdersAsync(IServiceProvider sp, CancellationToken ct)

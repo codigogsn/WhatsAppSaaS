@@ -42,6 +42,31 @@ try
 
     var builder = WebApplication.CreateBuilder(args);
 
+    // ────────────────────────────────────────
+    // AllowedHosts: restrict in production, permissive in dev
+    // ────────────────────────────────────────
+    var allowedHosts = Environment.GetEnvironmentVariable("ALLOWED_HOSTS");
+    if (string.IsNullOrWhiteSpace(allowedHosts) && !builder.Environment.IsDevelopment())
+    {
+        // Auto-detect from Render's RENDER_EXTERNAL_URL (e.g. "https://myapp.onrender.com")
+        var renderUrl = Environment.GetEnvironmentVariable("RENDER_EXTERNAL_URL");
+        if (!string.IsNullOrWhiteSpace(renderUrl) && Uri.TryCreate(renderUrl, UriKind.Absolute, out var renderUri))
+            allowedHosts = renderUri.Host;
+    }
+    if (!string.IsNullOrWhiteSpace(allowedHosts))
+    {
+        builder.Configuration["AllowedHosts"] = allowedHosts;
+        Log.Information("ALLOWED HOSTS: {Hosts}", allowedHosts);
+    }
+    else if (builder.Environment.IsDevelopment())
+    {
+        Log.Information("ALLOWED HOSTS: * (development mode)");
+    }
+    else
+    {
+        Log.Warning("ALLOWED HOSTS: * (no ALLOWED_HOSTS env var and RENDER_EXTERNAL_URL not set — consider restricting)");
+    }
+
     if (builder.Environment.IsDevelopment())
     {
         builder.WebHost.UseUrls("http://127.0.0.1:5070");
