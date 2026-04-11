@@ -121,10 +121,8 @@ public sealed class GmailController : ControllerBase
             return await _db.Businesses.FindAsync(new object[] { customerMatch.Value }, ct);
         }
 
-        // Fallback: use first active business (MVP single-tenant)
-        return await _db.Businesses
-            .Where(b => b.IsActive)
-            .FirstOrDefaultAsync(ct);
+        // No match found — do not fall back to another tenant
+        return null;
     }
 
     private static string ExtractEmailAddress(string from)

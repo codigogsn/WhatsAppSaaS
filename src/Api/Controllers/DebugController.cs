@@ -11,8 +11,11 @@ namespace Api.Controllers;
 public class DebugController : ControllerBase
 {
     [HttpGet("version")]
-    public IActionResult Version()
+    public IActionResult Version([FromServices] IHostEnvironment hostEnv)
     {
+        if (!hostEnv.IsDevelopment())
+            return NotFound();
+
         var sha = Environment.GetEnvironmentVariable("RENDER_GIT_COMMIT")
                   ?? Environment.GetEnvironmentVariable("GIT_COMMIT")
                   ?? "unknown";
