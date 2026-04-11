@@ -166,9 +166,10 @@ try
     builder.Services.AddAuthorization();
 
     // ────────────────────────────────────────
-    // Data Protection (key persistence)
+    // Data Protection (key persistence + optional encryption)
     // ────────────────────────────────────────
     var dpKeysPath = Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH");
+    var dpCertPath = Environment.GetEnvironmentVariable("DATA_PROTECTION_CERTIFICATE_PATH");
     var dpConfigured = false;
 
     if (string.IsNullOrWhiteSpace(dpKeysPath))
@@ -186,13 +187,32 @@ try
             File.WriteAllText(testFile, "ok");
             File.Delete(testFile);
 
-            builder.Services.AddDataProtection()
+            var dpBuilder = builder.Services.AddDataProtection()
                 .SetApplicationName("CODIGO-WhatsAppSaaS")
-                .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath));
+                .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath))
+                .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
+
+            // Optional: encrypt keys at rest with an X.509 certificate
+            if (!string.IsNullOrWhiteSpace(dpCertPath) && File.Exists(dpCertPath))
+            {
+                try
+                {
+                    var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(dpCertPath);
+                    dpBuilder.ProtectKeysWithCertificate(cert);
+                    Log.Information("DATA PROTECTION: keys encrypted at rest with certificate thumbprint={Thumbprint}", cert.Thumbprint);
+                }
+                catch (Exception certEx)
+                {
+                    Log.Error(certEx, "DATA PROTECTION: certificate at {Path} could not be loaded — keys will NOT be encrypted at rest", dpCertPath);
+                }
+            }
+            else
+            {
+                Log.Warning("DATA PROTECTION: keys persisted but NOT encrypted at rest. Set DATA_PROTECTION_CERTIFICATE_PATH to a .pfx file to enable encryption.");
+            }
 
             dpConfigured = true;
-            Log.Information("DATA PROTECTION: path={Path} | writable=true | app=CODIGO-WhatsAppSaaS", dpKeysPath);
-            Log.Warning("DATA PROTECTION WARNING: keys are persisted but not encrypted at rest in current environment");
+            Log.Information("DATA PROTECTION: path={Path} | writable=true | keyLifetime=90d | app=CODIGO-WhatsAppSaaS", dpKeysPath);
         }
         catch (Exception ex)
         {

@@ -51,6 +51,25 @@ public class PasswordResetController : ControllerBase
             if (conn.State != System.Data.ConnectionState.Open)
                 await conn.OpenAsync(ct);
 
+            // Per-email rate limit: max 1 reset request per 2 minutes (privacy-safe, uses token table)
+            using (var cmd = conn.CreateCommand())
+            {
+                cmd.CommandText = """
+                    SELECT 1 FROM "PasswordResetTokens" t
+                    INNER JOIN "BusinessUsers" u ON u."Id" = t."UserId"
+                    WHERE u."Email" = @email AND t."CreatedAtUtc" > @cutoff
+                    LIMIT 1
+                """;
+                var pe = cmd.CreateParameter(); pe.ParameterName = "email"; pe.Value = email; cmd.Parameters.Add(pe);
+                var pc = cmd.CreateParameter(); pc.ParameterName = "cutoff"; pc.Value = DateTime.UtcNow.AddMinutes(-2); cmd.Parameters.Add(pc);
+                var recent = await cmd.ExecuteScalarAsync(ct);
+                if (recent is not null)
+                {
+                    _logger.LogInformation("Password reset rate-limited for {Email} (recent token exists)", email);
+                    return Ok(genericResponse); // Same generic response — do not reveal rate limit vs no-account
+                }
+            }
+
             // Find user by email
             Guid? userId = null;
             using (var cmd = conn.CreateCommand())
