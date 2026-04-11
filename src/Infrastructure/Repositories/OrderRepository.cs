@@ -67,17 +67,11 @@ public sealed class OrderRepository : IOrderRepository
         // Recalcular montos
         order.RecalculateTotal();
 
-        // Actualizar analytics customer
-        if (order.CheckoutCompleted)
-        {
-            customer.OrdersCount += 1;
-            customer.LastPurchaseAtUtc = now;
-            customer.TotalSpent += order.TotalAmount ?? 0m;
-
-            // Save last delivery address for quick reorder
-            if (!string.IsNullOrWhiteSpace(order.Address))
-                customer.LastDeliveryAddress = order.Address;
-        }
+        // Customer analytics are updated atomically via raw SQL AFTER SaveChangesAsync
+        // to prevent lost-update race conditions from concurrent order creation.
+        // (see post-save block below)
+        if (order.CheckoutCompleted && !string.IsNullOrWhiteSpace(order.Address))
+            customer.LastDeliveryAddress = order.Address;
 
         // Data guards — ensure monetary fields are never null for EF
         order.SubtotalAmount ??= 0m;
@@ -117,6 +111,30 @@ public sealed class OrderRepository : IOrderRepository
             await _db.SaveChangesAsync(ct);
             _logger.LogInformation("ORDER CREATED: {OrderId} | {BusinessId} | {Total}",
                 order.Id, order.BusinessId, order.TotalAmount ?? 0m);
+
+            // Atomic SQL increment for customer aggregates — immune to concurrent read-modify-write races.
+            // This runs after the order + customer are persisted so the FK is guaranteed to exist.
+            if (order.CheckoutCompleted)
+            {
+                var totalAmount = order.TotalAmount ?? 0m;
+                try
+                {
+                    await _db.Database.ExecuteSqlRawAsync("""
+                        UPDATE "Customers"
+                        SET "OrdersCount" = "OrdersCount" + 1,
+                            "TotalSpent" = "TotalSpent" + @p0,
+                            "LastPurchaseAtUtc" = @p1
+                        WHERE "Id" = @p2
+                        """, totalAmount, now, customer.Id);
+                }
+                catch (Exception aggEx)
+                {
+                    _logger.LogError(aggEx, "ORDER SAVE: atomic customer aggregate update failed for CustomerId={CustomerId} OrderId={OrderId}",
+                        customer.Id, order.Id);
+                    // Non-fatal: the order itself was already persisted successfully
+                }
+            }
+
             _logger.LogInformation("ORDER SAVE: SUCCESS Id={Id}", order.Id);
         }
         catch (DbUpdateException dbEx)
