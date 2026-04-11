@@ -173,8 +173,8 @@ public class WebhookController : ControllerBase
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "WEBHOOK ERROR: business lookup failed for phone_number_id={PhoneNumberId}", phoneNumberId);
-            return Ok(); // return 200 so Meta does not retry endlessly
+            Log.Error(ex, "WEBHOOK ERROR: business lookup failed for phone_number_id={PhoneNumberId} — returning 500 so Meta retries", phoneNumberId);
+            return StatusCode(500);
         }
 
         if (businessContext is null)

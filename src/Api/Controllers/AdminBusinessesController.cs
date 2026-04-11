@@ -408,7 +408,6 @@ public class AdminBusinessesController : ControllerBase
             biz.Id,
             biz.Name,
             biz.PhoneNumberId,
-            biz.AdminKey,
             biz.IsActive,
             biz.Greeting,
             biz.Schedule,
