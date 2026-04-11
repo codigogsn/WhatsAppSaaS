@@ -246,24 +246,69 @@ public sealed class BackgroundJobWorker : BackgroundService
     private async Task ExecuteCleanupAbandonedOrdersAsync(IServiceProvider sp, CancellationToken ct)
     {
         var db = sp.GetRequiredService<AppDbContext>();
-        var cutoff = DateTime.UtcNow.AddHours(-24);
+        var now = DateTime.UtcNow;
+        var cutoff24h = now.AddHours(-24);
+        var cutoff48h = now.AddHours(-48);
+        var totalCancelled = 0;
 
-        // Find orders stuck in Pending with no checkout for 24+ hours
+        // 1. Orders stuck in Pending with no checkout for 24+ hours (existing behavior)
         var abandoned = await db.Orders
             .Where(o => o.Status == "Pending"
                 && !o.CheckoutCompleted
-                && o.CreatedAtUtc < cutoff)
+                && o.CreatedAtUtc < cutoff24h)
             .ToListAsync(ct);
 
         foreach (var order in abandoned)
         {
             order.Status = "Cancelled";
+            order.AdditionalNotes = string.IsNullOrWhiteSpace(order.AdditionalNotes)
+                ? "Auto-cancelled: no checkout after 24h"
+                : order.AdditionalNotes + " | Auto-cancelled: no checkout after 24h";
         }
+        totalCancelled += abandoned.Count;
 
-        if (abandoned.Count > 0)
+        // 2. Orders with checkout completed but no payment proof after 48 hours
+        var awaitingProof = await db.Orders
+            .Where(o => o.Status == "Pending"
+                && o.CheckoutCompleted
+                && o.PaymentProofMediaId == null
+                && o.PaymentVerifiedAtUtc == null
+                && (o.CheckoutCompletedAtUtc != null ? o.CheckoutCompletedAtUtc < cutoff48h : o.CreatedAtUtc < cutoff48h))
+            .ToListAsync(ct);
+
+        foreach (var order in awaitingProof)
+        {
+            order.Status = "Cancelled";
+            order.AdditionalNotes = string.IsNullOrWhiteSpace(order.AdditionalNotes)
+                ? "Auto-cancelled: no payment proof after 48h"
+                : order.AdditionalNotes + " | Auto-cancelled: no payment proof after 48h";
+        }
+        totalCancelled += awaitingProof.Count;
+
+        // 3. Orders with payment proof submitted but never verified after 48 hours
+        var unverified = await db.Orders
+            .Where(o => o.Status == "Pending"
+                && o.PaymentProofMediaId != null
+                && o.PaymentVerifiedAtUtc == null
+                && o.PaymentProofSubmittedAtUtc != null
+                && o.PaymentProofSubmittedAtUtc < cutoff48h)
+            .ToListAsync(ct);
+
+        foreach (var order in unverified)
+        {
+            order.Status = "Cancelled";
+            order.AdditionalNotes = string.IsNullOrWhiteSpace(order.AdditionalNotes)
+                ? "Auto-cancelled: payment proof unverified after 48h"
+                : order.AdditionalNotes + " | Auto-cancelled: payment proof unverified after 48h";
+        }
+        totalCancelled += unverified.Count;
+
+        if (totalCancelled > 0)
         {
             await db.SaveChangesAsync(ct);
-            _logger.LogInformation("Cancelled {Count} abandoned orders older than 24h", abandoned.Count);
+            _logger.LogInformation(
+                "Cancelled {Total} stale orders: {Abandoned} no-checkout, {AwaitingProof} no-proof, {Unverified} unverified-proof",
+                totalCancelled, abandoned.Count, awaitingProof.Count, unverified.Count);
         }
     }
 
