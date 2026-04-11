@@ -177,6 +177,9 @@ public class PasswordResetController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.NewPassword) || req.NewPassword.Length < 8)
             return BadRequest(new { error = "Password must be at least 8 characters" });
 
+        if (!req.NewPassword.Any(char.IsUpper) || !req.NewPassword.Any(char.IsDigit))
+            return BadRequest(new { error = "Password must contain at least one uppercase letter and one digit" });
+
         var tokenHash = HashToken(req.Token);
 
         try

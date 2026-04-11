@@ -22,7 +22,7 @@ public class WebhookController : ControllerBase
     private readonly IMessageQueue _messageQueue;
     private readonly ISignatureValidator _signatureValidator;
     private readonly WhatsAppOptions _whatsAppOptions;
-    private readonly bool _isProduction;
+    private readonly bool _isNonDevelopment;
 
     private const int MaxBodySize = 256 * 1024; // 256 KB
 
@@ -42,7 +42,7 @@ public class WebhookController : ControllerBase
         _messageQueue = messageQueue;
         _signatureValidator = signatureValidator;
         _whatsAppOptions = whatsAppOptions.Value;
-        _isProduction = hostEnvironment.IsProduction();
+        _isNonDevelopment = !hostEnvironment.IsDevelopment();
     }
 
     // GET /webhook and /api/webhook -- Meta webhook verification
@@ -104,8 +104,8 @@ public class WebhookController : ControllerBase
         if (rawBody.Length > MaxBodySize)
             return BadRequest("Payload too large");
 
-        // Signature validation: ALWAYS required in production, auto-enabled in dev when AppSecret is set
-        var requireSig = _isProduction
+        // Signature validation: required in ALL non-Development environments
+        var requireSig = _isNonDevelopment
                          || _whatsAppOptions.RequireSignatureValidation
                          || !string.IsNullOrEmpty(_whatsAppOptions.AppSecret);
         if (requireSig)
@@ -113,7 +113,7 @@ public class WebhookController : ControllerBase
             var sig = Request.Headers["X-Hub-Signature-256"].FirstOrDefault();
             if (!_signatureValidator.IsValid(rawBody, sig ?? ""))
             {
-                Log.Warning("WEBHOOK REJECTED: invalid signature on {Path} (production={IsProduction})", Request.Path, _isProduction);
+                Log.Warning("WEBHOOK REJECTED: invalid signature on {Path} (nonDev={IsNonDevelopment})", Request.Path, _isNonDevelopment);
                 return Unauthorized();
             }
         }
