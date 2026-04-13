@@ -52,9 +52,12 @@ public static class ConfigValidator
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("OPENAI_API_KEY")))
             Log.Warning("CONFIG: OPENAI_API_KEY not set — AI parsing disabled, fallback regex parser will handle orders");
 
-        // Data Protection keys path (required for persistence)
+        // Data Protection keys path (required for persistence across deploys)
         if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH")))
+        {
             Log.Error("CONFIG MISSING: DATA_PROTECTION_KEYS_PATH not set — keys will NOT persist across deploys");
+            missing.Add("DATA_PROTECTION_KEYS_PATH");
+        }
 
         Log.Information("CONFIG CHECK: WhatsApp + SMTP configuration loaded");
 
