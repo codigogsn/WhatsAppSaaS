@@ -456,6 +456,13 @@ public sealed class AdminUsersController : ControllerBase
                     IsActive = template.IsActive
                 });
             }
+
+            // Membership changed — revoke existing tokens so stale businessIds claims cannot be used
+            if (toRemove.Count > 0 || toAdd.Count > 0)
+            {
+                foreach (var u in userRows.Except(toRemove))
+                    u.TokenVersion++;
+            }
         }
 
         await _db.SaveChangesAsync(ct);
