@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Api.Auth;
 using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
@@ -17,19 +18,24 @@ public sealed class GmailController : ControllerBase
     private readonly GmailService _gmail;
     private readonly EmailAIService _emailAi;
     private readonly AppDbContext _db;
+    private readonly IConfiguration _config;
     private readonly ILogger<GmailController> _logger;
 
-    public GmailController(GmailService gmail, EmailAIService emailAi, AppDbContext db, ILogger<GmailController> logger)
+    public GmailController(GmailService gmail, EmailAIService emailAi, AppDbContext db, IConfiguration config, ILogger<GmailController> logger)
     {
         _gmail = gmail;
         _emailAi = emailAi;
         _db = db;
+        _config = config;
         _logger = logger;
     }
 
     [HttpGet("sync")]
     public async Task<IActionResult> Sync(CancellationToken ct)
     {
+        // Only Founder role or global admin key may trigger cross-tenant Gmail sync
+        if (!AdminAuth.IsFounder(User) && !AdminAuth.IsGlobalAdminKey(Request, _config))
+            return Forbid();
         _logger.LogInformation("Gmail sync triggered");
 
         var emails = await _gmail.FetchRecentEmailsAsync(20, ct);
