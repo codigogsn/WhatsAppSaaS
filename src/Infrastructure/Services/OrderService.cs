@@ -43,7 +43,31 @@ public sealed class OrderService
         };
 
         _db.Orders.Add(order);
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Unique index IX_Orders_ActivePending: concurrent insert lost the race.
+            // Detach the failed entity and reload the winner.
+            _db.Entry(order).State = Microsoft.EntityFrameworkCore.EntityState.Detached;
+
+            order = await _db.Orders
+                .Include(x => x.Items)
+                .OrderByDescending(x => x.CreatedAtUtc)
+                .FirstOrDefaultAsync(x =>
+                    x.From == fromPhone &&
+                    x.PhoneNumberId == phoneNumberId &&
+                    x.Status == "Pending",
+                    ct);
+
+            if (order != null)
+                return order;
+
+            throw; // Not a duplicate race — rethrow original error
+        }
 
         return order;
     }
