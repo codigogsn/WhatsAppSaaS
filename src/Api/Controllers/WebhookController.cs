@@ -135,10 +135,11 @@ public class WebhookController : ControllerBase
             return BadRequest();
         }
 
-        // Group messages by phoneNumberId for strict tenant isolation.
-        // Meta can batch messages from different phone numbers in one delivery;
-        // each must be resolved and enqueued under its own business context.
-        var messagesByPhone = new Dictionary<string, List<string>>(); // phoneNumberId → [messageIds]
+        // Build tenant-scoped payloads: one filtered payload per phoneNumberId.
+        // Meta can batch messages from different phone numbers in one delivery.
+        // Each enqueued job must contain ONLY messages for its own tenant —
+        // never the full original payload, which could leak cross-tenant messages.
+        var groupedPayloads = new Dictionary<string, (WebhookPayload Payload, List<string> MessageIds)>();
 
         if (payload.Entry is not null)
         {
@@ -148,43 +149,71 @@ public class WebhookController : ControllerBase
                 foreach (var change in entry.Changes)
                 {
                     var value = change?.Value;
-                    if (value is null) continue;
+                    if (value?.Messages is null) continue;
 
                     var pnId = value.Metadata?.PhoneNumberId;
                     if (string.IsNullOrWhiteSpace(pnId)) continue;
 
-                    if (value.Messages is not null)
+                    foreach (var msg in value.Messages)
                     {
-                        foreach (var msg in value.Messages)
+                        if (msg is null || string.IsNullOrWhiteSpace(msg.Id)) continue;
+
+                        if (!groupedPayloads.TryGetValue(pnId, out var group))
                         {
-                            if (!string.IsNullOrWhiteSpace(msg?.Id))
-                            {
-                                if (!messagesByPhone.TryGetValue(pnId, out var list))
-                                {
-                                    list = new List<string>();
-                                    messagesByPhone[pnId] = list;
-                                }
-                                list.Add(msg.Id);
-                            }
+                            // Create a new filtered payload for this phoneNumberId
+                            group = (new WebhookPayload { Object = payload.Object, Entry = [] }, new List<string>());
+                            groupedPayloads[pnId] = group;
                         }
+
+                        group.MessageIds.Add(msg.Id);
+
+                        // Find or create a matching entry → change → value in the filtered payload
+                        var filteredEntry = group.Payload.Entry.FirstOrDefault(e => e.Id == entry.Id);
+                        if (filteredEntry is null)
+                        {
+                            filteredEntry = new WebhookEntry { Id = entry.Id, Changes = [] };
+                            group.Payload.Entry.Add(filteredEntry);
+                        }
+
+                        // Each change is scoped to one phoneNumberId, so find-or-create by metadata match
+                        var filteredChange = filteredEntry.Changes.FirstOrDefault(c =>
+                            c.Value?.Metadata?.PhoneNumberId == pnId && c.Field == change!.Field);
+                        if (filteredChange is null)
+                        {
+                            filteredChange = new WebhookChange
+                            {
+                                Field = change!.Field,
+                                Value = new WebhookChangeValue
+                                {
+                                    MessagingProduct = value.MessagingProduct,
+                                    Metadata = value.Metadata,
+                                    Contacts = value.Contacts,
+                                    Statuses = value.Statuses,
+                                    Messages = []
+                                }
+                            };
+                            filteredEntry.Changes.Add(filteredChange);
+                        }
+
+                        filteredChange.Value!.Messages!.Add(msg);
                     }
                 }
             }
         }
 
-        var totalMessages = messagesByPhone.Values.Sum(l => l.Count);
+        var totalMessages = groupedPayloads.Values.Sum(g => g.MessageIds.Count);
         Log.Information("WEBHOOK HIT: POST {Path} phoneNumbers={PhoneCount} messageCount={MessageCount}",
-            Request.Path, messagesByPhone.Count, totalMessages);
+            Request.Path, groupedPayloads.Count, totalMessages);
 
-        if (messagesByPhone.Count == 0)
+        if (groupedPayloads.Count == 0)
         {
             Log.Debug("WEBHOOK SKIPPED: no inbound messages (status callback / receipt)");
             return Ok();
         }
 
-        // Process each phoneNumberId group independently — strict tenant isolation.
+        // Enqueue each tenant-scoped payload independently.
         var enqueuedCount = 0;
-        foreach (var (phoneNumberId, messageIds) in messagesByPhone)
+        foreach (var (phoneNumberId, (filteredPayload, messageIds)) in groupedPayloads)
         {
             BusinessContext? businessContext;
             try
@@ -209,7 +238,7 @@ public class WebhookController : ControllerBase
                 {
                     Log.Information("WEBHOOK ENQUEUING: businessId={BusinessId} phoneNumberId={PhoneNumberId} messageId={MessageId}",
                         businessContext.BusinessId, phoneNumberId, msgId);
-                    await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), msgId, ct);
+                    await _messageQueue.EnqueueAsync(new QueuedMessage(filteredPayload, businessContext), msgId, ct);
                     enqueuedCount++;
                 }
             }
