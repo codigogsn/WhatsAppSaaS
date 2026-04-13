@@ -126,12 +126,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // Ensure conversation row exists before idempotency check (FK dependency)
                     var state = await _stateStore.GetOrCreateAsync(conversationId, businessContext.BusinessId, cancellationToken);
 
-                    // Idempotency: atomic insert-or-skip via DB unique index
+                    // Idempotency: read-only duplicate check BEFORE processing.
+                    // The actual mark happens AFTER successful processing to avoid
+                    // permanently losing messages when processing fails transiently.
                     var msgId = message.Id;
                     if (!string.IsNullOrWhiteSpace(msgId))
                     {
-                        var isNew = await _stateStore.MarkMessageProcessedAsync(conversationId, msgId, cancellationToken);
-                        if (!isNew)
+                        if (await _stateStore.IsMessageProcessedAsync(conversationId, msgId, cancellationToken))
                         {
                             _logger.LogInformation("DEDUP: ignoring duplicate message {MessageId} in {ConversationId}", msgId, conversationId);
                             continue;
@@ -1765,12 +1766,20 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                     state.LastActivityUtc = DateTime.UtcNow;
                     await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+
+                    // Mark processed AFTER success — ensures transient failures are retried
+                    // instead of being permanently lost. Dedup is still safe: the read-only
+                    // check above filters duplicates, and this atomic insert-or-skip via DB
+                    // unique index handles any residual race.
+                    if (!string.IsNullOrWhiteSpace(msgId))
+                        await _stateStore.MarkMessageProcessedAsync(conversationId, msgId, cancellationToken);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex,
                             "Failed processing message {MessageId} in conversation {ConversationId}",
                             message.Id, conversationId);
+                        throw;
                     }
                 }
             }
