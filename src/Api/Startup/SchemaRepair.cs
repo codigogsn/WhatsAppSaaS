@@ -46,7 +46,9 @@ public static class SchemaRepair
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_WebhookQueue_MessageId" ON "WebhookQueue" ("MessageId") WHERE "MessageId" IS NOT NULL AND "ProcessedAtUtc" IS NULL""");
         Log.Information("QUEUE SCHEMA: WebhookQueue ensured");
         ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "InteractiveMenuEnabled" boolean NOT NULL DEFAULT false""");
-        // Prevent duplicate active orders per customer/phone per business
+        // Prevent duplicate active orders per customer/phone per business.
+        // First repair any existing duplicates so the unique index can be created.
+        RepairDuplicatePendingOrders(conn);
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Orders_ActivePending" ON "Orders" ("BusinessId", "From", "PhoneNumberId") WHERE "Status" = 'Pending'""");
     }
 
@@ -419,6 +421,47 @@ public static class SchemaRepair
         {
             Log.Warning("LEGACY REPAIR SQL warning: {Message} — SQL: {Sql}", ex.Message, sql[..Math.Min(sql.Length, 120)]);
             return false;
+        }
+    }
+
+    /// <summary>
+    /// Repairs duplicate pending orders that would violate the IX_Orders_ActivePending
+    /// unique partial index. Keeps the oldest row per group as the winner; extras are
+    /// cancelled with an audit note. Rows are never deleted.
+    /// </summary>
+    private static void RepairDuplicatePendingOrders(System.Data.Common.DbConnection conn)
+    {
+        try
+        {
+            // Cancel all duplicate pending rows except the earliest per group.
+            // The CTE ranks by CreatedAtUtc ascending; rank 1 is the winner, rest are cancelled.
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = """
+                WITH ranked AS (
+                    SELECT "Id",
+                           ROW_NUMBER() OVER (
+                               PARTITION BY "BusinessId", "From", "PhoneNumberId"
+                               ORDER BY "CreatedAtUtc"
+                           ) AS rn
+                    FROM "Orders"
+                    WHERE "Status" = 'Pending'
+                )
+                UPDATE "Orders"
+                SET "Status" = 'Cancelled',
+                    "SpecialInstructions" = COALESCE("SpecialInstructions", '')
+                        || ' [Auto-repaired duplicate pending order during unique index enforcement]'
+                FROM ranked
+                WHERE "Orders"."Id" = ranked."Id" AND ranked.rn > 1
+            """;
+            var repaired = cmd.ExecuteNonQuery();
+            if (repaired > 0)
+                Log.Warning("SCHEMA REPAIR: cancelled {Count} duplicate pending orders to enforce IX_Orders_ActivePending", repaired);
+            else
+                Log.Information("SCHEMA REPAIR: no duplicate pending orders found");
+        }
+        catch (Exception ex)
+        {
+            Log.Warning("SCHEMA REPAIR: duplicate pending order repair failed — {Message}", ex.Message);
         }
     }
 
