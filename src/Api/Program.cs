@@ -218,18 +218,17 @@ try
                 .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
 
             // Optional: encrypt keys at rest with an X.509 certificate
-            if (!string.IsNullOrWhiteSpace(dpCertPath) && File.Exists(dpCertPath))
+            if (!string.IsNullOrWhiteSpace(dpCertPath))
             {
-                try
-                {
-                    var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(dpCertPath);
-                    dpBuilder.ProtectKeysWithCertificate(cert);
-                    Log.Information("DATA PROTECTION: keys encrypted at rest with certificate thumbprint={Thumbprint}", cert.Thumbprint);
-                }
-                catch (Exception certEx)
-                {
-                    Log.Error(certEx, "DATA PROTECTION: certificate at {Path} could not be loaded — keys will NOT be encrypted at rest", dpCertPath);
-                }
+                // Path explicitly configured — must work or fail fast
+                if (!File.Exists(dpCertPath))
+                    throw new FileNotFoundException(
+                        $"DATA_PROTECTION_CERTIFICATE_PATH is set to '{dpCertPath}' but the file does not exist. " +
+                        "Fix the path or remove the variable to run without encryption at rest.");
+
+                var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(dpCertPath);
+                dpBuilder.ProtectKeysWithCertificate(cert);
+                Log.Information("DATA PROTECTION: keys encrypted at rest with certificate thumbprint={Thumbprint}", cert.Thumbprint);
             }
             else
             {
