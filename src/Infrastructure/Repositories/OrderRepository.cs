@@ -28,8 +28,23 @@ public sealed class OrderRepository : IOrderRepository
 
         var now = DateTime.UtcNow;
 
-        // Buscar customer existente (scoped to business)
-        // Check both From phone and checkout-form phone (legacy records may use either)
+        // Upsert customer via raw SQL to survive concurrent inserts.
+        // INSERT ... ON CONFLICT atomically creates or updates, so two simultaneous
+        // order-creation requests for the same phone+business can never lose an order
+        // to a unique-constraint violation.
+        var custName = string.IsNullOrWhiteSpace(order.CustomerName) ? null : order.CustomerName.Trim();
+        var custId = Guid.NewGuid();
+
+        await _db.Database.ExecuteSqlRawAsync("""
+            INSERT INTO "Customers" ("Id", "BusinessId", "PhoneE164", "Name", "TotalSpent", "OrdersCount", "FirstSeenAtUtc", "LastSeenAtUtc")
+            VALUES (@p0, @p1, @p2, @p3, 0, 0, @p4, @p4)
+            ON CONFLICT ("BusinessId", "PhoneE164") DO UPDATE
+            SET "LastSeenAtUtc" = @p4,
+                "Name" = CASE WHEN "Customers"."Name" IS NULL OR "Customers"."Name" = '' THEN EXCLUDED."Name" ELSE "Customers"."Name" END,
+                "PhoneE164" = COALESCE(@p5, "Customers"."PhoneE164")
+            """, custId, order.BusinessId!, (object)phoneE164, custName as object ?? DBNull.Value, now, phoneE164 as object);
+
+        // Reload the winning customer row (whether we inserted or the other request did)
         var customer = await _db.Customers
             .FirstOrDefaultAsync(c => c.BusinessId == order.BusinessId
                 && (c.PhoneE164 == phoneE164
@@ -37,29 +52,19 @@ public sealed class OrderRepository : IOrderRepository
 
         if (customer == null)
         {
+            // Defensive fallback — should never happen after upsert
+            _logger.LogError("CUSTOMER UPSERT: reload failed for BusinessId={BusinessId} Phone={Phone}", order.BusinessId, phoneE164);
             customer = new Customer
             {
                 BusinessId = order.BusinessId,
-                PhoneE164 = phoneE164,
-                Name = string.IsNullOrWhiteSpace(order.CustomerName) ? null : order.CustomerName.Trim(),
+                PhoneE164 = phoneE164!,
+                Name = custName,
                 TotalSpent = 0m,
                 OrdersCount = 0,
                 FirstSeenAtUtc = now,
                 LastSeenAtUtc = now
             };
-
             _db.Customers.Add(customer);
-        }
-        else
-        {
-            if (string.IsNullOrWhiteSpace(customer.Name) && !string.IsNullOrWhiteSpace(order.CustomerName))
-                customer.Name = order.CustomerName.Trim();
-
-            // Migrate legacy records: if stored under checkout-form phone, update to WhatsApp sender
-            if (fromE164 != null && customer.PhoneE164 != phoneE164)
-                customer.PhoneE164 = phoneE164;
-
-            customer.LastSeenAtUtc = now;
         }
 
         // Link order → customer
