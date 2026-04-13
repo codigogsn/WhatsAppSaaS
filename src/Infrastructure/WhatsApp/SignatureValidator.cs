@@ -24,13 +24,13 @@ public sealed class SignatureValidator : ISignatureValidator
     {
         if (string.IsNullOrEmpty(_options.AppSecret))
         {
-            _logger.LogWarning("AppSecret is not configured; cannot validate signature");
+            _logger.LogError("SIGNATURE VALIDATION FAIL-CLOSED: AppSecret not configured — rejecting request");
             return false;
         }
 
         if (string.IsNullOrEmpty(signature))
         {
-            _logger.LogWarning("Missing X-Hub-Signature-256 header");
+            _logger.LogWarning("SIGNATURE VALIDATION: missing X-Hub-Signature-256 header");
             return false;
         }
 

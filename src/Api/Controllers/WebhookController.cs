@@ -104,16 +104,29 @@ public class WebhookController : ControllerBase
         if (rawBody.Length > MaxBodySize)
             return BadRequest("Payload too large");
 
-        // Signature validation: required in ALL non-Development environments
+        // Signature validation: required in ALL non-Development environments.
+        // Fail-closed: production MUST have AppSecret configured; reject everything otherwise.
         var requireSig = _isNonDevelopment
                          || _whatsAppOptions.RequireSignatureValidation
                          || !string.IsNullOrEmpty(_whatsAppOptions.AppSecret);
+
+        if (_isNonDevelopment && string.IsNullOrEmpty(_whatsAppOptions.AppSecret))
+        {
+            Log.Error("WEBHOOK REJECTED: AppSecret not configured in production — fail-closed. Path={Path}", Request.Path);
+            return StatusCode(500);
+        }
+
         if (requireSig)
         {
             var sig = Request.Headers["X-Hub-Signature-256"].FirstOrDefault();
-            if (!_signatureValidator.IsValid(rawBody, sig ?? ""))
+            if (string.IsNullOrEmpty(sig))
             {
-                Log.Warning("WEBHOOK REJECTED: invalid signature on {Path} (nonDev={IsNonDevelopment})", Request.Path, _isNonDevelopment);
+                Log.Warning("WEBHOOK REJECTED: missing X-Hub-Signature-256 header on {Path}", Request.Path);
+                return Unauthorized();
+            }
+            if (!_signatureValidator.IsValid(rawBody, sig))
+            {
+                Log.Warning("WEBHOOK REJECTED: invalid signature on {Path}", Request.Path);
                 return Unauthorized();
             }
         }
