@@ -135,32 +135,47 @@ public class WebhookController : ControllerBase
             return BadRequest();
         }
 
-        var firstMessageId = payload.Entry?
-            .FirstOrDefault()?
-            .Changes?
-            .FirstOrDefault()?
-            .Value?
-            .Messages?
-            .FirstOrDefault()?
-            .Id;
+        // Collect ALL message IDs from the payload for per-message dedup.
+        // Meta can batch multiple messages in a single webhook delivery.
+        // Deduplicating by only the first message ID would silently drop
+        // new messages that share a batch with a previously-seen first message.
+        var allMessageIds = new List<string>();
+        string? phoneNumberId = null;
 
-        var phoneNumberId = payload.Entry?
-            .FirstOrDefault()?
-            .Changes?
-            .FirstOrDefault()?
-            .Value?
-            .Metadata?
-            .PhoneNumberId;
+        if (payload.Entry is not null)
+        {
+            foreach (var entry in payload.Entry)
+            {
+                if (entry?.Changes is null) continue;
+                foreach (var change in entry.Changes)
+                {
+                    var value = change?.Value;
+                    if (value is null) continue;
 
-        Log.Information("WEBHOOK HIT: POST {Path} phoneNumberId={PhoneNumberId} messageId={MessageId}",
-            Request.Path, phoneNumberId ?? "(none)", firstMessageId ?? "(none)");
+                    phoneNumberId ??= value.Metadata?.PhoneNumberId;
+
+                    if (value.Messages is not null)
+                    {
+                        foreach (var msg in value.Messages)
+                        {
+                            if (!string.IsNullOrWhiteSpace(msg?.Id))
+                                allMessageIds.Add(msg.Id);
+                        }
+                    }
+                }
+            }
+        }
+
+        Log.Information("WEBHOOK HIT: POST {Path} phoneNumberId={PhoneNumberId} messageCount={MessageCount} messageIds={MessageIds}",
+            Request.Path, phoneNumberId ?? "(none)", allMessageIds.Count,
+            allMessageIds.Count > 0 ? string.Join(",", allMessageIds) : "(none)");
 
         if (string.IsNullOrWhiteSpace(phoneNumberId))
             return Ok();
 
         // Skip non-message webhooks (status callbacks, delivery/read receipts, etc.)
         // These have phoneNumberId but no actual messages to process.
-        if (string.IsNullOrWhiteSpace(firstMessageId))
+        if (allMessageIds.Count == 0)
         {
             Log.Debug("WEBHOOK SKIPPED: no inbound messages (status callback / receipt), phoneNumberId={PhoneNumberId}", phoneNumberId);
             return Ok();
@@ -186,17 +201,24 @@ public class WebhookController : ControllerBase
         Log.Information("INCOMING MSG: {From} | {BusinessId}",
             phoneNumberId, businessContext.BusinessId);
 
-        Log.Information("WEBHOOK ENQUEUING: businessId={BusinessId} phoneNumberId={PhoneNumberId} messageId={MessageId}",
-            businessContext.BusinessId, phoneNumberId, firstMessageId ?? "(none)");
-
+        // Enqueue one queue item per message ID for per-message dedup.
+        // Each item carries the full payload; the processor's own per-message
+        // MarkMessageProcessedAsync ensures only new messages are acted upon.
+        var enqueuedCount = 0;
         try
         {
-            await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), firstMessageId, ct);
+            foreach (var msgId in allMessageIds)
+            {
+                Log.Information("WEBHOOK ENQUEUING: businessId={BusinessId} phoneNumberId={PhoneNumberId} messageId={MessageId}",
+                    businessContext.BusinessId, phoneNumberId, msgId);
+                await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), msgId, ct);
+                enqueuedCount++;
+            }
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "WEBHOOK ENQUEUE FAILED: queue insert failed for businessId={BusinessId} messageId={MessageId} — returning 500 so Meta retries",
-                businessContext.BusinessId, firstMessageId ?? "(none)");
+            Log.Error(ex, "WEBHOOK ENQUEUE FAILED: queue insert failed for businessId={BusinessId} enqueued={Enqueued}/{Total} — returning 500 so Meta retries",
+                businessContext.BusinessId, enqueuedCount, allMessageIds.Count);
             WhatsAppSaaS.Api.Diagnostics.AppMetrics.RecordEnqueueFailure();
             return StatusCode(500);
         }
