@@ -110,8 +110,10 @@ public sealed class AuthController : ControllerBase
         }
 
         // Filter to only active user assignments with active businesses
+        // AND same password hash as the authenticated row — prevents cross-tenant
+        // aggregation when unrelated users in different businesses share an email.
         var activeBizIds = assignments
-            .Where(a => a.UserActive && a.BizActive)
+            .Where(a => a.UserActive && a.BizActive && a.PasswordHash == primary.PasswordHash)
             .Select(a => a.BusinessId)
             .Distinct()
             .ToList();
