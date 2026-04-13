@@ -179,8 +179,8 @@ public class WebhookController : ControllerBase
 
         if (businessContext is null)
         {
-            Log.Warning("WEBHOOK: could not resolve or create business for phone_number_id={PhoneNumberId}", phoneNumberId);
-            return Ok();
+            Log.Warning("WEBHOOK: could not resolve or create business for phone_number_id={PhoneNumberId} — returning 500 so Meta retries", phoneNumberId);
+            return StatusCode(500);
         }
 
         Log.Information("INCOMING MSG: {From} | {BusinessId}",

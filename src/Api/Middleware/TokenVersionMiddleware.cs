@@ -46,6 +46,16 @@ public sealed class TokenVersionMiddleware
                     return;
                 }
             }
+            else
+            {
+                // Fail closed: authenticated tokens without a valid tokVer claim must not bypass revocation
+                Log.Warning("Token rejected: missing or invalid tokVer claim user={Sub}", sub);
+
+                context.Response.StatusCode = 401;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync("""{"error":"Invalid token. Please log in again."}""");
+                return;
+            }
         }
 
         await _next(context);
