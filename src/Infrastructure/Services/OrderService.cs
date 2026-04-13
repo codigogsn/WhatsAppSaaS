@@ -1,5 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using WhatsAppSaaS.Domain.Entities;
+using WhatsAppSaaS.Domain.Exceptions;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace WhatsAppSaaS.Infrastructure.Services;
@@ -7,10 +9,12 @@ namespace WhatsAppSaaS.Infrastructure.Services;
 public sealed class OrderService
 {
     private readonly AppDbContext _db;
+    private readonly ILogger<OrderService> _logger;
 
-    public OrderService(AppDbContext db)
+    public OrderService(AppDbContext db, ILogger<OrderService> logger)
     {
         _db = db;
+        _logger = logger;
     }
 
     public async Task<Order> GetOrCreateOpenOrderAsync(
@@ -61,8 +65,15 @@ public sealed class OrderService
 
         order.Items.Add(item);
 
-        // ✅ Nada de Total/Subtotal aquí porque tu entidad Order no los tiene
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _logger.LogWarning(ex, "CONCURRENCY CONFLICT on OrderId={OrderId}", order.Id);
+            throw new ConcurrencyException("Order was modified by another process.");
+        }
     }
 
     public async Task MarkCheckoutCompletedAsync(Order order, CancellationToken ct)
@@ -70,6 +81,14 @@ public sealed class OrderService
         order.CheckoutCompleted = true;
         order.CheckoutCompletedAtUtc = DateTime.UtcNow;
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _logger.LogWarning(ex, "CONCURRENCY CONFLICT on OrderId={OrderId}", order.Id);
+            throw new ConcurrencyException("Order was modified by another process.");
+        }
     }
 }

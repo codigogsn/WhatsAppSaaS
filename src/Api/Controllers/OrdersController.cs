@@ -13,6 +13,7 @@ using Microsoft.Extensions.Logging;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Domain.Entities;
+using WhatsAppSaaS.Domain.Exceptions;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace WhatsAppSaaS.Api.Controllers;
@@ -480,7 +481,16 @@ public sealed class OrdersController : ControllerBase
 
         order.PaymentVerifiedAtUtc = DateTime.UtcNow;
         order.PaymentVerifiedBy = "dashboard";
-        await _context.SaveChangesAsync();
+
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _logger.LogWarning(ex, "HTTP 409 due to concurrency conflict on OrderId={OrderId}", id);
+            return Conflict(new { error = "Order was updated by another process. Please retry." });
+        }
 
         // Notify customer
         if (!string.IsNullOrWhiteSpace(order.From) && !string.IsNullOrWhiteSpace(order.PhoneNumberId))
@@ -518,7 +528,16 @@ public sealed class OrdersController : ControllerBase
         order.PaymentVerifiedBy = null;
         order.PaymentProofMediaId = null;
         order.PaymentProofSubmittedAtUtc = null;
-        await _context.SaveChangesAsync();
+
+        try
+        {
+            await _context.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _logger.LogWarning(ex, "HTTP 409 due to concurrency conflict on OrderId={OrderId}", id);
+            return Conflict(new { error = "Order was updated by another process. Please retry." });
+        }
 
         // Clear cached proof file
         DeleteProofCache(id);

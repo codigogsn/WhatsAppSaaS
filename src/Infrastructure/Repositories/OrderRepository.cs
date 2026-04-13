@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Domain.Entities;
+using WhatsAppSaaS.Domain.Exceptions;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
 namespace WhatsAppSaaS.Infrastructure.Repositories;
@@ -185,7 +186,17 @@ public sealed class OrderRepository : IOrderRepository
 
         order.PaymentProofMediaId = mediaId;
         order.PaymentProofSubmittedAtUtc = DateTime.UtcNow;
-        await _db.SaveChangesAsync(ct);
+
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _logger.LogWarning(ex, "CONCURRENCY CONFLICT on OrderId={OrderId}", orderId);
+            throw new ConcurrencyException("Order was modified by another process.");
+        }
+
         return true;
     }
 

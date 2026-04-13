@@ -347,7 +347,16 @@ public sealed class BackgroundJobWorker : BackgroundService
 
         if (totalCancelled > 0)
         {
-            await db.SaveChangesAsync(ct);
+            try
+            {
+                await db.SaveChangesAsync(ct);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                _logger.LogWarning(ex, "CONCURRENCY CONFLICT during abandoned order cleanup — {Count} orders skipped, will retry next cycle", totalCancelled);
+                return;
+            }
+
             _logger.LogInformation(
                 "Cancelled {Total} stale orders: {Abandoned} no-checkout, {AwaitingProof} no-proof, {Unverified} unverified-proof",
                 totalCancelled, abandoned.Count, awaitingProof.Count, unverified.Count);
