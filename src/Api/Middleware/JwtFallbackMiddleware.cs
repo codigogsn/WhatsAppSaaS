@@ -56,7 +56,7 @@ public sealed class JwtFallbackMiddleware
                         ValidateIssuerSigningKey = true,
                         ValidIssuer = jwtService.Issuer,
                         ValidAudience = jwtService.Issuer,
-                        IssuerSigningKey = jwtService.GetSigningKey(),
+                        IssuerSigningKeys = jwtService.GetAllSigningKeys(),
                         ClockSkew = TimeSpan.FromSeconds(30)
                     }, out var validatedToken);
 

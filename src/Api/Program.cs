@@ -177,7 +177,7 @@ try
                     ValidateIssuerSigningKey = true,
                     ValidIssuer = jwtService.Issuer,
                     ValidAudience = jwtService.Issuer,
-                    IssuerSigningKey = jwtService.GetSigningKey()
+                    IssuerSigningKeys = jwtService.GetAllSigningKeys()
                 };
             });
     }

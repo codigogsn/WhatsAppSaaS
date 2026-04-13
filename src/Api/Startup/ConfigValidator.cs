@@ -59,6 +59,14 @@ public static class ConfigValidator
             missing.Add("DATA_PROTECTION_KEYS_PATH");
         }
 
+        // Data Protection encryption at rest (required in production)
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DATA_PROTECTION_CERTIFICATE_BASE64"))
+            && string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("DATA_PROTECTION_CERTIFICATE_PATH")))
+        {
+            Log.Error("CONFIG MISSING: No data protection certificate configured — keys will NOT be encrypted at rest. Set DATA_PROTECTION_CERTIFICATE_BASE64 or DATA_PROTECTION_CERTIFICATE_PATH");
+            missing.Add("DATA_PROTECTION_CERTIFICATE_BASE64 or DATA_PROTECTION_CERTIFICATE_PATH");
+        }
+
         Log.Information("CONFIG CHECK: WhatsApp + SMTP configuration loaded");
 
         // Fail fast in production if critical vars are missing
