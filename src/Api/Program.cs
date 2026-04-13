@@ -226,7 +226,10 @@ try
                         $"DATA_PROTECTION_CERTIFICATE_PATH is set to '{dpCertPath}' but the file does not exist. " +
                         "Fix the path or remove the variable to run without encryption at rest.");
 
-                var cert = new System.Security.Cryptography.X509Certificates.X509Certificate2(dpCertPath);
+                var dpCertPassword = Environment.GetEnvironmentVariable("DATA_PROTECTION_CERTIFICATE_PASSWORD");
+                var cert = string.IsNullOrWhiteSpace(dpCertPassword)
+                    ? new System.Security.Cryptography.X509Certificates.X509Certificate2(dpCertPath)
+                    : new System.Security.Cryptography.X509Certificates.X509Certificate2(dpCertPath, dpCertPassword);
                 dpBuilder.ProtectKeysWithCertificate(cert);
                 Log.Information("DATA PROTECTION: keys encrypted at rest with certificate thumbprint={Thumbprint}", cert.Thumbprint);
             }
