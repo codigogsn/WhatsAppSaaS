@@ -328,24 +328,27 @@ public sealed class BackgroundJobWorker : BackgroundService
         totalCancelled += awaitingProof.Count;
 
         // 3. Orders with payment proof submitted but never verified after 48 hours
+        //    These must NOT be auto-cancelled — the customer already paid.
+        //    Flag them for urgent manual review instead.
         var unverified = await db.Orders
             .Where(o => o.Status == "Pending"
                 && o.PaymentProofMediaId != null
                 && o.PaymentVerifiedAtUtc == null
                 && o.PaymentProofSubmittedAtUtc != null
-                && o.PaymentProofSubmittedAtUtc < cutoff48h)
+                && o.PaymentProofSubmittedAtUtc < cutoff48h
+                && (o.AdditionalNotes == null || !o.AdditionalNotes.Contains("OVERDUE REVIEW")))
             .ToListAsync(ct);
 
         foreach (var order in unverified)
         {
-            order.Status = "Cancelled";
             order.AdditionalNotes = string.IsNullOrWhiteSpace(order.AdditionalNotes)
-                ? "Auto-cancelled: payment proof unverified after 48h"
-                : order.AdditionalNotes + " | Auto-cancelled: payment proof unverified after 48h";
+                ? "⚠ OVERDUE REVIEW: payment proof submitted but unverified after 48h — requires manual verification"
+                : order.AdditionalNotes + " | ⚠ OVERDUE REVIEW: payment proof submitted but unverified after 48h";
         }
-        totalCancelled += unverified.Count;
+        if (unverified.Count > 0)
+            _logger.LogWarning("PAYMENT REVIEW OVERDUE: {Count} orders have unverified payment proof past 48h — manual review required", unverified.Count);
 
-        if (totalCancelled > 0)
+        if (totalCancelled > 0 || unverified.Count > 0)
         {
             try
             {
@@ -353,13 +356,14 @@ public sealed class BackgroundJobWorker : BackgroundService
             }
             catch (DbUpdateConcurrencyException ex)
             {
-                _logger.LogWarning(ex, "CONCURRENCY CONFLICT during abandoned order cleanup — {Count} orders skipped, will retry next cycle", totalCancelled);
+                _logger.LogWarning(ex, "CONCURRENCY CONFLICT during abandoned order cleanup — will retry next cycle");
                 return;
             }
 
-            _logger.LogInformation(
-                "Cancelled {Total} stale orders: {Abandoned} no-checkout, {AwaitingProof} no-proof, {Unverified} unverified-proof",
-                totalCancelled, abandoned.Count, awaitingProof.Count, unverified.Count);
+            if (totalCancelled > 0)
+                _logger.LogInformation(
+                    "Cancelled {Total} stale orders: {Abandoned} no-checkout, {AwaitingProof} no-proof",
+                    totalCancelled, abandoned.Count, awaitingProof.Count);
         }
     }
 
