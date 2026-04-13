@@ -87,6 +87,7 @@ public sealed class PostgresMessageQueue : IMessageQueue
                 WHERE "ProcessedAtUtc" IS NULL
                   AND "AttemptCount" < 5
                   AND ("NextRetryAtUtc" IS NULL OR "NextRetryAtUtc" <= @now)
+                  AND ("ClaimedAtUtc" IS NULL OR "ClaimedAtUtc" < @now - interval '5 minutes')
                 ORDER BY "CreatedAtUtc"
                 LIMIT 1
                 FOR UPDATE SKIP LOCKED
