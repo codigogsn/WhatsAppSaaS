@@ -97,7 +97,7 @@ public sealed class PostgresMessageQueue : IMessageQueue
                 "AttemptCount" = q."AttemptCount" + 1
             FROM next
             WHERE q."Id" = next."Id"
-            RETURNING q."Id", q."Payload"
+            RETURNING q."Id", q."Payload", q."AttemptCount"
         """;
         cmd.Parameters.AddWithValue("now", DateTime.UtcNow);
 
@@ -107,6 +107,7 @@ public sealed class PostgresMessageQueue : IMessageQueue
 
         var id = reader.GetGuid(0);
         var json = reader.GetString(1);
+        var attemptCount = reader.GetInt32(2);
         await reader.CloseAsync();
 
         QueuedMessage? message;
@@ -127,17 +128,22 @@ public sealed class PostgresMessageQueue : IMessageQueue
             return null;
         }
 
-        // Track the DB row ID so the worker can mark complete/fail
+        // Track the DB row ID and attempt count so the worker can mark complete/fail
         _lastDequeuedItemId = id;
+        _lastDequeuedAttemptCount = attemptCount;
         return message;
     }
 
     // Tracks the last dequeued item so the worker can complete/fail it.
     // Thread-safe because there is only one worker consuming sequentially.
     private Guid? _lastDequeuedItemId;
+    private int _lastDequeuedAttemptCount;
 
     /// <summary>Returns the DB row ID of the last dequeued item, or null.</summary>
     public Guid? LastDequeuedItemId => _lastDequeuedItemId;
+
+    /// <summary>Returns the attempt count of the last dequeued item (already incremented during dequeue).</summary>
+    public int LastDequeuedAttemptCount => _lastDequeuedAttemptCount;
 
     public async Task CompleteLastAsync(CancellationToken ct)
     {
@@ -149,11 +155,24 @@ public sealed class PostgresMessageQueue : IMessageQueue
         _lastDequeuedItemId = null;
     }
 
-    public async Task FailLastAsync(string error, CancellationToken ct)
+    /// <summary>
+    /// Records a processing failure. Returns true when max retries are exhausted (terminal failure).
+    /// </summary>
+    public async Task<bool> FailLastAsync(string error, CancellationToken ct)
     {
-        if (_lastDequeuedItemId is not { } itemId) return;
+        if (_lastDequeuedItemId is not { } itemId) return false;
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(ct);
+
+        const int maxAttempts = 5;
+        if (_lastDequeuedAttemptCount >= maxAttempts)
+        {
+            // Terminal failure — mark as processed so it's not retried
+            await MarkProcessedAsync(conn, itemId, "PERMANENT_FAILURE: " + (error.Length > 2000 ? error[..2000] : error), ct);
+            _logger.LogWarning("QUEUE PERMANENT FAILURE: item {Id} exhausted all {MaxAttempts} retries, marked as processed", itemId, maxAttempts);
+            _lastDequeuedItemId = null;
+            return true;
+        }
 
         // Backoff computed in SQL from AttemptCount (already incremented during dequeue):
         // 1→30s, 2→2min, 3→10min, 4→30min
@@ -175,6 +194,7 @@ public sealed class PostgresMessageQueue : IMessageQueue
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogDebug("QUEUE FAILED: item {Id} scheduled for retry with backoff", itemId);
         _lastDequeuedItemId = null;
+        return false;
     }
 
     private static async Task MarkProcessedAsync(NpgsqlConnection conn, Guid id, string? error, CancellationToken ct)

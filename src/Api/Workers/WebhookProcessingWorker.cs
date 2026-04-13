@@ -1,4 +1,5 @@
 using WhatsAppSaaS.Application.Interfaces;
+using WhatsAppSaaS.Domain.Entities;
 
 namespace WhatsAppSaaS.Api.Workers;
 
@@ -7,6 +8,9 @@ public sealed class WebhookProcessingWorker : BackgroundService
     private readonly IMessageQueue _queue;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WebhookProcessingWorker> _logger;
+
+    private const string FallbackMessage =
+        "Lo sentimos, estamos experimentando un problema temporal. Por favor intenta de nuevo en unos minutos.";
 
     public WebhookProcessingWorker(
         IMessageQueue queue,
@@ -81,7 +85,14 @@ public sealed class WebhookProcessingWorker : BackgroundService
 
                 if (_queue is WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue pgqFail)
                 {
-                    try { await pgqFail.FailLastAsync(ex.Message, stoppingToken); }
+                    try
+                    {
+                        var isTerminal = await pgqFail.FailLastAsync(ex.Message, stoppingToken);
+                        if (isTerminal && message is not null)
+                        {
+                            await SendFallbackReplyAsync(message, stoppingToken);
+                        }
+                    }
                     catch (Exception failEx) { _logger.LogError(failEx, "Failed to return queue item for retry"); }
                 }
 
@@ -90,6 +101,65 @@ public sealed class WebhookProcessingWorker : BackgroundService
         }
 
         _logger.LogInformation("WebhookProcessingWorker stopped");
+    }
+
+    private async Task SendFallbackReplyAsync(QueuedMessage message, CancellationToken ct)
+    {
+        // Extract the customer phone from the first inbound message in the payload
+        var customerPhone = message.Payload.Entry
+            .SelectMany(e => e.Changes)
+            .Select(c => c.Value)
+            .Where(v => v?.Messages is { Count: > 0 })
+            .SelectMany(v => v!.Messages!)
+            .Select(m => m.From)
+            .FirstOrDefault();
+
+        if (string.IsNullOrWhiteSpace(customerPhone))
+        {
+            _logger.LogWarning(
+                "FALLBACK SKIP: no customer phone found in payload for business {BusinessId}",
+                message.BusinessContext.BusinessId);
+            return;
+        }
+
+        _logger.LogWarning(
+            "FALLBACK ATTEMPT: sending fallback reply to {CustomerPhone} for business {BusinessId} after permanent processing failure",
+            customerPhone, message.BusinessContext.BusinessId);
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var whatsApp = scope.ServiceProvider.GetRequiredService<IWhatsAppClient>();
+
+            var fallback = new OutgoingMessage
+            {
+                To = customerPhone,
+                Body = FallbackMessage,
+                PhoneNumberId = message.BusinessContext.PhoneNumberId,
+                AccessToken = message.BusinessContext.AccessToken
+            };
+
+            var sent = await whatsApp.SendTextMessageAsync(fallback, ct);
+
+            if (sent)
+            {
+                _logger.LogWarning(
+                    "FALLBACK SENT: fallback reply delivered to {CustomerPhone} for business {BusinessId}",
+                    customerPhone, message.BusinessContext.BusinessId);
+            }
+            else
+            {
+                _logger.LogError(
+                    "FALLBACK FAILED: WhatsApp API rejected fallback to {CustomerPhone} for business {BusinessId}",
+                    customerPhone, message.BusinessContext.BusinessId);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "FALLBACK ERROR: exception sending fallback to {CustomerPhone} for business {BusinessId}",
+                customerPhone, message.BusinessContext.BusinessId);
+        }
     }
 
     private async Task CheckQueueHealthAsync(CancellationToken ct)
