@@ -77,6 +77,12 @@ public class AppDbContext : DbContext
             b.Property(x => x.DeliveryFee).HasPrecision(12, 2);
             b.Property(x => x.TotalAmount).HasPrecision(12, 2);
 
+            // 💵 Cash payment fields — explicit types to prevent SQLite-era TEXT drift
+            b.Property(x => x.CashTenderedAmount).HasPrecision(12, 2);
+            b.Property(x => x.CashBcvRateUsed).HasPrecision(12, 2);
+            b.Property(x => x.CashChangeAmount).HasPrecision(12, 2);
+            b.Property(x => x.CashChangeAmountBs).HasPrecision(12, 2);
+
             // ⏱️ Operational timestamps
             b.Property(x => x.AcceptedAtUtc);
             b.Property(x => x.PreparingAtUtc);

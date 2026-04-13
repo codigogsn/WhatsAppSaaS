@@ -239,12 +239,33 @@ public static class SchemaRepair
             """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CheckoutCompleted' AND data_type<>'boolean') THEN ALTER TABLE "Orders" ALTER COLUMN "CheckoutCompleted" TYPE boolean USING CASE WHEN "CheckoutCompleted"=0 THEN false ELSE true END; END IF; END $$""",
             """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CheckoutFormSent' AND data_type<>'boolean') THEN ALTER TABLE "Orders" ALTER COLUMN "CheckoutFormSent" TYPE boolean USING CASE WHEN "CheckoutFormSent"=0 THEN false ELSE true END; END IF; END $$""",
         ];
+        // Cash boolean fields (CashChangeRequired, CashChangeReturned) — migration created as INTEGER
+        string[] cashBoolRepairs =
+        [
+            """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeRequired' AND data_type<>'boolean') THEN ALTER TABLE "Orders" ALTER COLUMN "CashChangeRequired" TYPE boolean USING CASE WHEN "CashChangeRequired"::text IN ('1','true','True') THEN true ELSE false END; END IF; END $$""",
+            """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeReturned' AND data_type<>'boolean') THEN ALTER TABLE "Orders" ALTER COLUMN "CashChangeReturned" TYPE boolean USING CASE WHEN "CashChangeReturned"::text IN ('1','true','True') THEN true ELSE false END; END IF; END $$""",
+        ];
+        // Cash decimal fields — migration created as TEXT
+        string[] cashDecimalRepairs =
+        [
+            """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashTenderedAmount' AND data_type='text') THEN ALTER TABLE "Orders" ALTER COLUMN "CashTenderedAmount" TYPE numeric(12,2) USING NULLIF("CashTenderedAmount",'')::numeric(12,2); END IF; END $$""",
+            """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashBcvRateUsed' AND data_type='text') THEN ALTER TABLE "Orders" ALTER COLUMN "CashBcvRateUsed" TYPE numeric(12,2) USING NULLIF("CashBcvRateUsed",'')::numeric(12,2); END IF; END $$""",
+            """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeAmount' AND data_type='text') THEN ALTER TABLE "Orders" ALTER COLUMN "CashChangeAmount" TYPE numeric(12,2) USING NULLIF("CashChangeAmount",'')::numeric(12,2); END IF; END $$""",
+            """DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='Orders' AND column_name='CashChangeAmountBs' AND data_type='text') THEN ALTER TABLE "Orders" ALTER COLUMN "CashChangeAmountBs" TYPE numeric(12,2) USING NULLIF("CashChangeAmountBs",'')::numeric(12,2); END IF; END $$""",
+        ];
         var boolFixed = false;
-        foreach (var sql in boolRepairs)
+        foreach (var sql in boolRepairs.Concat(cashBoolRepairs))
         {
             if (ExecSql(conn, sql)) boolFixed = true;
         }
         Log.Information(boolFixed ? "LEGACY BOOL REPAIR APPLIED" : "LEGACY BOOL REPAIR SKIPPED");
+
+        var cashFixed = false;
+        foreach (var sql in cashDecimalRepairs)
+        {
+            if (ExecSql(conn, sql)) cashFixed = true;
+        }
+        Log.Information(cashFixed ? "CASH DECIMAL REPAIR: TEXT → numeric(12,2) applied" : "CASH DECIMAL REPAIR: skipped (already correct)");
 
         // ── Indexes (IF NOT EXISTS) ──
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Businesses_PhoneNumberId" ON "Businesses" ("PhoneNumberId")""");
