@@ -193,8 +193,7 @@ try
     // ────────────────────────────────────────
     // Data Protection (key persistence + optional encryption)
     // ────────────────────────────────────────
-    var dpKeysPath = Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH");
-    var dpCertPath = Environment.GetEnvironmentVariable("DATA_PROTECTION_CERTIFICATE_PATH");
+    var dpKeysPath = Environment.GetEnvironmentVariable("DATA_PROTECTION_KEYS_PATH")?.Trim();
     var dpConfigured = false;
 
     if (string.IsNullOrWhiteSpace(dpKeysPath))
@@ -217,25 +216,39 @@ try
                 .PersistKeysToFileSystem(new DirectoryInfo(dpKeysPath))
                 .SetDefaultKeyLifetime(TimeSpan.FromDays(90));
 
-            // Optional: encrypt keys at rest with an X.509 certificate
-            if (!string.IsNullOrWhiteSpace(dpCertPath))
+            // Optional: encrypt keys at rest with an X.509 certificate.
+            // Priority: BASE64 env var > PATH env var > no encryption.
+            var dpCertBase64 = Environment.GetEnvironmentVariable("DATA_PROTECTION_CERTIFICATE_BASE64")?.Trim();
+            var dpCertPath = Environment.GetEnvironmentVariable("DATA_PROTECTION_CERTIFICATE_PATH")?.Trim();
+            var dpCertPassword = Environment.GetEnvironmentVariable("DATA_PROTECTION_CERTIFICATE_PASSWORD")?.Trim();
+
+            if (!string.IsNullOrWhiteSpace(dpCertBase64))
             {
-                // Path explicitly configured — must work or fail fast
+                // BASE64 certificate — preferred for Render and containerized deployments
+                var certBytes = Convert.FromBase64String(dpCertBase64);
+                var cert = string.IsNullOrWhiteSpace(dpCertPassword)
+                    ? new System.Security.Cryptography.X509Certificates.X509Certificate2(certBytes)
+                    : new System.Security.Cryptography.X509Certificates.X509Certificate2(certBytes, dpCertPassword);
+                dpBuilder.ProtectKeysWithCertificate(cert);
+                Log.Information("DATA PROTECTION: certificate loaded from BASE64 thumbprint={Thumbprint}", cert.Thumbprint);
+            }
+            else if (!string.IsNullOrWhiteSpace(dpCertPath))
+            {
+                // File path certificate — for local dev or persistent disk deployments
                 if (!File.Exists(dpCertPath))
                     throw new FileNotFoundException(
                         $"DATA_PROTECTION_CERTIFICATE_PATH is set to '{dpCertPath}' but the file does not exist. " +
                         "Fix the path or remove the variable to run without encryption at rest.");
 
-                var dpCertPassword = Environment.GetEnvironmentVariable("DATA_PROTECTION_CERTIFICATE_PASSWORD");
                 var cert = string.IsNullOrWhiteSpace(dpCertPassword)
                     ? new System.Security.Cryptography.X509Certificates.X509Certificate2(dpCertPath)
                     : new System.Security.Cryptography.X509Certificates.X509Certificate2(dpCertPath, dpCertPassword);
                 dpBuilder.ProtectKeysWithCertificate(cert);
-                Log.Information("DATA PROTECTION: keys encrypted at rest with certificate thumbprint={Thumbprint}", cert.Thumbprint);
+                Log.Information("DATA PROTECTION: certificate loaded from PATH thumbprint={Thumbprint}", cert.Thumbprint);
             }
             else
             {
-                Log.Warning("DATA PROTECTION: keys persisted but NOT encrypted at rest. Set DATA_PROTECTION_CERTIFICATE_PATH to a .pfx file to enable encryption.");
+                Log.Warning("DATA PROTECTION: keys persisted but NOT encrypted at rest. Set DATA_PROTECTION_CERTIFICATE_BASE64 or DATA_PROTECTION_CERTIFICATE_PATH to enable encryption.");
             }
 
             dpConfigured = true;
