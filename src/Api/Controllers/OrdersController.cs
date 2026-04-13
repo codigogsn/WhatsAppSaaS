@@ -624,8 +624,9 @@ public sealed class OrdersController : ControllerBase
             if (cashChangeReturned)
                 return Ok(new { success = true, alreadyReturned = true });
 
-            // Step 2: Update with raw SQL
+            // Step 2: Atomic compare-and-set — only succeeds if not already returned
             var now = DateTime.UtcNow;
+            int rowsAffected;
             using (var updCmd = conn.CreateCommand())
             {
                 updCmd.CommandText = """
@@ -635,12 +636,16 @@ public sealed class OrdersController : ControllerBase
                         "CashChangeReturnedBy" = 'dashboard',
                         "CashChangeReturnedReference" = @ref
                     WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@oid)
+                      AND ("CashChangeReturned" IS NULL OR "CashChangeReturned" = false)
                 """;
                 var p1 = updCmd.CreateParameter(); p1.ParameterName = "oid"; p1.Value = id.ToString(); updCmd.Parameters.Add(p1);
                 var p2 = updCmd.CreateParameter(); p2.ParameterName = "ts"; p2.Value = now; updCmd.Parameters.Add(p2);
                 var p3 = updCmd.CreateParameter(); p3.ParameterName = "ref"; p3.Value = (object?)req?.Reference ?? DBNull.Value; updCmd.Parameters.Add(p3);
-                await updCmd.ExecuteNonQueryAsync();
+                rowsAffected = await updCmd.ExecuteNonQueryAsync();
             }
+
+            if (rowsAffected == 0)
+                return Conflict(new { error = "Cash change was already returned by another operator" });
 
             _logger.LogInformation("CASH CHANGE RETURNED: OrderId={OrderId} Ref={Ref}", id, req?.Reference);
 
