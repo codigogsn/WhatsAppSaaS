@@ -84,6 +84,21 @@ public sealed class OrderRepository : IOrderRepository
         order.DeliveryFee ??= 0m;
         order.TotalAmount ??= (order.SubtotalAmount ?? 0m) + (order.DeliveryFee ?? 0m);
 
+        // Reject zero/negative-value orders — a completed order with no monetary value
+        // indicates a pricing bug upstream. Fail explicitly instead of persisting junk.
+        if (order.TotalAmount <= 0m)
+        {
+            _logger.LogError(
+                "ORDER REJECTED: zero or negative total. BusinessId={BusinessId} " +
+                "TotalAmount={TotalAmount} SubtotalAmount={SubtotalAmount} DeliveryFee={DeliveryFee} " +
+                "Items={ItemCount} CheckoutCompleted={Checkout}",
+                order.BusinessId, order.TotalAmount, order.SubtotalAmount, order.DeliveryFee,
+                order.Items.Count, order.CheckoutCompleted);
+            throw new InvalidOperationException(
+                $"Cannot persist order with TotalAmount={order.TotalAmount}. " +
+                "Orders must have a positive total.");
+        }
+
         _db.Orders.Add(order);
 
         // Pre-save diagnostic log

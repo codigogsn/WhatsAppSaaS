@@ -295,6 +295,18 @@ public static class SchemaRepair
         }
         Log.Information("MONETARY CHECK CONSTRAINTS: {Count}/7 applied", checksAdded);
 
+        // Stricter DB safety net: prevent $0 TotalAmount on completed orders.
+        // The application guard in OrderRepository is the primary defense; this is the backstop.
+        ExecSql(conn, """
+            DO $$ BEGIN
+                IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='CK_Orders_TotalAmount_Positive') THEN
+                    ALTER TABLE "Orders" ADD CONSTRAINT "CK_Orders_TotalAmount_Positive"
+                        CHECK (NOT ("CheckoutCompleted" = true AND ("TotalAmount" IS NULL OR "TotalAmount" <= 0)));
+                END IF;
+            END $$
+        """);
+        Log.Information("MONETARY CHECK: CK_Orders_TotalAmount_Positive ensured");
+
         // ── Indexes (IF NOT EXISTS) ──
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Businesses_PhoneNumberId" ON "Businesses" ("PhoneNumberId")""");
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Customers_BusinessId_PhoneE164" ON "Customers" ("BusinessId", "PhoneE164")""");
