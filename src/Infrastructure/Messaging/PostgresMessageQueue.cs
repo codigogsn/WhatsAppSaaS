@@ -67,10 +67,21 @@ public sealed class PostgresMessageQueue : IMessageQueue
         cmd.Parameters.AddWithValue("now", DateTime.UtcNow);
 
         var rows = await cmd.ExecuteNonQueryAsync(cancellationToken);
-        if (rows == 0)
+        if (rows == 0 && !string.IsNullOrWhiteSpace(messageId))
+        {
+            // ON CONFLICT DO NOTHING fired — message already in queue (dedup). Safe to ack.
             _logger.LogInformation("QUEUE DEDUP: skipped duplicate enqueue for messageId={MessageId}", messageId);
+        }
+        else if (rows == 0)
+        {
+            // Non-dedup path returned 0 rows — INSERT silently failed. Must not ack to Meta.
+            _logger.LogError("WEBHOOK ENQUEUE FAILED: INSERT returned 0 rows without conflict. messageId={MessageId}", messageId ?? "(none)");
+            throw new InvalidOperationException("Enqueue failed: INSERT returned 0 affected rows.");
+        }
         else
+        {
             _logger.LogDebug("QUEUE ENQUEUED: item persisted to WebhookQueue messageId={MessageId}", messageId ?? "(none)");
+        }
     }
 
     public async ValueTask<QueuedMessage?> DequeueAsync(CancellationToken cancellationToken = default)
