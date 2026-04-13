@@ -135,12 +135,10 @@ public class WebhookController : ControllerBase
             return BadRequest();
         }
 
-        // Collect ALL message IDs from the payload for per-message dedup.
-        // Meta can batch multiple messages in a single webhook delivery.
-        // Deduplicating by only the first message ID would silently drop
-        // new messages that share a batch with a previously-seen first message.
-        var allMessageIds = new List<string>();
-        string? phoneNumberId = null;
+        // Group messages by phoneNumberId for strict tenant isolation.
+        // Meta can batch messages from different phone numbers in one delivery;
+        // each must be resolved and enqueued under its own business context.
+        var messagesByPhone = new Dictionary<string, List<string>>(); // phoneNumberId → [messageIds]
 
         if (payload.Entry is not null)
         {
@@ -152,75 +150,76 @@ public class WebhookController : ControllerBase
                     var value = change?.Value;
                     if (value is null) continue;
 
-                    phoneNumberId ??= value.Metadata?.PhoneNumberId;
+                    var pnId = value.Metadata?.PhoneNumberId;
+                    if (string.IsNullOrWhiteSpace(pnId)) continue;
 
                     if (value.Messages is not null)
                     {
                         foreach (var msg in value.Messages)
                         {
                             if (!string.IsNullOrWhiteSpace(msg?.Id))
-                                allMessageIds.Add(msg.Id);
+                            {
+                                if (!messagesByPhone.TryGetValue(pnId, out var list))
+                                {
+                                    list = new List<string>();
+                                    messagesByPhone[pnId] = list;
+                                }
+                                list.Add(msg.Id);
+                            }
                         }
                     }
                 }
             }
         }
 
-        Log.Information("WEBHOOK HIT: POST {Path} phoneNumberId={PhoneNumberId} messageCount={MessageCount} messageIds={MessageIds}",
-            Request.Path, phoneNumberId ?? "(none)", allMessageIds.Count,
-            allMessageIds.Count > 0 ? string.Join(",", allMessageIds) : "(none)");
+        var totalMessages = messagesByPhone.Values.Sum(l => l.Count);
+        Log.Information("WEBHOOK HIT: POST {Path} phoneNumbers={PhoneCount} messageCount={MessageCount}",
+            Request.Path, messagesByPhone.Count, totalMessages);
 
-        if (string.IsNullOrWhiteSpace(phoneNumberId))
-            return Ok();
-
-        // Skip non-message webhooks (status callbacks, delivery/read receipts, etc.)
-        // These have phoneNumberId but no actual messages to process.
-        if (allMessageIds.Count == 0)
+        if (messagesByPhone.Count == 0)
         {
-            Log.Debug("WEBHOOK SKIPPED: no inbound messages (status callback / receipt), phoneNumberId={PhoneNumberId}", phoneNumberId);
+            Log.Debug("WEBHOOK SKIPPED: no inbound messages (status callback / receipt)");
             return Ok();
         }
 
-        BusinessContext? businessContext;
-        try
-        {
-            businessContext = await _businessResolver.ResolveOrCreateAsync(phoneNumberId, ct);
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "WEBHOOK ERROR: business lookup failed for phone_number_id={PhoneNumberId} — returning 500 so Meta retries", phoneNumberId);
-            return StatusCode(500);
-        }
-
-        if (businessContext is null)
-        {
-            Log.Warning("WEBHOOK: could not resolve or create business for phone_number_id={PhoneNumberId} — returning 500 so Meta retries", phoneNumberId);
-            return StatusCode(500);
-        }
-
-        Log.Information("INCOMING MSG: {From} | {BusinessId}",
-            phoneNumberId, businessContext.BusinessId);
-
-        // Enqueue one queue item per message ID for per-message dedup.
-        // Each item carries the full payload; the processor's own per-message
-        // MarkMessageProcessedAsync ensures only new messages are acted upon.
+        // Process each phoneNumberId group independently — strict tenant isolation.
         var enqueuedCount = 0;
-        try
+        foreach (var (phoneNumberId, messageIds) in messagesByPhone)
         {
-            foreach (var msgId in allMessageIds)
+            BusinessContext? businessContext;
+            try
             {
-                Log.Information("WEBHOOK ENQUEUING: businessId={BusinessId} phoneNumberId={PhoneNumberId} messageId={MessageId}",
-                    businessContext.BusinessId, phoneNumberId, msgId);
-                await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), msgId, ct);
-                enqueuedCount++;
+                businessContext = await _businessResolver.ResolveOrCreateAsync(phoneNumberId, ct);
             }
-        }
-        catch (Exception ex)
-        {
-            Log.Error(ex, "WEBHOOK ENQUEUE FAILED: queue insert failed for businessId={BusinessId} enqueued={Enqueued}/{Total} — returning 500 so Meta retries",
-                businessContext.BusinessId, enqueuedCount, allMessageIds.Count);
-            WhatsAppSaaS.Api.Diagnostics.AppMetrics.RecordEnqueueFailure();
-            return StatusCode(500);
+            catch (Exception ex)
+            {
+                Log.Error(ex, "WEBHOOK ERROR: business lookup failed for phone_number_id={PhoneNumberId} — returning 500 so Meta retries", phoneNumberId);
+                return StatusCode(500);
+            }
+
+            if (businessContext is null)
+            {
+                Log.Warning("WEBHOOK: could not resolve or create business for phone_number_id={PhoneNumberId} — returning 500 so Meta retries", phoneNumberId);
+                return StatusCode(500);
+            }
+
+            try
+            {
+                foreach (var msgId in messageIds)
+                {
+                    Log.Information("WEBHOOK ENQUEUING: businessId={BusinessId} phoneNumberId={PhoneNumberId} messageId={MessageId}",
+                        businessContext.BusinessId, phoneNumberId, msgId);
+                    await _messageQueue.EnqueueAsync(new QueuedMessage(payload, businessContext), msgId, ct);
+                    enqueuedCount++;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "WEBHOOK ENQUEUE FAILED: businessId={BusinessId} enqueued={Enqueued}/{Total} — returning 500 so Meta retries",
+                    businessContext.BusinessId, enqueuedCount, totalMessages);
+                WhatsAppSaaS.Api.Diagnostics.AppMetrics.RecordEnqueueFailure();
+                return StatusCode(500);
+            }
         }
 
         return Ok();
