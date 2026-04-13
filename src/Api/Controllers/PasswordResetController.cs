@@ -217,10 +217,15 @@ public class PasswordResetController : ControllerBase
             // Hash new password
             var newHash = WhatsAppSaaS.Api.Controllers.AuthController.HashPassword(req.NewPassword);
 
+            // Atomic transaction: password update + token consumption succeed or fail together.
+            // Prevents token reuse if the connection drops between the two writes.
+            await using var txn = await conn.BeginTransactionAsync(ct);
+
             // Update password for ALL business assignments of this user (same email)
             string? userEmail = null;
             using (var cmd = conn.CreateCommand())
             {
+                cmd.Transaction = txn;
                 cmd.CommandText = """SELECT "Email" FROM "BusinessUsers" WHERE "Id" = @uid LIMIT 1""";
                 var p = cmd.CreateParameter(); p.ParameterName = "uid"; p.Value = userId.Value; cmd.Parameters.Add(p);
                 userEmail = (await cmd.ExecuteScalarAsync(ct))?.ToString();
@@ -229,6 +234,7 @@ public class PasswordResetController : ControllerBase
             if (userEmail != null)
             {
                 using var cmd = conn.CreateCommand();
+                cmd.Transaction = txn;
                 cmd.CommandText = """UPDATE "BusinessUsers" SET "PasswordHash" = @hash, "TokenVersion" = COALESCE("TokenVersion", 0) + 1 WHERE "Email" = @email""";
                 var p1 = cmd.CreateParameter(); p1.ParameterName = "hash"; p1.Value = newHash; cmd.Parameters.Add(p1);
                 var p2 = cmd.CreateParameter(); p2.ParameterName = "email"; p2.Value = userEmail; cmd.Parameters.Add(p2);
@@ -238,11 +244,14 @@ public class PasswordResetController : ControllerBase
             // Mark token as used
             using (var cmd = conn.CreateCommand())
             {
+                cmd.Transaction = txn;
                 cmd.CommandText = """UPDATE "PasswordResetTokens" SET "UsedAtUtc" = @now WHERE "Id" = @id""";
                 var p1 = cmd.CreateParameter(); p1.ParameterName = "now"; p1.Value = DateTime.UtcNow; cmd.Parameters.Add(p1);
                 var p2 = cmd.CreateParameter(); p2.ParameterName = "id"; p2.Value = tokenId.Value; cmd.Parameters.Add(p2);
                 await cmd.ExecuteNonQueryAsync(ct);
             }
+
+            await txn.CommitAsync(ct);
 
             _logger.LogInformation("Password reset completed for user {UserId}", userId.Value);
             return Ok(new { message = "Password has been reset successfully. You can now log in." });
