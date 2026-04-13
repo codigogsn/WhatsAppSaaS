@@ -18,10 +18,16 @@ public class BusinessResolver : IBusinessResolver
 {
     private readonly AppDbContext _db;
     private readonly string? _menuPdfUrl;
+    private readonly bool _isDevelopment;
+    private readonly bool _allowAutoCreate;
 
-    public BusinessResolver(AppDbContext db, IOptions<WhatsAppOptions>? whatsAppOptions = null)
+    public BusinessResolver(AppDbContext db, IWebHostEnvironment env, IConfiguration config, IOptions<WhatsAppOptions>? whatsAppOptions = null)
     {
         _db = db;
+        _isDevelopment = env.IsDevelopment();
+        var flag = config["ALLOW_AUTO_BUSINESS_CREATION"]
+                   ?? Environment.GetEnvironmentVariable("ALLOW_AUTO_BUSINESS_CREATION");
+        _allowAutoCreate = string.Equals(flag, "true", StringComparison.OrdinalIgnoreCase);
 
         // Build menu PDF URL: config > PUBLIC_BASE_URL > RENDER_EXTERNAL_URL (auto-provided by Render)
         var configBase = whatsAppOptions?.Value?.PublicBaseUrl;
@@ -63,6 +69,15 @@ public class BusinessResolver : IBusinessResolver
         {
             Log.Information("BUSINESS RESOLVED phoneNumberId={PhoneNumberId} businessId={BusinessId}", id, existing.BusinessId);
             return existing;
+        }
+
+        // Guard: block auto-creation outside Development unless explicitly opted in
+        if (!_isDevelopment && !_allowAutoCreate)
+        {
+            Log.Warning("BUSINESS AUTO-CREATE BLOCKED: unknown phoneNumberId={PhoneNumberId} environment={Environment} allowAutoCreate={AllowAutoCreate}. " +
+                        "Set ALLOW_AUTO_BUSINESS_CREATION=true to permit auto-creation outside Development.",
+                id, _isDevelopment ? "Development" : "Production", _allowAutoCreate);
+            return null;
         }
 
         // Auto-create: resolve config from env vars

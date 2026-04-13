@@ -1,7 +1,10 @@
 using Api.Services;
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.FileProviders;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -26,7 +29,20 @@ public class BusinessResolverTests : IDisposable
         _db = new AppDbContext(options);
         _db.Database.Migrate();
 
-        _sut = new BusinessResolver(_db);
+        // Simulate Development environment so auto-create tests keep working
+        var env = new TestWebHostEnvironment { EnvironmentName = "Development" };
+        var config = new ConfigurationBuilder().Build();
+        _sut = new BusinessResolver(_db, env, config);
+    }
+
+    private sealed class TestWebHostEnvironment : IWebHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = "Development";
+        public string ApplicationName { get; set; } = "Test";
+        public string WebRootPath { get; set; } = "";
+        public IFileProvider WebRootFileProvider { get; set; } = null!;
+        public string ContentRootPath { get; set; } = "";
+        public IFileProvider ContentRootFileProvider { get; set; } = null!;
     }
 
     public void Dispose()
