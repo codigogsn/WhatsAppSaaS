@@ -229,7 +229,7 @@ public class PasswordResetController : ControllerBase
             if (userEmail != null)
             {
                 using var cmd = conn.CreateCommand();
-                cmd.CommandText = """UPDATE "BusinessUsers" SET "PasswordHash" = @hash WHERE "Email" = @email""";
+                cmd.CommandText = """UPDATE "BusinessUsers" SET "PasswordHash" = @hash, "TokenVersion" = COALESCE("TokenVersion", 0) + 1 WHERE "Email" = @email""";
                 var p1 = cmd.CreateParameter(); p1.ParameterName = "hash"; p1.Value = newHash; cmd.Parameters.Add(p1);
                 var p2 = cmd.CreateParameter(); p2.ParameterName = "email"; p2.Value = userEmail; cmd.Parameters.Add(p2);
                 await cmd.ExecuteNonQueryAsync(ct);

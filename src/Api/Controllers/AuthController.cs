@@ -43,13 +43,14 @@ public sealed class AuthController : ControllerBase
             await conn.OpenAsync(ct);
 
         // Fetch ALL business assignments for this email (multi-sede support)
-        var assignments = new List<(Guid UserId, Guid BusinessId, string PasswordHash, string Name, string Email, string Role, bool UserActive, string BizName, bool BizActive)>();
+        var assignments = new List<(Guid UserId, Guid BusinessId, string PasswordHash, string Name, string Email, string Role, bool UserActive, string BizName, bool BizActive, int TokenVersion)>();
 
         using (var cmd = conn.CreateCommand())
         {
             cmd.CommandText = """
                 SELECT u."Id", u."BusinessId", u."PasswordHash", u."Name", u."Email", u."Role", u."IsActive",
-                       b."Name" AS "BizName", b."IsActive" AS "BizActive"
+                       b."Name" AS "BizName", b."IsActive" AS "BizActive",
+                       COALESCE(u."TokenVersion", 0) AS "TokenVersion"
                 FROM "BusinessUsers" u
                 INNER JOIN "Businesses" b ON CAST(b."Id" AS TEXT) = CAST(u."BusinessId" AS TEXT)
                 WHERE u."Email" = @email
@@ -76,9 +77,14 @@ public sealed class AuthController : ControllerBase
                     string sv => sv is "1" or "true" or "True", _ => true
                 };
 
+                var tokenVersion = r["TokenVersion"] switch
+                {
+                    int iv => iv, long lv => (int)lv, _ => 0
+                };
+
                 assignments.Add((
                     r.GetGuid(0), r.GetGuid(1), r.GetString(2), r.GetString(3),
-                    r.GetString(4), r.GetString(5), userActive, r["BizName"]?.ToString() ?? "", bizActive
+                    r.GetString(4), r.GetString(5), userActive, r["BizName"]?.ToString() ?? "", bizActive, tokenVersion
                 ));
             }
         }
@@ -123,7 +129,7 @@ public sealed class AuthController : ControllerBase
             .DistinctBy(x => x.id)
             .ToList();
 
-        var token = _jwt.GenerateToken(primary.UserId, activeBizIds[0], primary.Role, primary.Email, activeBizIds);
+        var token = _jwt.GenerateToken(primary.UserId, activeBizIds[0], primary.Role, primary.Email, activeBizIds, primary.TokenVersion);
 
         _logger.LogInformation("Login success: role={Role} businesses={Count}",
             primary.Role, activeBizIds.Count);

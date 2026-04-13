@@ -262,6 +262,7 @@ public class AppDbContext : DbContext
             b.Property(x => x.Role).IsRequired().HasMaxLength(50);
             b.Property(x => x.IsActive).IsRequired();
             b.Property(x => x.CreatedAtUtc).IsRequired();
+            b.Property(x => x.TokenVersion).IsRequired().HasDefaultValue(0);
 
             b.HasOne(x => x.Business)
                 .WithMany()

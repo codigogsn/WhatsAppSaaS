@@ -157,11 +157,14 @@ public sealed class AdminUsersController : ControllerBase
         if (!string.IsNullOrWhiteSpace(req.Name))
             user.Name = req.Name.Trim();
 
+        var mustRevoke = false;
+
         if (!string.IsNullOrWhiteSpace(req.Role))
         {
             var validRoles = new[] { "Owner", "Manager", "Operator" };
             if (!validRoles.Contains(req.Role))
                 return BadRequest(new { error = "Invalid role", allowed = validRoles });
+            if (user.Role != req.Role) mustRevoke = true;
             user.Role = req.Role;
         }
 
@@ -170,10 +173,16 @@ public sealed class AdminUsersController : ControllerBase
             if (req.Password.Length < 8)
                 return BadRequest(new { error = "Password must be at least 8 characters" });
             user.PasswordHash = AuthController.HashPassword(req.Password);
+            mustRevoke = true;
         }
 
         if (req.IsActive.HasValue)
+        {
+            if (user.IsActive && !req.IsActive.Value) mustRevoke = true;
             user.IsActive = req.IsActive.Value;
+        }
+
+        if (mustRevoke) user.TokenVersion++;
 
         await _db.SaveChangesAsync(ct);
 
@@ -395,6 +404,7 @@ public sealed class AdminUsersController : ControllerBase
         if (userRows.Count == 0)
             return NotFound(new { error = "User not found" });
 
+        var mustRevoke = false;
         foreach (var u in userRows)
         {
             if (!string.IsNullOrWhiteSpace(req.Name)) u.Name = req.Name.Trim();
@@ -403,15 +413,22 @@ public sealed class AdminUsersController : ControllerBase
                 var validRoles = new[] { "Owner", "Manager", "Operator" };
                 if (!validRoles.Contains(req.Role))
                     return BadRequest(new { error = "Invalid role" });
+                if (u.Role != req.Role) mustRevoke = true;
                 u.Role = req.Role;
             }
-            if (req.IsActive.HasValue) u.IsActive = req.IsActive.Value;
+            if (req.IsActive.HasValue)
+            {
+                if (u.IsActive && !req.IsActive.Value) mustRevoke = true;
+                u.IsActive = req.IsActive.Value;
+            }
             if (!string.IsNullOrWhiteSpace(req.Password))
             {
                 if (req.Password.Length < 8)
                     return BadRequest(new { error = "Password must be at least 8 characters" });
                 u.PasswordHash = AuthController.HashPassword(req.Password);
+                mustRevoke = true;
             }
+            if (mustRevoke) u.TokenVersion++;
         }
 
         // Handle business reassignment

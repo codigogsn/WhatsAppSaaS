@@ -30,7 +30,7 @@ public sealed class JwtService
     }
 
     public string GenerateToken(Guid userId, Guid businessId, string role, string email,
-        IEnumerable<Guid>? allBusinessIds = null)
+        IEnumerable<Guid>? allBusinessIds = null, int tokenVersion = 0)
     {
         var key = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_secret));
         var creds = new SigningCredentials(key, SecurityAlgorithms.HmacSha256);
@@ -42,6 +42,7 @@ public sealed class JwtService
             new(ClaimTypes.Role, role),
             new(JwtRegisteredClaimNames.Email, email),
             new(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString()),
+            new("tokVer", tokenVersion.ToString()),
         };
 
         // Multi-business claim: comma-separated list of all assigned business IDs

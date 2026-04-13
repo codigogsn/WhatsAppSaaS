@@ -14,5 +14,8 @@ public class BusinessUser
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
+    /// <summary>Incremented on password change, role change, or deactivation to revoke all existing JWT tokens.</summary>
+    public int TokenVersion { get; set; } = 0;
+
     public Business? Business { get; set; }
 }

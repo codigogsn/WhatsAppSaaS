@@ -376,6 +376,7 @@ try
 
     app.UseAuthentication();
     app.UseMiddleware<WhatsAppSaaS.Api.Middleware.JwtFallbackMiddleware>();
+    app.UseMiddleware<WhatsAppSaaS.Api.Middleware.TokenVersionMiddleware>();
     app.UseAuthorization();
 
     app.MapControllers();
