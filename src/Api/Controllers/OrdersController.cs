@@ -524,10 +524,14 @@ public sealed class OrdersController : ControllerBase
             : await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { error = "Order not found" });
 
+        // Clear verification status but PRESERVE original proof evidence for audit/disputes
         order.PaymentVerifiedAtUtc = null;
         order.PaymentVerifiedBy = null;
-        order.PaymentProofMediaId = null;
-        order.PaymentProofSubmittedAtUtc = null;
+        // PaymentProofMediaId and PaymentProofSubmittedAtUtc intentionally kept —
+        // the original proof must remain available for operator review and dispute resolution.
+        order.AdditionalNotes = string.IsNullOrWhiteSpace(order.AdditionalNotes)
+            ? $"Payment proof rejected at {DateTime.UtcNow:O}"
+            : order.AdditionalNotes + $" | Payment proof rejected at {DateTime.UtcNow:O}";
 
         try
         {
@@ -539,8 +543,7 @@ public sealed class OrdersController : ControllerBase
             return Conflict(new { error = "Order was updated by another process. Please retry." });
         }
 
-        // Clear cached proof file
-        DeleteProofCache(id);
+        // Proof cache intentionally preserved for audit trail
 
         // Notify customer
         if (!string.IsNullOrWhiteSpace(order.From) && !string.IsNullOrWhiteSpace(order.PhoneNumberId))
