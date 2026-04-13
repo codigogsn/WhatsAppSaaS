@@ -267,6 +267,34 @@ public static class SchemaRepair
         }
         Log.Information(cashFixed ? "CASH DECIMAL REPAIR: TEXT → numeric(12,2) applied" : "CASH DECIMAL REPAIR: skipped (already correct)");
 
+        // ── Monetary CHECK constraints ──
+        // Clamp any existing impossible negative values to 0 before adding constraints.
+        ExecSql(conn, """UPDATE "Orders" SET "SubtotalAmount" = 0 WHERE "SubtotalAmount" < 0""");
+        ExecSql(conn, """UPDATE "Orders" SET "DeliveryFee" = 0 WHERE "DeliveryFee" < 0""");
+        ExecSql(conn, """UPDATE "Orders" SET "TotalAmount" = 0 WHERE "TotalAmount" < 0""");
+        ExecSql(conn, """UPDATE "Orders" SET "CashTenderedAmount" = 0 WHERE "CashTenderedAmount" < 0""");
+        ExecSql(conn, """UPDATE "Orders" SET "CashBcvRateUsed" = 0 WHERE "CashBcvRateUsed" < 0""");
+        ExecSql(conn, """UPDATE "Orders" SET "CashChangeAmount" = 0 WHERE "CashChangeAmount" < 0""");
+        ExecSql(conn, """UPDATE "Orders" SET "CashChangeAmountBs" = 0 WHERE "CashChangeAmountBs" < 0""");
+
+        // Add CHECK constraints idempotently (skipped if already present)
+        string[] checkConstraints =
+        [
+            """DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='CK_Orders_SubtotalAmount_NonNeg') THEN ALTER TABLE "Orders" ADD CONSTRAINT "CK_Orders_SubtotalAmount_NonNeg" CHECK ("SubtotalAmount" IS NULL OR "SubtotalAmount" >= 0); END IF; END $$""",
+            """DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='CK_Orders_DeliveryFee_NonNeg') THEN ALTER TABLE "Orders" ADD CONSTRAINT "CK_Orders_DeliveryFee_NonNeg" CHECK ("DeliveryFee" IS NULL OR "DeliveryFee" >= 0); END IF; END $$""",
+            """DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='CK_Orders_TotalAmount_NonNeg') THEN ALTER TABLE "Orders" ADD CONSTRAINT "CK_Orders_TotalAmount_NonNeg" CHECK ("TotalAmount" IS NULL OR "TotalAmount" >= 0); END IF; END $$""",
+            """DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='CK_Orders_CashTendered_NonNeg') THEN ALTER TABLE "Orders" ADD CONSTRAINT "CK_Orders_CashTendered_NonNeg" CHECK ("CashTenderedAmount" IS NULL OR "CashTenderedAmount" >= 0); END IF; END $$""",
+            """DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='CK_Orders_CashBcvRate_NonNeg') THEN ALTER TABLE "Orders" ADD CONSTRAINT "CK_Orders_CashBcvRate_NonNeg" CHECK ("CashBcvRateUsed" IS NULL OR "CashBcvRateUsed" >= 0); END IF; END $$""",
+            """DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='CK_Orders_CashChangeAmt_NonNeg') THEN ALTER TABLE "Orders" ADD CONSTRAINT "CK_Orders_CashChangeAmt_NonNeg" CHECK ("CashChangeAmount" IS NULL OR "CashChangeAmount" >= 0); END IF; END $$""",
+            """DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname='CK_Orders_CashChangeAmtBs_NonNeg') THEN ALTER TABLE "Orders" ADD CONSTRAINT "CK_Orders_CashChangeAmtBs_NonNeg" CHECK ("CashChangeAmountBs" IS NULL OR "CashChangeAmountBs" >= 0); END IF; END $$""",
+        ];
+        var checksAdded = 0;
+        foreach (var sql in checkConstraints)
+        {
+            if (ExecSql(conn, sql)) checksAdded++;
+        }
+        Log.Information("MONETARY CHECK CONSTRAINTS: {Count}/7 applied", checksAdded);
+
         // ── Indexes (IF NOT EXISTS) ──
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Businesses_PhoneNumberId" ON "Businesses" ("PhoneNumberId")""");
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_Customers_BusinessId_PhoneE164" ON "Customers" ("BusinessId", "PhoneE164")""");
