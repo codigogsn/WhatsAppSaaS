@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -16,6 +17,7 @@ namespace WhatsAppSaaS.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/admin/menu")]
+[Authorize]
 [EnableRateLimiting("admin")]
 public sealed class AdminMenuController : ControllerBase
 {

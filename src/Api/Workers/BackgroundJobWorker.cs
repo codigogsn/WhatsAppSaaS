@@ -242,9 +242,9 @@ public sealed class BackgroundJobWorker : BackgroundService
             _logger.LogWarning(ex, "QUEUE CLEANUP: failed to purge abandoned items (non-fatal)");
         }
 
-        // Purge stuck claimed items whose lease expired (>10min) and are old enough to discard.
-        // The 10-minute threshold aligns with the 5-minute durable claim lease in DequeueAsync,
-        // giving a safe margin before permanent cleanup.
+        // Purge stuck claimed items whose lease expired (>30min) and are old enough to discard.
+        // The 30-minute threshold aligns with the 15-minute durable claim lease in DequeueAsync,
+        // giving a safe 2x margin before permanent cleanup.
         try
         {
             var conn3 = db.Database.GetDbConnection();
@@ -254,12 +254,12 @@ public sealed class BackgroundJobWorker : BackgroundService
                 DELETE FROM "WebhookQueue"
                 WHERE "ProcessedAtUtc" IS NULL
                   AND "ClaimedAtUtc" IS NOT NULL
-                  AND "ClaimedAtUtc" < now() - interval '10 minutes'
+                  AND "ClaimedAtUtc" < now() - interval '30 minutes'
                   AND "CreatedAtUtc" < now() - interval '7 days'
             """;
             var stuck = await cmd3.ExecuteNonQueryAsync(ct);
             if (stuck > 0)
-                _logger.LogInformation("QUEUE CLEANUP: purged {Count} stuck claimed items (lease expired >10min, created >7d ago)", stuck);
+                _logger.LogInformation("QUEUE CLEANUP: purged {Count} stuck claimed items (lease expired >30min, created >7d ago)", stuck);
         }
         catch (Exception ex)
         {

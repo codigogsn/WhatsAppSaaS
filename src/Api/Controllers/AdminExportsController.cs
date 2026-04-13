@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -15,6 +16,7 @@ namespace Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/admin/exports")]
+[Authorize]
 [EnableRateLimiting("admin")]
 public class AdminExportsController : ControllerBase
 {

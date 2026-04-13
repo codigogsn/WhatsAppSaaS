@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -20,6 +21,7 @@ namespace WhatsAppSaaS.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 [EnableRateLimiting("admin")]
 public sealed class OrdersController : ControllerBase
 {

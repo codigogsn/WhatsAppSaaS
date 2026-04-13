@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -10,6 +11,7 @@ using WhatsAppSaaS.Infrastructure.Persistence;
 namespace WhatsAppSaaS.Api.Controllers;
 
 [ApiController]
+[Authorize]
 public sealed class MenuPdfController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -27,6 +29,7 @@ public sealed class MenuPdfController : ControllerBase
     /// <summary>
     /// Public endpoint: serves the menu PDF for a business. Used by WhatsApp document messages.
     /// </summary>
+    [AllowAnonymous]
     [HttpGet("api/menu-pdf/{businessId:guid}")]
     [ResponseCache(Duration = 300)] // 5 min cache
     public async Task<IActionResult> Serve(Guid businessId, CancellationToken ct)

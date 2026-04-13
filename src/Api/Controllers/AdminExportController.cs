@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -9,6 +10,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("admin/export")]
+[Authorize]
 [EnableRateLimiting("admin")]
 public class AdminExportController : ControllerBase
 {

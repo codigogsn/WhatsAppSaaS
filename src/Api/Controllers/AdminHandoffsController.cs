@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -13,6 +14,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/admin/handoffs")]
+[Authorize]
 [EnableRateLimiting("admin")]
 public class AdminHandoffsController : ControllerBase
 {

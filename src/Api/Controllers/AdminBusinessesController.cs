@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -12,6 +13,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/admin/businesses")]
+[Authorize]
 [EnableRateLimiting("admin")]
 public class AdminBusinessesController : ControllerBase
 {

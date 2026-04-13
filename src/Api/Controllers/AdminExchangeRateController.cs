@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -7,6 +8,7 @@ namespace Api.Controllers;
 
 [ApiController]
 [Route("api/admin/exchange-rates")]
+[Authorize]
 [EnableRateLimiting("admin")]
 public class AdminExchangeRateController : ControllerBase
 {
