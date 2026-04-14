@@ -88,7 +88,11 @@ public sealed class PostgresMessageQueue : IMessageQueue
     /// Result of a dequeue operation, carrying the DB row ID and attempt count
     /// so each concurrent worker can independently complete/fail its own item.
     /// </summary>
-    public sealed record DequeuedItem(QueuedMessage Message, Guid ItemId, int AttemptCount);
+    /// <summary>
+    /// Result of a dequeue operation. Carries ownership marker (ClaimedAtUtc)
+    /// so each worker can fence its completion/failure against re-claim by others.
+    /// </summary>
+    public sealed record DequeuedItem(QueuedMessage Message, Guid ItemId, int AttemptCount, DateTime ClaimedAtUtc);
 
     /// <summary>
     /// Dequeue with explicit item tracking for concurrent workers.
@@ -117,7 +121,7 @@ public sealed class PostgresMessageQueue : IMessageQueue
                 "AttemptCount" = q."AttemptCount" + 1
             FROM next
             WHERE q."Id" = next."Id"
-            RETURNING q."Id", q."Payload", q."AttemptCount"
+            RETURNING q."Id", q."Payload", q."AttemptCount", q."ClaimedAtUtc"
         """;
         cmd.Parameters.AddWithValue("now", DateTime.UtcNow);
 
@@ -128,6 +132,7 @@ public sealed class PostgresMessageQueue : IMessageQueue
         var id = reader.GetGuid(0);
         var json = reader.GetString(1);
         var attemptCount = reader.GetInt32(2);
+        var claimedAtUtc = reader.GetDateTime(3);
         await reader.CloseAsync();
 
         QueuedMessage? message;
@@ -148,7 +153,7 @@ public sealed class PostgresMessageQueue : IMessageQueue
             return null;
         }
 
-        return new DequeuedItem(message, id, attemptCount);
+        return new DequeuedItem(message, id, attemptCount, claimedAtUtc);
     }
 
     public async ValueTask<QueuedMessage?> DequeueAsync(CancellationToken cancellationToken = default)
@@ -174,25 +179,120 @@ public sealed class PostgresMessageQueue : IMessageQueue
 
     // ── Explicit ID-based complete/fail (concurrent-safe) ──
 
-    /// <summary>Mark a specific item as successfully processed.</summary>
-    public async Task CompleteAsync(Guid itemId, CancellationToken ct)
+    /// <summary>
+    /// Mark a specific item as successfully processed.
+    /// Ownership-fenced: only succeeds if this worker still holds the claim (ClaimedAtUtc matches).
+    /// Returns true if completed; false if ownership was lost (another worker reclaimed the row).
+    /// </summary>
+    public async Task<bool> CompleteAsync(Guid itemId, DateTime claimedAtUtc, CancellationToken ct)
     {
-        await MarkProcessedAsync(itemId, null, ct);
+        var rows = await MarkProcessedOwnedAsync(itemId, claimedAtUtc, null, ct);
+        if (rows == 0)
+        {
+            _logger.LogWarning("QUEUE OWNERSHIP LOST: cannot complete item {Id} — claim was superseded by another worker", itemId);
+            return false;
+        }
         _logger.LogDebug("QUEUE COMPLETED: item {Id}", itemId);
+        return true;
     }
 
     /// <summary>
     /// Record a processing failure for a specific item.
-    /// Returns true when max retries exhausted (terminal failure).
+    /// Ownership-fenced: only succeeds if this worker still holds the claim.
+    /// Returns (isTerminal, ownershipHeld). If ownership was lost, returns (false, false).
     /// </summary>
-    public async Task<bool> FailAsync(Guid itemId, int attemptCount, string error, CancellationToken ct)
+    public async Task<(bool IsTerminal, bool OwnershipHeld)> FailAsync(Guid itemId, int attemptCount, DateTime claimedAtUtc, string error, CancellationToken ct)
     {
         const int maxAttempts = 5;
         if (attemptCount >= maxAttempts)
         {
             var truncated = error.Length > 2000 ? error[..2000] : error;
+            var rows = await MarkProcessedOwnedAsync(itemId, claimedAtUtc, "PERMANENT_FAILURE: " + truncated, ct);
+            if (rows == 0)
+            {
+                _logger.LogWarning("QUEUE OWNERSHIP LOST: cannot mark terminal failure for item {Id} — claim was superseded", itemId);
+                return (false, false);
+            }
+            _logger.LogWarning("QUEUE PERMANENT FAILURE: item {Id} exhausted all {MaxAttempts} retries", itemId, maxAttempts);
+            return (true, true);
+        }
+
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE "WebhookQueue"
+            SET "LastError" = @err,
+                "ClaimedAtUtc" = NULL,
+                "NextRetryAtUtc" = now() + CASE "AttemptCount"
+                    WHEN 1 THEN interval '30 seconds'
+                    WHEN 2 THEN interval '2 minutes'
+                    WHEN 3 THEN interval '10 minutes'
+                    ELSE interval '30 minutes'
+                END
+            WHERE "Id" = @id AND "ProcessedAtUtc" IS NULL AND "ClaimedAtUtc" = @claimedAt
+        """;
+        cmd.Parameters.AddWithValue("id", itemId);
+        cmd.Parameters.AddWithValue("err", error.Length > 2000 ? error[..2000] : error);
+        cmd.Parameters.AddWithValue("claimedAt", claimedAtUtc);
+        var rows2 = await cmd.ExecuteNonQueryAsync(ct);
+        if (rows2 == 0)
+        {
+            _logger.LogWarning("QUEUE OWNERSHIP LOST: cannot schedule retry for item {Id} — claim was superseded", itemId);
+            return (false, false);
+        }
+        _logger.LogDebug("QUEUE FAILED: item {Id} scheduled for retry with backoff", itemId);
+        return (false, true);
+    }
+
+    /// <summary>
+    /// Extend the claim lease for an item being actively processed.
+    /// Ownership-fenced: only succeeds if this worker still holds the claim.
+    /// Returns the new ClaimedAtUtc if successful, or null if ownership was lost.
+    /// </summary>
+    public async Task<DateTime?> RenewClaimAsync(Guid itemId, DateTime currentClaimedAtUtc, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE "WebhookQueue"
+            SET "ClaimedAtUtc" = now()
+            WHERE "Id" = @id AND "ProcessedAtUtc" IS NULL AND "ClaimedAtUtc" = @claimedAt
+            RETURNING "ClaimedAtUtc"
+        """;
+        cmd.Parameters.AddWithValue("id", itemId);
+        cmd.Parameters.AddWithValue("claimedAt", currentClaimedAtUtc);
+        var result = await cmd.ExecuteScalarAsync(ct);
+        return result is DateTime dt ? dt : null;
+    }
+
+    // ── Legacy instance-based complete/fail (backward compat) ──
+
+    public async Task CompleteLastAsync(CancellationToken ct)
+    {
+        if (_lastDequeuedItemId is not { } itemId) return;
+        // Legacy path uses unfenced MarkProcessedAsync (single-worker sequential mode)
+        await MarkProcessedAsync(itemId, null, ct);
+        _logger.LogDebug("QUEUE COMPLETED: item {Id}", itemId);
+        _lastDequeuedItemId = null;
+    }
+
+    /// <summary>
+    /// Records a processing failure. Returns true when max retries are exhausted (terminal failure).
+    /// Legacy unfenced path for single-worker sequential mode.
+    /// </summary>
+    public async Task<bool> FailLastAsync(string error, CancellationToken ct)
+    {
+        if (_lastDequeuedItemId is not { } itemId) return false;
+
+        const int maxAttempts = 5;
+        if (_lastDequeuedAttemptCount >= maxAttempts)
+        {
+            var truncated = error.Length > 2000 ? error[..2000] : error;
             await MarkProcessedAsync(itemId, "PERMANENT_FAILURE: " + truncated, ct);
             _logger.LogWarning("QUEUE PERMANENT FAILURE: item {Id} exhausted all {MaxAttempts} retries", itemId, maxAttempts);
+            _lastDequeuedItemId = null;
             return true;
         }
 
@@ -215,45 +315,29 @@ public sealed class PostgresMessageQueue : IMessageQueue
         cmd.Parameters.AddWithValue("err", error.Length > 2000 ? error[..2000] : error);
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogDebug("QUEUE FAILED: item {Id} scheduled for retry with backoff", itemId);
+        _lastDequeuedItemId = null;
         return false;
     }
 
     /// <summary>
-    /// Extend the claim lease for an item being actively processed.
-    /// Prevents re-claim by other workers during long-running processing.
+    /// Ownership-fenced mark-processed: only updates if ClaimedAtUtc matches.
+    /// Returns the number of rows affected (0 = ownership lost).
     /// </summary>
-    public async Task RenewClaimAsync(Guid itemId, CancellationToken ct)
+    private async Task<int> MarkProcessedOwnedAsync(Guid id, DateTime claimedAtUtc, string? error, CancellationToken ct)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             UPDATE "WebhookQueue"
-            SET "ClaimedAtUtc" = now()
-            WHERE "Id" = @id AND "ProcessedAtUtc" IS NULL
+            SET "ProcessedAtUtc" = @now, "LastError" = @err
+            WHERE "Id" = @id AND "ClaimedAtUtc" = @claimedAt
         """;
-        cmd.Parameters.AddWithValue("id", itemId);
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
-
-    // ── Legacy instance-based complete/fail (backward compat) ──
-
-    public async Task CompleteLastAsync(CancellationToken ct)
-    {
-        if (_lastDequeuedItemId is not { } itemId) return;
-        await CompleteAsync(itemId, ct);
-        _lastDequeuedItemId = null;
-    }
-
-    /// <summary>
-    /// Records a processing failure. Returns true when max retries are exhausted (terminal failure).
-    /// </summary>
-    public async Task<bool> FailLastAsync(string error, CancellationToken ct)
-    {
-        if (_lastDequeuedItemId is not { } itemId) return false;
-        var result = await FailAsync(itemId, _lastDequeuedAttemptCount, error, ct);
-        _lastDequeuedItemId = null;
-        return result;
+        cmd.Parameters.AddWithValue("id", id);
+        cmd.Parameters.AddWithValue("now", DateTime.UtcNow);
+        cmd.Parameters.AddWithValue("err", (object?)error ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("claimedAt", claimedAtUtc);
+        return await cmd.ExecuteNonQueryAsync(ct);
     }
 
     private async Task MarkProcessedAsync(Guid id, string? error, CancellationToken ct)

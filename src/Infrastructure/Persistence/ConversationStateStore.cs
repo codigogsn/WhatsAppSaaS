@@ -141,19 +141,28 @@ public sealed class ConversationStateStore : IConversationStateStore
     {
         var cutoff = DateTime.UtcNow - ttl;
 
+        // Clean up old conversation states
         var old = await _db.ConversationStates
             .Where(s => s.UpdatedAtUtc < cutoff)
             .ToListAsync(ct);
 
-        if (old.Count == 0) return;
+        if (old.Count > 0)
+        {
+            _db.ConversationStates.RemoveRange(old);
+            await _db.SaveChangesAsync(ct);
+        }
 
-        var oldIds = old.Select(s => s.ConversationId).ToList();
+        // Processed-message tombstones are retained for 7 days (not tied to conversation TTL)
+        // to ensure webhook replay protection outlives delayed upstream retries.
+        var dedupCutoff = DateTime.UtcNow.AddDays(-7);
         var oldMsgs = await _db.ProcessedMessages
-            .Where(p => oldIds.Contains(p.ConversationId))
+            .Where(p => p.CreatedAtUtc < dedupCutoff)
             .ToListAsync(ct);
 
-        _db.ProcessedMessages.RemoveRange(oldMsgs);
-        _db.ConversationStates.RemoveRange(old);
-        await _db.SaveChangesAsync(ct);
+        if (oldMsgs.Count > 0)
+        {
+            _db.ProcessedMessages.RemoveRange(oldMsgs);
+            await _db.SaveChangesAsync(ct);
+        }
     }
 }

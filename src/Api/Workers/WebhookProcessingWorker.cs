@@ -120,6 +120,9 @@ public sealed class WebhookProcessingWorker : BackgroundService
         SemaphoreSlim semaphore,
         CancellationToken stoppingToken)
     {
+        // Track current ownership marker — updated by heartbeat on each renewal
+        var claimedAtUtc = item.ClaimedAtUtc;
+
         try
         {
             _logger.LogInformation(
@@ -127,13 +130,16 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 item.Message.BusinessContext.BusinessId,
                 item.Message.BusinessContext.BusinessName);
 
-            // Create a per-item timeout linked to the stopping token
+            // Create a per-item timeout linked to the stopping token.
+            // Heartbeat failure also cancels this CTS to abort processing if ownership is lost.
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
             timeoutCts.CancelAfter(_processingTimeout);
 
-            // Start heartbeat to keep claim alive during processing
+            // Start heartbeat to keep claim alive during processing.
+            // Heartbeat tracks and updates claimedAtUtc; cancels timeoutCts on ownership loss.
             using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-            var heartbeatTask = RunHeartbeatAsync(pgq, item.ItemId, heartbeatCts.Token);
+            var heartbeatTask = RunHeartbeatAsync(pgq, item.ItemId, claimedAtUtc, timeoutCts,
+                newClaimed => claimedAtUtc = newClaimed, heartbeatCts.Token);
 
             try
             {
@@ -147,16 +153,24 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 // Stop heartbeat before completing
                 await heartbeatCts.CancelAsync();
 
-                await pgq.CompleteAsync(item.ItemId, stoppingToken);
-                Diagnostics.AppMetrics.RecordProcessed(sw.Elapsed.TotalMilliseconds);
-
-                _logger.LogInformation(
-                    "Processed message for business {BusinessId}",
-                    item.Message.BusinessContext.BusinessId);
+                var completed = await pgq.CompleteAsync(item.ItemId, claimedAtUtc, stoppingToken);
+                if (completed)
+                {
+                    Diagnostics.AppMetrics.RecordProcessed(sw.Elapsed.TotalMilliseconds);
+                    _logger.LogInformation(
+                        "Processed message for business {BusinessId}",
+                        item.Message.BusinessContext.BusinessId);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "Processed message for business {BusinessId} but ownership was lost — another worker may have handled it",
+                        item.Message.BusinessContext.BusinessId);
+                }
             }
             catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
             {
-                // Processing timeout (not shutdown)
+                // Processing timeout or heartbeat ownership loss (not shutdown)
                 await heartbeatCts.CancelAsync();
                 var msg = $"Processing timed out after {_processingTimeout.TotalMinutes}m";
                 _logger.LogError("WORKER TIMEOUT: {Message} for business {BusinessId}", msg, item.Message.BusinessContext.BusinessId);
@@ -164,8 +178,8 @@ public sealed class WebhookProcessingWorker : BackgroundService
 
                 try
                 {
-                    var isTerminal = await pgq.FailAsync(item.ItemId, item.AttemptCount, msg, stoppingToken);
-                    if (isTerminal)
+                    var (isTerminal, owned) = await pgq.FailAsync(item.ItemId, item.AttemptCount, claimedAtUtc, msg, stoppingToken);
+                    if (isTerminal && owned)
                         await SendFallbackReplyAsync(item.Message, stoppingToken);
                 }
                 catch (Exception failEx) { _logger.LogError(failEx, "Failed to record timeout failure for queue item"); }
@@ -184,8 +198,8 @@ public sealed class WebhookProcessingWorker : BackgroundService
 
                 try
                 {
-                    var isTerminal = await pgq.FailAsync(item.ItemId, item.AttemptCount, ex.Message, stoppingToken);
-                    if (isTerminal)
+                    var (isTerminal, owned) = await pgq.FailAsync(item.ItemId, item.AttemptCount, claimedAtUtc, ex.Message, stoppingToken);
+                    if (isTerminal && owned)
                         await SendFallbackReplyAsync(item.Message, stoppingToken);
                 }
                 catch (Exception failEx) { _logger.LogError(failEx, "Failed to return queue item for retry"); }
@@ -210,25 +224,42 @@ public sealed class WebhookProcessingWorker : BackgroundService
     /// Periodically renews the claim lease so long-running processing
     /// does not cause the item to be re-claimed by another cycle.
     /// Renews every 5 minutes (well within the 15-minute claim timeout).
+    /// If renewal fails (ownership lost), cancels the processing CTS to abort the attempt.
     /// </summary>
     private async Task RunHeartbeatAsync(
         Infrastructure.Messaging.PostgresMessageQueue pgq,
         Guid itemId,
+        DateTime initialClaimedAtUtc,
+        CancellationTokenSource processingCts,
+        Action<DateTime> onRenewed,
         CancellationToken ct)
     {
+        var currentClaimedAt = initialClaimedAtUtc;
         try
         {
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromMinutes(5), ct);
-                await pgq.RenewClaimAsync(itemId, ct);
+                var newClaimed = await pgq.RenewClaimAsync(itemId, currentClaimedAt, ct);
+                if (newClaimed is null)
+                {
+                    // Ownership lost — another worker reclaimed this item.
+                    // Cancel processing to prevent silent loss on later failure.
+                    _logger.LogWarning("QUEUE HEARTBEAT: ownership lost for item {Id} — aborting processing", itemId);
+                    await processingCts.CancelAsync();
+                    return;
+                }
+                currentClaimedAt = newClaimed.Value;
+                onRenewed(currentClaimedAt);
                 _logger.LogDebug("QUEUE HEARTBEAT: renewed claim for item {Id}", itemId);
             }
         }
         catch (OperationCanceledException) { /* expected when processing completes */ }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "QUEUE HEARTBEAT: failed to renew claim for item {Id} (non-fatal)", itemId);
+            // Treat heartbeat failure as ownership loss — abort processing
+            _logger.LogWarning(ex, "QUEUE HEARTBEAT: failed to renew claim for item {Id} — aborting processing", itemId);
+            try { await processingCts.CancelAsync(); } catch { /* best effort */ }
         }
     }
 
