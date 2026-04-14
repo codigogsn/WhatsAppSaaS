@@ -188,38 +188,36 @@ public class PasswordResetController : ControllerBase
             if (conn.State != System.Data.ConnectionState.Open)
                 await conn.OpenAsync(ct);
 
-            // Find valid token
-            Guid? tokenId = null;
+            // Hash new password before touching the DB
+            var newHash = WhatsAppSaaS.Api.Controllers.AuthController.HashPassword(req.NewPassword);
+
+            // Atomic transaction: token consumption + password update succeed or fail together.
+            await using var txn = await conn.BeginTransactionAsync(ct);
+
+            // Atomically consume the token: UPDATE + WHERE guards ensure only one concurrent
+            // request can win. Losers get 0 rows and never touch the password.
             Guid? userId = null;
             using (var cmd = conn.CreateCommand())
             {
+                cmd.Transaction = txn;
                 cmd.CommandText = """
-                    SELECT "Id", "UserId" FROM "PasswordResetTokens"
+                    UPDATE "PasswordResetTokens"
+                    SET "UsedAtUtc" = @now
                     WHERE "TokenHash" = @hash AND "UsedAtUtc" IS NULL AND "ExpiresAtUtc" > @now
-                    LIMIT 1
+                    RETURNING "UserId"
                 """;
                 var p1 = cmd.CreateParameter(); p1.ParameterName = "hash"; p1.Value = tokenHash; cmd.Parameters.Add(p1);
                 var p2 = cmd.CreateParameter(); p2.ParameterName = "now"; p2.Value = DateTime.UtcNow; cmd.Parameters.Add(p2);
-                using var r = await cmd.ExecuteReaderAsync(ct);
-                if (await r.ReadAsync(ct))
-                {
-                    tokenId = r.GetGuid(0);
-                    userId = r.GetGuid(1);
-                }
+                var result = await cmd.ExecuteScalarAsync(ct);
+                userId = result is Guid g ? g : null;
             }
 
-            if (!tokenId.HasValue || !userId.HasValue)
+            if (!userId.HasValue)
             {
-                _logger.LogWarning("Invalid or expired reset token submitted");
+                await txn.RollbackAsync(ct);
+                _logger.LogWarning("Invalid or expired reset token submitted (atomic consume returned no rows)");
                 return BadRequest(new { error = "Invalid or expired reset link. Please request a new one." });
             }
-
-            // Hash new password
-            var newHash = WhatsAppSaaS.Api.Controllers.AuthController.HashPassword(req.NewPassword);
-
-            // Atomic transaction: password update + token consumption succeed or fail together.
-            // Prevents token reuse if the connection drops between the two writes.
-            await using var txn = await conn.BeginTransactionAsync(ct);
 
             // Update password for ALL business assignments of this user (same email)
             string? userEmail = null;
@@ -238,16 +236,6 @@ public class PasswordResetController : ControllerBase
                 cmd.CommandText = """UPDATE "BusinessUsers" SET "PasswordHash" = @hash, "TokenVersion" = COALESCE("TokenVersion", 0) + 1 WHERE "Email" = @email""";
                 var p1 = cmd.CreateParameter(); p1.ParameterName = "hash"; p1.Value = newHash; cmd.Parameters.Add(p1);
                 var p2 = cmd.CreateParameter(); p2.ParameterName = "email"; p2.Value = userEmail; cmd.Parameters.Add(p2);
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
-
-            // Mark token as used
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = txn;
-                cmd.CommandText = """UPDATE "PasswordResetTokens" SET "UsedAtUtc" = @now WHERE "Id" = @id""";
-                var p1 = cmd.CreateParameter(); p1.ParameterName = "now"; p1.Value = DateTime.UtcNow; cmd.Parameters.Add(p1);
-                var p2 = cmd.CreateParameter(); p2.ParameterName = "id"; p2.Value = tokenId.Value; cmd.Parameters.Add(p2);
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
