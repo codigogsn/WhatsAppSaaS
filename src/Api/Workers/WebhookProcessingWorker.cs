@@ -8,6 +8,8 @@ public sealed class WebhookProcessingWorker : BackgroundService
     private readonly IMessageQueue _queue;
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<WebhookProcessingWorker> _logger;
+    private readonly int _maxConcurrency;
+    private readonly TimeSpan _processingTimeout;
 
     private const string FallbackMessage =
         "Lo sentimos, estamos experimentando un problema temporal. Por favor intenta de nuevo en unos minutos.";
@@ -15,17 +17,227 @@ public sealed class WebhookProcessingWorker : BackgroundService
     public WebhookProcessingWorker(
         IMessageQueue queue,
         IServiceScopeFactory scopeFactory,
-        ILogger<WebhookProcessingWorker> logger)
+        ILogger<WebhookProcessingWorker> logger,
+        IConfiguration config)
     {
         _queue = queue;
         _scopeFactory = scopeFactory;
         _logger = logger;
+
+        _maxConcurrency = int.TryParse(
+            config["WORKER_CONCURRENCY"] ?? Environment.GetEnvironmentVariable("WORKER_CONCURRENCY"),
+            out var c) && c > 0 ? c : 1;
+
+        var timeoutMin = int.TryParse(
+            config["WORKER_TIMEOUT_MINUTES"] ?? Environment.GetEnvironmentVariable("WORKER_TIMEOUT_MINUTES"),
+            out var t) && t > 0 ? t : 10;
+        _processingTimeout = TimeSpan.FromMinutes(timeoutMin);
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("WebhookProcessingWorker started");
+        _logger.LogInformation(
+            "WebhookProcessingWorker started concurrency={Concurrency} timeout={Timeout}",
+            _maxConcurrency, _processingTimeout);
 
+        if (_queue is not Infrastructure.Messaging.PostgresMessageQueue pgq)
+        {
+            // Fallback: original sequential loop for non-Postgres queues
+            await RunSequentialAsync(stoppingToken);
+            return;
+        }
+
+        using var semaphore = new SemaphoreSlim(_maxConcurrency, _maxConcurrency);
+        var activeTasks = new List<Task>();
+        var emptyPolls = 0;
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            // Wait for a concurrency slot
+            try { await semaphore.WaitAsync(stoppingToken); }
+            catch (OperationCanceledException) { break; }
+
+            Infrastructure.Messaging.PostgresMessageQueue.DequeuedItem? item;
+            try
+            {
+                item = await pgq.DequeueItemAsync(stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                semaphore.Release();
+                break;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error dequeuing from queue");
+                semaphore.Release();
+                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+                continue;
+            }
+
+            if (item is null)
+            {
+                semaphore.Release();
+                emptyPolls++;
+                var delay = emptyPolls >= 10 ? 1000 : 250;
+
+                if (emptyPolls % 60 == 0)
+                {
+                    try { await CheckQueueHealthAsync(stoppingToken); }
+                    catch (Exception ex) { _logger.LogDebug(ex, "Queue health check failed (non-fatal)"); }
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(delay), stoppingToken);
+                continue;
+            }
+
+            emptyPolls = 0;
+
+            // Spawn processing task — semaphore released when done
+            var task = ProcessItemAsync(pgq, item, semaphore, stoppingToken);
+            lock (activeTasks)
+            {
+                activeTasks.RemoveAll(t => t.IsCompleted);
+                activeTasks.Add(task);
+            }
+        }
+
+        // Graceful shutdown: wait for in-flight tasks
+        Task[] remaining;
+        lock (activeTasks) { remaining = activeTasks.Where(t => !t.IsCompleted).ToArray(); }
+        if (remaining.Length > 0)
+        {
+            _logger.LogInformation("WebhookProcessingWorker shutting down, waiting for {Count} in-flight tasks", remaining.Length);
+            await Task.WhenAll(remaining);
+        }
+
+        _logger.LogInformation("WebhookProcessingWorker stopped");
+    }
+
+    private async Task ProcessItemAsync(
+        Infrastructure.Messaging.PostgresMessageQueue pgq,
+        Infrastructure.Messaging.PostgresMessageQueue.DequeuedItem item,
+        SemaphoreSlim semaphore,
+        CancellationToken stoppingToken)
+    {
+        try
+        {
+            _logger.LogInformation(
+                "Dequeued message for business {BusinessId} ({BusinessName})",
+                item.Message.BusinessContext.BusinessId,
+                item.Message.BusinessContext.BusinessName);
+
+            // Create a per-item timeout linked to the stopping token
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            timeoutCts.CancelAfter(_processingTimeout);
+
+            // Start heartbeat to keep claim alive during processing
+            using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            var heartbeatTask = RunHeartbeatAsync(pgq, item.ItemId, heartbeatCts.Token);
+
+            try
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var processor = scope.ServiceProvider.GetRequiredService<IWebhookProcessor>();
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                await processor.ProcessAsync(item.Message.Payload, item.Message.BusinessContext, timeoutCts.Token);
+                sw.Stop();
+
+                // Stop heartbeat before completing
+                await heartbeatCts.CancelAsync();
+
+                await pgq.CompleteAsync(item.ItemId, stoppingToken);
+                Diagnostics.AppMetrics.RecordProcessed(sw.Elapsed.TotalMilliseconds);
+
+                _logger.LogInformation(
+                    "Processed message for business {BusinessId}",
+                    item.Message.BusinessContext.BusinessId);
+            }
+            catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+            {
+                // Processing timeout (not shutdown)
+                await heartbeatCts.CancelAsync();
+                var msg = $"Processing timed out after {_processingTimeout.TotalMinutes}m";
+                _logger.LogError("WORKER TIMEOUT: {Message} for business {BusinessId}", msg, item.Message.BusinessContext.BusinessId);
+                Diagnostics.AppMetrics.RecordFailed();
+
+                try
+                {
+                    var isTerminal = await pgq.FailAsync(item.ItemId, item.AttemptCount, msg, stoppingToken);
+                    if (isTerminal)
+                        await SendFallbackReplyAsync(item.Message, stoppingToken);
+                }
+                catch (Exception failEx) { _logger.LogError(failEx, "Failed to record timeout failure for queue item"); }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                // Graceful shutdown — don't fail the item, let it be re-claimed
+                await heartbeatCts.CancelAsync();
+                _logger.LogInformation("Processing interrupted by shutdown for business {BusinessId}", item.Message.BusinessContext.BusinessId);
+            }
+            catch (Exception ex)
+            {
+                await heartbeatCts.CancelAsync();
+                _logger.LogError(ex, "Error processing queued webhook message");
+                Diagnostics.AppMetrics.RecordFailed();
+
+                try
+                {
+                    var isTerminal = await pgq.FailAsync(item.ItemId, item.AttemptCount, ex.Message, stoppingToken);
+                    if (isTerminal)
+                        await SendFallbackReplyAsync(item.Message, stoppingToken);
+                }
+                catch (Exception failEx) { _logger.LogError(failEx, "Failed to return queue item for retry"); }
+
+                await Task.Delay(TimeSpan.FromSeconds(2), stoppingToken);
+            }
+            finally
+            {
+                // Ensure heartbeat is stopped
+                if (!heartbeatCts.IsCancellationRequested)
+                    await heartbeatCts.CancelAsync();
+                try { await heartbeatTask; } catch { /* heartbeat cancellation is expected */ }
+            }
+        }
+        finally
+        {
+            semaphore.Release();
+        }
+    }
+
+    /// <summary>
+    /// Periodically renews the claim lease so long-running processing
+    /// does not cause the item to be re-claimed by another cycle.
+    /// Renews every 5 minutes (well within the 15-minute claim timeout).
+    /// </summary>
+    private async Task RunHeartbeatAsync(
+        Infrastructure.Messaging.PostgresMessageQueue pgq,
+        Guid itemId,
+        CancellationToken ct)
+    {
+        try
+        {
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(TimeSpan.FromMinutes(5), ct);
+                await pgq.RenewClaimAsync(itemId, ct);
+                _logger.LogDebug("QUEUE HEARTBEAT: renewed claim for item {Id}", itemId);
+            }
+        }
+        catch (OperationCanceledException) { /* expected when processing completes */ }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "QUEUE HEARTBEAT: failed to renew claim for item {Id} (non-fatal)", itemId);
+        }
+    }
+
+    /// <summary>
+    /// Fallback sequential loop for non-Postgres queues (InMemory dev mode).
+    /// Preserves original behavior exactly.
+    /// </summary>
+    private async Task RunSequentialAsync(CancellationToken stoppingToken)
+    {
         var emptyPolls = 0;
 
         while (!stoppingToken.IsCancellationRequested)
@@ -39,40 +251,26 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 {
                     emptyPolls++;
                     var delay = emptyPolls >= 10 ? 1000 : 250;
-
-                    // Periodic queue health check (~every 60s of idle)
-                    if (emptyPolls % 60 == 0 && _queue is WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue)
-                    {
-                        try { await CheckQueueHealthAsync(stoppingToken); }
-                        catch (Exception ex) { _logger.LogDebug(ex, "Queue health check failed (non-fatal)"); }
-                    }
-
                     await Task.Delay(TimeSpan.FromMilliseconds(delay), stoppingToken);
                     continue;
                 }
 
                 emptyPolls = 0;
 
-                _logger.LogInformation(
-                    "Dequeued message for business {BusinessId} ({BusinessName})",
-                    message.BusinessContext.BusinessId,
-                    message.BusinessContext.BusinessName);
-
                 using var scope = _scopeFactory.CreateScope();
                 var processor = scope.ServiceProvider.GetRequiredService<IWebhookProcessor>();
 
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                timeoutCts.CancelAfter(_processingTimeout);
+
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                await processor.ProcessAsync(message.Payload, message.BusinessContext, stoppingToken);
+                await processor.ProcessAsync(message.Payload, message.BusinessContext, timeoutCts.Token);
                 sw.Stop();
 
-                if (_queue is WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue pgq)
+                if (_queue is Infrastructure.Messaging.PostgresMessageQueue pgq)
                     await pgq.CompleteLastAsync(stoppingToken);
 
                 Diagnostics.AppMetrics.RecordProcessed(sw.Elapsed.TotalMilliseconds);
-
-                _logger.LogInformation(
-                    "Processed message for business {BusinessId}",
-                    message.BusinessContext.BusinessId);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -83,15 +281,13 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 _logger.LogError(ex, "Error processing queued webhook message");
                 Diagnostics.AppMetrics.RecordFailed();
 
-                if (_queue is WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue pgqFail)
+                if (_queue is Infrastructure.Messaging.PostgresMessageQueue pgqFail)
                 {
                     try
                     {
                         var isTerminal = await pgqFail.FailLastAsync(ex.Message, stoppingToken);
                         if (isTerminal && message is not null)
-                        {
                             await SendFallbackReplyAsync(message, stoppingToken);
-                        }
                     }
                     catch (Exception failEx) { _logger.LogError(failEx, "Failed to return queue item for retry"); }
                 }
@@ -100,12 +296,11 @@ public sealed class WebhookProcessingWorker : BackgroundService
             }
         }
 
-        _logger.LogInformation("WebhookProcessingWorker stopped");
+        _logger.LogInformation("WebhookProcessingWorker stopped (sequential mode)");
     }
 
     private async Task SendFallbackReplyAsync(QueuedMessage message, CancellationToken ct)
     {
-        // Extract the customer phone from the first inbound message in the payload
         var customerPhone = message.Payload.Entry
             .SelectMany(e => e.Changes)
             .Select(c => c.Value)
@@ -164,7 +359,7 @@ public sealed class WebhookProcessingWorker : BackgroundService
 
     private async Task CheckQueueHealthAsync(CancellationToken ct)
     {
-        if (_queue is not WhatsAppSaaS.Infrastructure.Messaging.PostgresMessageQueue pgq) return;
+        if (_queue is not Infrastructure.Messaging.PostgresMessageQueue pgq) return;
 
         await using var conn = new Npgsql.NpgsqlConnection(pgq.ConnectionString);
         await conn.OpenAsync(ct);

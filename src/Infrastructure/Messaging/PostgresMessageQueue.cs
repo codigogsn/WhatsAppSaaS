@@ -84,12 +84,21 @@ public sealed class PostgresMessageQueue : IMessageQueue
         }
     }
 
-    public async ValueTask<QueuedMessage?> DequeueAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// Result of a dequeue operation, carrying the DB row ID and attempt count
+    /// so each concurrent worker can independently complete/fail its own item.
+    /// </summary>
+    public sealed record DequeuedItem(QueuedMessage Message, Guid ItemId, int AttemptCount);
+
+    /// <summary>
+    /// Dequeue with explicit item tracking for concurrent workers.
+    /// Returns null if queue is empty.
+    /// </summary>
+    public async ValueTask<DequeuedItem?> DequeueItemAsync(CancellationToken cancellationToken = default)
     {
         await using var conn = new NpgsqlConnection(_connectionString);
         await conn.OpenAsync(cancellationToken);
 
-        // Atomic claim: SELECT + UPDATE in one statement using CTE with FOR UPDATE SKIP LOCKED
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             WITH next AS (
@@ -129,24 +138,31 @@ public sealed class PostgresMessageQueue : IMessageQueue
         catch (JsonException ex)
         {
             _logger.LogError(ex, "QUEUE: corrupt payload in item {Id}, marking processed", id);
-            await MarkProcessedAsync(conn, id, "corrupt_payload: " + ex.Message, cancellationToken);
+            await MarkProcessedAsync(id, "corrupt_payload: " + ex.Message, cancellationToken);
             return null;
         }
 
         if (message is null)
         {
-            await MarkProcessedAsync(conn, id, "null_after_deserialize", cancellationToken);
+            await MarkProcessedAsync(id, "null_after_deserialize", cancellationToken);
             return null;
         }
 
-        // Track the DB row ID and attempt count so the worker can mark complete/fail
-        _lastDequeuedItemId = id;
-        _lastDequeuedAttemptCount = attemptCount;
-        return message;
+        return new DequeuedItem(message, id, attemptCount);
     }
 
-    // Tracks the last dequeued item so the worker can complete/fail it.
-    // Thread-safe because there is only one worker consuming sequentially.
+    public async ValueTask<QueuedMessage?> DequeueAsync(CancellationToken cancellationToken = default)
+    {
+        var item = await DequeueItemAsync(cancellationToken);
+        if (item is null) return null;
+
+        // Legacy single-item tracking for backward compatibility
+        _lastDequeuedItemId = item.ItemId;
+        _lastDequeuedAttemptCount = item.AttemptCount;
+        return item.Message;
+    }
+
+    // Legacy single-item tracking — kept for backward compatibility
     private Guid? _lastDequeuedItemId;
     private int _lastDequeuedAttemptCount;
 
@@ -156,37 +172,32 @@ public sealed class PostgresMessageQueue : IMessageQueue
     /// <summary>Returns the attempt count of the last dequeued item (already incremented during dequeue).</summary>
     public int LastDequeuedAttemptCount => _lastDequeuedAttemptCount;
 
-    public async Task CompleteLastAsync(CancellationToken ct)
+    // ── Explicit ID-based complete/fail (concurrent-safe) ──
+
+    /// <summary>Mark a specific item as successfully processed.</summary>
+    public async Task CompleteAsync(Guid itemId, CancellationToken ct)
     {
-        if (_lastDequeuedItemId is not { } itemId) return;
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync(ct);
-        await MarkProcessedAsync(conn, itemId, null, ct);
+        await MarkProcessedAsync(itemId, null, ct);
         _logger.LogDebug("QUEUE COMPLETED: item {Id}", itemId);
-        _lastDequeuedItemId = null;
     }
 
     /// <summary>
-    /// Records a processing failure. Returns true when max retries are exhausted (terminal failure).
+    /// Record a processing failure for a specific item.
+    /// Returns true when max retries exhausted (terminal failure).
     /// </summary>
-    public async Task<bool> FailLastAsync(string error, CancellationToken ct)
+    public async Task<bool> FailAsync(Guid itemId, int attemptCount, string error, CancellationToken ct)
     {
-        if (_lastDequeuedItemId is not { } itemId) return false;
-        await using var conn = new NpgsqlConnection(_connectionString);
-        await conn.OpenAsync(ct);
-
         const int maxAttempts = 5;
-        if (_lastDequeuedAttemptCount >= maxAttempts)
+        if (attemptCount >= maxAttempts)
         {
-            // Terminal failure — mark as processed so it's not retried
-            await MarkProcessedAsync(conn, itemId, "PERMANENT_FAILURE: " + (error.Length > 2000 ? error[..2000] : error), ct);
-            _logger.LogWarning("QUEUE PERMANENT FAILURE: item {Id} exhausted all {MaxAttempts} retries, marked as processed", itemId, maxAttempts);
-            _lastDequeuedItemId = null;
+            var truncated = error.Length > 2000 ? error[..2000] : error;
+            await MarkProcessedAsync(itemId, "PERMANENT_FAILURE: " + truncated, ct);
+            _logger.LogWarning("QUEUE PERMANENT FAILURE: item {Id} exhausted all {MaxAttempts} retries", itemId, maxAttempts);
             return true;
         }
 
-        // Backoff computed in SQL from AttemptCount (already incremented during dequeue):
-        // 1→30s, 2→2min, 3→10min, 4→30min
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             UPDATE "WebhookQueue"
@@ -204,12 +215,51 @@ public sealed class PostgresMessageQueue : IMessageQueue
         cmd.Parameters.AddWithValue("err", error.Length > 2000 ? error[..2000] : error);
         await cmd.ExecuteNonQueryAsync(ct);
         _logger.LogDebug("QUEUE FAILED: item {Id} scheduled for retry with backoff", itemId);
-        _lastDequeuedItemId = null;
         return false;
     }
 
-    private static async Task MarkProcessedAsync(NpgsqlConnection conn, Guid id, string? error, CancellationToken ct)
+    /// <summary>
+    /// Extend the claim lease for an item being actively processed.
+    /// Prevents re-claim by other workers during long-running processing.
+    /// </summary>
+    public async Task RenewClaimAsync(Guid itemId, CancellationToken ct)
     {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE "WebhookQueue"
+            SET "ClaimedAtUtc" = now()
+            WHERE "Id" = @id AND "ProcessedAtUtc" IS NULL
+        """;
+        cmd.Parameters.AddWithValue("id", itemId);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
+    // ── Legacy instance-based complete/fail (backward compat) ──
+
+    public async Task CompleteLastAsync(CancellationToken ct)
+    {
+        if (_lastDequeuedItemId is not { } itemId) return;
+        await CompleteAsync(itemId, ct);
+        _lastDequeuedItemId = null;
+    }
+
+    /// <summary>
+    /// Records a processing failure. Returns true when max retries are exhausted (terminal failure).
+    /// </summary>
+    public async Task<bool> FailLastAsync(string error, CancellationToken ct)
+    {
+        if (_lastDequeuedItemId is not { } itemId) return false;
+        var result = await FailAsync(itemId, _lastDequeuedAttemptCount, error, ct);
+        _lastDequeuedItemId = null;
+        return result;
+    }
+
+    private async Task MarkProcessedAsync(Guid id, string? error, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             UPDATE "WebhookQueue"
