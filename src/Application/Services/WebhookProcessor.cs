@@ -126,13 +126,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     // Ensure conversation row exists before idempotency check (FK dependency)
                     var state = await _stateStore.GetOrCreateAsync(conversationId, businessContext.BusinessId, cancellationToken);
 
-                    // Idempotency: read-only duplicate check BEFORE processing.
-                    // The actual mark happens AFTER successful processing to avoid
-                    // permanently losing messages when processing fails transiently.
+                    // Atomic idempotency claim: INSERT under unique index BEFORE any side effects.
+                    // If another worker already claimed this message, we get false and skip entirely.
+                    // This prevents duplicate replies, state mutations, and order creation under
+                    // concurrent worker execution.
                     var msgId = message.Id;
                     if (!string.IsNullOrWhiteSpace(msgId))
                     {
-                        if (await _stateStore.IsMessageProcessedAsync(conversationId, msgId, cancellationToken))
+                        var claimed = await _stateStore.MarkMessageProcessedAsync(conversationId, msgId, cancellationToken);
+                        if (!claimed)
                         {
                             _logger.LogInformation("DEDUP: ignoring duplicate message {MessageId} in {ConversationId}", msgId, conversationId);
                             continue;
@@ -1766,19 +1768,25 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                     state.LastActivityUtc = DateTime.UtcNow;
                     await _stateStore.SaveAsync(conversationId, state, cancellationToken);
-
-                    // Mark processed AFTER success — ensures transient failures are retried
-                    // instead of being permanently lost. Dedup is still safe: the read-only
-                    // check above filters duplicates, and this atomic insert-or-skip via DB
-                    // unique index handles any residual race.
-                    if (!string.IsNullOrWhiteSpace(msgId))
-                        await _stateStore.MarkMessageProcessedAsync(conversationId, msgId, cancellationToken);
                     }
                     catch (Exception ex)
                     {
                         _logger.LogError(ex,
                             "Failed processing message {MessageId} in conversation {ConversationId}",
                             message.Id, conversationId);
+
+                        // Unclaim the processed-message row so queue-level retry can reprocess.
+                        // Without this, the atomic claim would permanently block retries.
+                        if (!string.IsNullOrWhiteSpace(message.Id))
+                        {
+                            try { await _stateStore.UnclaimMessageAsync(conversationId, message.Id, cancellationToken); }
+                            catch (Exception uce)
+                            {
+                                _logger.LogWarning(uce,
+                                    "Failed to unclaim message {MessageId} — retry may see false duplicate", message.Id);
+                            }
+                        }
+
                         throw;
                     }
                 }

@@ -115,6 +115,17 @@ public sealed class ConversationStateStore : IConversationStateStore
         }
     }
 
+    public async Task UnclaimMessageAsync(string conversationId, string messageId, CancellationToken ct = default)
+    {
+        var entity = await _db.ProcessedMessages
+            .FirstOrDefaultAsync(p => p.ConversationId == conversationId && p.MessageId == messageId, ct);
+        if (entity is not null)
+        {
+            _db.ProcessedMessages.Remove(entity);
+            await _db.SaveChangesAsync(ct);
+        }
+    }
+
     private static bool IsDuplicateKeyException(DbUpdateException ex)
     {
         // Npgsql: SqlState 23505 = unique_violation

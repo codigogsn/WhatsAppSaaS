@@ -213,6 +213,8 @@ public interface IConversationStateStore
     Task<bool> IsMessageProcessedAsync(string conversationId, string messageId, CancellationToken ct = default);
     /// <summary>Returns true if newly marked; false if already processed (duplicate).</summary>
     Task<bool> MarkMessageProcessedAsync(string conversationId, string messageId, CancellationToken ct = default);
+    /// <summary>Remove a processed-message claim so queue-level retry can reprocess after transient failure.</summary>
+    Task UnclaimMessageAsync(string conversationId, string messageId, CancellationToken ct = default);
     Task PurgeOldStatesAsync(TimeSpan ttl, CancellationToken ct = default);
 }
 
