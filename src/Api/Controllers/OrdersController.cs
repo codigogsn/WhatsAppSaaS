@@ -739,29 +739,37 @@ public sealed class OrdersController : ControllerBase
                 "GetPaymentProof: orderId={OrderId}, businessId={BusinessId}, mediaId={MediaId}",
                 id, order.BusinessId, order.PaymentProofMediaId);
 
-            // Tenant isolation: resolve business access token
-            string? bizToken = null;
-            if (order.BusinessId.HasValue)
+            // Tenant isolation: resolve business access token.
+            // Fail closed — never fall back to a global token for tenant-bound media.
+            if (!order.BusinessId.HasValue)
             {
-                try
-                {
-                    var biz = await _context.Businesses.AsNoTracking()
-                        .Where(b => b.Id == order.BusinessId.Value && b.IsActive)
-                        .Select(b => new { b.AccessToken })
-                        .FirstOrDefaultAsync(ct);
-                    bizToken = biz?.AccessToken;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex,
-                        "GetPaymentProof: failed to look up business {BusinessId} for order {OrderId}. Falling back to env/appsettings token.",
-                        order.BusinessId, id);
-                }
+                _logger.LogError("GetPaymentProof: order {OrderId} has no BusinessId — cannot resolve tenant token", id);
+                return StatusCode(500, new { error = "No se pudo verificar la cuenta del negocio para este pedido." });
+            }
 
-                if (string.IsNullOrWhiteSpace(bizToken))
-                    _logger.LogWarning(
-                        "GetPaymentProof: no access token found for business {BusinessId} (order {OrderId}). Will fall back to env/appsettings token.",
-                        order.BusinessId, id);
+            string? bizToken = null;
+            try
+            {
+                var biz = await _context.Businesses.AsNoTracking()
+                    .Where(b => b.Id == order.BusinessId.Value && b.IsActive)
+                    .Select(b => new { b.AccessToken })
+                    .FirstOrDefaultAsync(ct);
+                bizToken = biz?.AccessToken;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex,
+                    "GetPaymentProof: failed to look up business {BusinessId} for order {OrderId} — denying access",
+                    order.BusinessId, id);
+                return StatusCode(502, new { error = "No se pudo obtener las credenciales del negocio. Intenta de nuevo." });
+            }
+
+            if (string.IsNullOrWhiteSpace(bizToken))
+            {
+                _logger.LogError(
+                    "GetPaymentProof: no access token for business {BusinessId} (order {OrderId}) — denying access to prevent cross-tenant fallback",
+                    order.BusinessId, id);
+                return StatusCode(502, new { error = "El negocio no tiene token de acceso configurado. Contacte al administrador." });
             }
 
             var result = await _whatsAppClient.GetMediaAsync(order.PaymentProofMediaId, bizToken, ct);
