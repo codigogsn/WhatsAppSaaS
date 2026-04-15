@@ -4469,8 +4469,10 @@ function applyGlobalModeUI() {
     var msg = document.getElementById('msg');
     if (msg) msg.textContent = '';
   }
-  // Sync view wrappers with business mode
-  initDashboardView();
+  // Only run initDashboardView in global mode (no business selected) to hide
+  // screen containers. Skip when a business is selected — otherwise every
+  // auto-refresh tick would force navigateTo('overview'), resetting the screen.
+  if (global) initDashboardView();
   // Update sidebar disabled states for global vs business mode
   if (typeof updateSidebarGlobalState === 'function') updateSidebarGlobalState();
 }
