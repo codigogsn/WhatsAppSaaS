@@ -2810,15 +2810,6 @@ Tipo: burger"></textarea>
     </div>
   </div>
 
-  <!-- ═══ BLOCK 3: Operational Pipeline Status ═══ -->
-  <div id="statusStrip" class="status-strip">
-    <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pendiente</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
-    <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparando</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
-    <div class="status-chip"><div class="status-chip-label" style="color:var(--accent);">En Camino</div><div class="status-chip-value" style="color:var(--accent);" id="kpiOut">0</div></div>
-    <div class="status-chip"><div class="status-chip-label" style="color:var(--success);">Completado</div><div class="status-chip-value" style="color:var(--success);" id="kpiCompleted">0</div></div>
-    <div class="status-chip"><div class="status-chip-label" style="color:var(--danger);">Cancelado</div><div class="status-chip-value" style="color:var(--danger);" id="kpiCancelled">0</div></div>
-  </div>
-
   <!-- Inline Intelligence Strip -->
   <div class="intel-strip" id="intelStrip">
     <div class="intel-strip-badge stable" id="intelStripBadge">Estable</div>
@@ -2917,6 +2908,15 @@ Tipo: burger"></textarea>
       <div class="hf-empty" id="handoffEmpty">No hay conversaciones activas</div>
     </div>
   </details>
+
+  <!-- Pipeline Status Strip -->
+  <div id="statusStrip" class="status-strip">
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pendiente</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparando</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--accent);">En Camino</div><div class="status-chip-value" style="color:var(--accent);" id="kpiOut">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--success);">Completado</div><div class="status-chip-value" style="color:var(--success);" id="kpiCompleted">0</div></div>
+    <div class="status-chip"><div class="status-chip-label" style="color:var(--danger);">Cancelado</div><div class="status-chip-value" style="color:var(--danger);" id="kpiCancelled">0</div></div>
+  </div>
 
   <!-- Filters -->
   <div id="ordersFilters" class="filters">
