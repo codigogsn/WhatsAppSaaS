@@ -2298,13 +2298,13 @@
   <div class="shell-sidebar" id="shellSidebar" style="display:none;">
     <!-- Navigation -->
     <div class="sb-group">
-      <button class="sb-btn active" id="sbOverview" onclick="setDashboardView('overview')" title="Overview">
+      <button class="sb-btn active" id="sbOverview" onclick="navigateTo('overview')" title="Overview">
         <span>&#9634;</span><span class="sb-tooltip">Overview</span>
       </button>
-      <button class="sb-btn" id="sbOrders" onclick="setDashboardView('orders')" title="Pedidos">
+      <button class="sb-btn" id="sbOrders" onclick="navigateTo('orders')" title="Pedidos">
         <span>&#128230;</span><span class="sb-tooltip">Pedidos</span>
       </button>
-      <button class="sb-btn" id="sbCustomers" onclick="toggleCustomersPanel()" title="Customers">
+      <button class="sb-btn" id="sbCustomers" onclick="navigateTo('customers')" title="Customers">
         <span>&#128101;</span><span class="sb-tooltip">Customers</span>
       </button>
     </div>
@@ -2314,13 +2314,13 @@
       <button class="sb-btn" id="sbNewBiz" onclick="openCreateBiz()" title="Nuevo Negocio">
         <span>&#43;</span><span class="sb-tooltip">Nuevo Negocio</span>
       </button>
-      <button class="sb-btn" id="sbBizAdmin" onclick="toggleBizPanel()" title="Administrar Negocio" style="display:none;">
+      <button class="sb-btn" id="sbBizAdmin" onclick="navigateTo('bizadmin')" title="Administrar Negocio" style="display:none;">
         <span>&#127970;</span><span class="sb-tooltip">Negocio</span>
       </button>
       <button class="sb-btn" id="sbMenuMgr" onclick="openMenuManager()" title="Menu Manager" style="display:none;">
         <span>&#128221;</span><span class="sb-tooltip">Menu</span>
       </button>
-      <button class="sb-btn" id="sbUsersAdmin" onclick="toggleUsersPanel()" title="Usuarios" style="display:none;">
+      <button class="sb-btn" id="sbUsersAdmin" onclick="navigateTo('users')" title="Usuarios" style="display:none;">
         <span>&#128100;</span><span class="sb-tooltip">Usuarios</span>
       </button>
     </div>
@@ -2396,15 +2396,15 @@
   <!-- Row C: Toolbar / Module Actions -->
   <div class="nav-bar">
     <div class="view-tabs" id="viewTabs">
-      <button class="view-tab active" id="tabOverview" onclick="setDashboardView('overview')">Overview</button>
-      <button class="view-tab" id="tabOrders" onclick="setDashboardView('orders')">Pedidos</button>
+      <button class="view-tab active" id="tabOverview" onclick="navigateTo('overview')">Overview</button>
+      <button class="view-tab" id="tabOrders" onclick="navigateTo('orders')">Pedidos</button>
     </div>
     <div class="toolbar-sep"></div>
     <button class="primary" onclick="openCreateBiz()" id="btnNewBiz">+ Nuevo Negocio</button>
-    <button onclick="toggleBizPanel()" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
+    <button onclick="navigateTo('bizadmin')" id="btnBizAdmin" style="display:none;">Administrar Negocio</button>
     <button onclick="openMenuManager()" id="btnMenuMgr" style="display:none;">Menu Manager</button>
-    <button onclick="toggleUsersPanel()" id="btnUsersAdmin" style="display:none;">Usuarios</button>
-    <button onclick="toggleCustomersPanel()" id="btnCustomers">Customers</button>
+    <button onclick="navigateTo('users')" id="btnUsersAdmin" style="display:none;">Usuarios</button>
+    <button onclick="navigateTo('customers')" id="btnCustomers">Customers</button>
     <div class="toolbar-sep"></div>
     <button onclick="openDashboardConfig()" id="btnDashConfig" title="Personalizar dashboard" style="font-size:13px;padding:4px 8px;">&#9881;</button>
   </div>
@@ -3149,49 +3149,76 @@ function toggleTheme(){
   applyTheme(next);
 }
 
-// ═══ Dashboard View Controller ═══
-var _currentView = 'overview';
+// ═══ Primary Screen Navigation — Single Source of Truth ═══
+var _currentScreen = 'overview';
 
-function setDashboardView(view) {
-  _currentView = view;
-  var overview = document.getElementById('viewOverview');
-  var orders = document.getElementById('viewOrders');
+// Screen registry: maps screen name → { containerId, sidebarBtnId, tabId?, onShow? }
+var _screenRegistry = {
+  overview:  { container: 'viewOverview',    sidebar: 'sbOverview',    tab: 'tabOverview' },
+  orders:    { container: 'viewOrders',      sidebar: 'sbOrders',      tab: 'tabOrders' },
+  customers: { container: 'customersPanel',  sidebar: 'sbCustomers' },
+  bizadmin:  { container: 'bizPanel',        sidebar: 'sbBizAdmin' },
+  users:     { container: 'usersPanel',      sidebar: 'sbUsersAdmin' }
+};
+
+// Unified navigation function — THE single entry point for all primary screen changes
+function navigateTo(screen) {
+  var reg = _screenRegistry[screen];
+  if (!reg) return;
+
+  // Business-required screens: guard before navigating
+  if (screen !== 'overview' && screen !== 'orders') {
+    if (typeof getBusinessId === 'function' && !getBusinessId()) {
+      showToast('Select a business first', 'warn');
+      return;
+    }
+  }
+
+  _currentScreen = screen;
+
+  // 1. Hide ALL primary screen containers
+  for (var key in _screenRegistry) {
+    var el = document.getElementById(_screenRegistry[key].container);
+    if (el) el.style.display = 'none';
+  }
+
+  // 2. Show ONLY the target screen
+  var target = document.getElementById(reg.container);
+  if (target) target.style.display = '';
+
+  // 3. Clear ALL sidebar active states, then activate the correct one
+  clearSidebarActiveStates();
+  setSidebarActive(reg.sidebar, true);
+
+  // 4. Sync legacy tab bar (Overview/Orders tabs)
   var tabO = document.getElementById('tabOverview');
   var tabP = document.getElementById('tabOrders');
-  if (!overview || !orders) return;
+  if (tabO) tabO.classList.toggle('active', screen === 'overview');
+  if (tabP) tabP.classList.toggle('active', screen === 'orders');
 
-  if (view === 'orders') {
-    overview.style.display = 'none';
-    orders.style.display = '';
-    if (tabO) tabO.classList.remove('active');
-    if (tabP) tabP.classList.add('active');
-  } else {
-    overview.style.display = '';
-    orders.style.display = 'none';
-    if (tabO) tabO.classList.add('active');
-    if (tabP) tabP.classList.remove('active');
-  }
-  // Sync sidebar active state — clear ALL sidebar buttons first, then set the correct one
-  if (typeof ENABLE_SIDEBAR !== 'undefined' && ENABLE_SIDEBAR) {
-    clearSidebarActiveStates();
-    var sbO = document.getElementById('sbOverview');
-    var sbP = document.getElementById('sbOrders');
-    if (sbO) sbO.classList.toggle('active', view === 'overview');
-    if (sbP) sbP.classList.toggle('active', view === 'orders');
-  }
+  // 5. Trigger data load for screens that need it
+  if (screen === 'customers') { if (typeof loadCrm === 'function') loadCrm(); }
+  if (screen === 'bizadmin')  { var bid = getBusinessId(); if (bid && typeof loadBizProfile === 'function') loadBizProfile(bid); }
+  if (screen === 'users')     { if (typeof loadUsers === 'function') loadUsers(); }
 }
+
+// Legacy compatibility: setDashboardView delegates to navigateTo
+function setDashboardView(view) {
+  navigateTo(view);
+}
+var _currentView = _currentScreen; // legacy alias
 
 // Initialize default view (called after page load)
 function initDashboardView() {
-  // In global/all-business mode, hide both view wrappers (existing logic handles internal elements)
   if (typeof getBusinessId === 'function' && !getBusinessId()) {
-    var overview = document.getElementById('viewOverview');
-    var orders = document.getElementById('viewOrders');
-    if (overview) overview.style.display = 'none';
-    if (orders) orders.style.display = 'none';
+    // In global/all-business mode, hide all screens
+    for (var key in _screenRegistry) {
+      var el = document.getElementById(_screenRegistry[key].container);
+      if (el) el.style.display = 'none';
+    }
     return;
   }
-  setDashboardView('overview');
+  navigateTo('overview');
 }
 
 // ═══ System Toast (replaces browser alerts) ═══
@@ -3519,15 +3546,13 @@ function onBusinessSelect(){
   const bid = document.getElementById('businessSelect').value;
   if (bid) localStorage.setItem('BUSINESS_ID', bid); else localStorage.removeItem('BUSINESS_ID');
   updateBizAdminButton();
-  // Close ALL module panels on any business switch — prevents stale data from previous business
-  closeAllPanels();
+  // Navigate to overview — this hides all other screens and resets sidebar state
+  navigateTo('overview');
   // Reset assist dock init guard and reconfigure immediately for new context
   window._assistInit = false;
   initAssistDock();
   // Update sidebar disabled states for global vs business mode
   updateSidebarGlobalState();
-  // Clear sidebar active states for panels being closed
-  clearSidebarActiveStates();
   // Protect UI during async transition
   document.body.classList.add('dash-loading');
   load().finally(function(){ document.body.classList.remove('dash-loading'); });
@@ -3716,19 +3741,12 @@ function bizPanelNav(section) {
   });
 }
 
+// Legacy toggle — delegates to unified navigation
 function toggleBizPanel(){
-  const panel = document.getElementById('bizPanel');
-  if (panel.style.display === 'none') {
-    const bid = getBusinessId();
-    if (!bid) { showToast('Select a business first', 'warn'); return; }
-    closeAllPanels('bizPanel');
-    clearSidebarActiveStates();
-    loadBizProfile(bid);
-    panel.style.display = '';
-    setSidebarActive('sbBizAdmin', true);
+  if (_currentScreen === 'bizadmin') {
+    navigateTo('overview'); // close → return to overview
   } else {
-    panel.style.display = 'none';
-    setSidebarActive('sbBizAdmin', false);
+    navigateTo('bizadmin');
   }
 }
 
@@ -5628,35 +5646,20 @@ function updateUsersButton(){
   }
 }
 
-// ── Users Panel ──
+// ── Legacy toggles — delegate to unified navigation ──
 async function toggleUsersPanel(){
-  if (!getBusinessId()) { showToast('Select a business to manage users', 'warn'); return; }
-  const panel = document.getElementById('usersPanel');
-  if (panel.style.display === 'none') {
-    closeAllPanels('usersPanel');
-    clearSidebarActiveStates();
-    panel.style.display = '';
-    setSidebarActive('sbUsersAdmin', true);
-    await loadUsers();
+  if (_currentScreen === 'users') {
+    navigateTo('overview');
   } else {
-    panel.style.display = 'none';
-    setSidebarActive('sbUsersAdmin', false);
+    navigateTo('users');
   }
 }
 
-// ── Customers CRM ──
 function toggleCustomersPanel(){
-  if (!getBusinessId()) { showToast('Select a business to view customers', 'warn'); return; }
-  const panel = document.getElementById('customersPanel');
-  if (panel.style.display === 'none') {
-    closeAllPanels('customersPanel');
-    clearSidebarActiveStates();
-    panel.style.display = '';
-    setSidebarActive('sbCustomers', true);
-    loadCrm();
+  if (_currentScreen === 'customers') {
+    navigateTo('overview');
   } else {
-    panel.style.display = 'none';
-    setSidebarActive('sbCustomers', false);
+    navigateTo('customers');
   }
 }
 
