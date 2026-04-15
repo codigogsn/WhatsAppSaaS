@@ -3915,7 +3915,7 @@ document.getElementById('newBizType')?.addEventListener('change', async function
   const preview = document.getElementById('templatePreview');
   if (!this.value) { preview.style.display = 'none'; preview.innerHTML = ''; return; }
   try {
-    const res = await fetch('/api/admin/businesses/templates/' + this.value);
+    const res = await fetch('/api/admin/businesses/templates/' + this.value, { headers: jwtHeaders() });
     if (!res.ok) { preview.style.display = 'none'; return; }
     const t = await res.json();
     let html = '<strong>' + esc(t.name) + '</strong> &mdash; ' + t.totalItems + ' items<br>';
