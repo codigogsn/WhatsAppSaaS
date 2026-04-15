@@ -206,14 +206,28 @@ public sealed class PostgresMessageQueue : IMessageQueue
         const int maxAttempts = 5;
         if (attemptCount >= maxAttempts)
         {
+            // Terminal failure: do NOT mark processed yet. Leave ProcessedAtUtc NULL so the item
+            // remains visible to monitoring/health checks. Set a TERMINAL_FAILURE marker in LastError.
+            // The worker must call CompleteTerminalAsync AFTER fallback delivery succeeds.
             var truncated = error.Length > 2000 ? error[..2000] : error;
-            var rows = await MarkProcessedOwnedAsync(itemId, claimedAtUtc, "PERMANENT_FAILURE: " + truncated, ct);
+            await using var tConn = new NpgsqlConnection(_connectionString);
+            await tConn.OpenAsync(ct);
+            await using var tCmd = tConn.CreateCommand();
+            tCmd.CommandText = """
+                UPDATE "WebhookQueue"
+                SET "LastError" = @err
+                WHERE "Id" = @id AND "ProcessedAtUtc" IS NULL AND "ClaimedAtUtc" = @claimedAt
+            """;
+            tCmd.Parameters.AddWithValue("id", itemId);
+            tCmd.Parameters.AddWithValue("err", "TERMINAL_FAILURE: " + truncated);
+            tCmd.Parameters.AddWithValue("claimedAt", claimedAtUtc);
+            var rows = await tCmd.ExecuteNonQueryAsync(ct);
             if (rows == 0)
             {
                 _logger.LogWarning("QUEUE OWNERSHIP LOST: cannot mark terminal failure for item {Id} — claim was superseded", itemId);
                 return (false, false);
             }
-            _logger.LogWarning("QUEUE PERMANENT FAILURE: item {Id} exhausted all {MaxAttempts} retries", itemId, maxAttempts);
+            _logger.LogWarning("QUEUE TERMINAL FAILURE: item {Id} exhausted all {MaxAttempts} retries — awaiting fallback delivery before marking processed", itemId, maxAttempts);
             return (true, true);
         }
 
@@ -243,6 +257,29 @@ public sealed class PostgresMessageQueue : IMessageQueue
         }
         _logger.LogDebug("QUEUE FAILED: item {Id} scheduled for retry with backoff", itemId);
         return (false, true);
+    }
+
+    /// <summary>
+    /// Mark a terminal-failure item as fully processed AFTER fallback delivery has succeeded.
+    /// Called only after the customer fallback reply was successfully sent.
+    /// If fallback failed, the item remains with ProcessedAtUtc NULL and TERMINAL_FAILURE
+    /// in LastError, visible to monitoring and operator review.
+    /// </summary>
+    public async Task CompleteTerminalAsync(Guid itemId, CancellationToken ct)
+    {
+        await using var conn = new NpgsqlConnection(_connectionString);
+        await conn.OpenAsync(ct);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            UPDATE "WebhookQueue"
+            SET "ProcessedAtUtc" = @now,
+                "LastError" = REPLACE(COALESCE("LastError", ''), 'TERMINAL_FAILURE:', 'PERMANENT_FAILURE_FALLBACK_SENT:')
+            WHERE "Id" = @id AND "ProcessedAtUtc" IS NULL
+        """;
+        cmd.Parameters.AddWithValue("id", itemId);
+        cmd.Parameters.AddWithValue("now", DateTime.UtcNow);
+        await cmd.ExecuteNonQueryAsync(ct);
+        _logger.LogInformation("QUEUE TERMINAL COMPLETED: item {Id} marked processed after successful fallback delivery", itemId);
     }
 
     /// <summary>
@@ -289,9 +326,21 @@ public sealed class PostgresMessageQueue : IMessageQueue
         const int maxAttempts = 5;
         if (_lastDequeuedAttemptCount >= maxAttempts)
         {
+            // Terminal failure: set marker but do NOT mark processed yet.
+            // Worker must call CompleteTerminalAsync after fallback delivery succeeds.
             var truncated = error.Length > 2000 ? error[..2000] : error;
-            await MarkProcessedAsync(itemId, "PERMANENT_FAILURE: " + truncated, ct);
-            _logger.LogWarning("QUEUE PERMANENT FAILURE: item {Id} exhausted all {MaxAttempts} retries", itemId, maxAttempts);
+            await using var tconn = new NpgsqlConnection(_connectionString);
+            await tconn.OpenAsync(ct);
+            await using var tcmd = tconn.CreateCommand();
+            tcmd.CommandText = """
+                UPDATE "WebhookQueue"
+                SET "LastError" = @err
+                WHERE "Id" = @id AND "ProcessedAtUtc" IS NULL
+            """;
+            tcmd.Parameters.AddWithValue("id", itemId);
+            tcmd.Parameters.AddWithValue("err", "TERMINAL_FAILURE: " + truncated);
+            await tcmd.ExecuteNonQueryAsync(ct);
+            _logger.LogWarning("QUEUE TERMINAL FAILURE: item {Id} exhausted all {MaxAttempts} retries — awaiting fallback delivery", itemId, maxAttempts);
             _lastDequeuedItemId = null;
             return true;
         }

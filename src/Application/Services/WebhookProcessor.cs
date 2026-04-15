@@ -70,6 +70,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Per-request vertical strategy (resolved from business config)
     private IVerticalStrategy _verticalStrategy = null!;
 
+    // Tracks whether irreversible side effects (WhatsApp sends, order persistence)
+    // have been committed during this processing attempt. When true, the catch block
+    // must NOT unclaim the message — duplicating real-world actions is worse than
+    // accepting that the message won't be retried.
+    private bool _sideEffectsCommitted;
+
     public async Task ProcessAsync(WebhookPayload payload, BusinessContext businessContext, CancellationToken cancellationToken = default)
     {
         if (payload?.Entry is null) return;
@@ -121,6 +127,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         "Processing message: id={MessageId} from={From} type={Type} conversationId={ConversationId}",
                         message.Id, message.From, message.Type, conversationId);
 
+                    _sideEffectsCommitted = false; // Reset for each message in the batch
                     try
                     {
                     // Ensure conversation row exists before idempotency check (FK dependency)
@@ -1775,10 +1782,20 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             "Failed processing message {MessageId} in conversation {ConversationId}",
                             message.Id, conversationId);
 
-                        // Unclaim the processed-message row so queue-level retry can reprocess.
-                        // Without this, the atomic claim would permanently block retries.
-                        if (!string.IsNullOrWhiteSpace(message.Id))
+                        if (_sideEffectsCommitted)
                         {
+                            // Irreversible side effects (WhatsApp sends, order persistence) have already
+                            // been committed. Unclaiming would allow a retry that duplicates those actions.
+                            // Leave the dedup claim in place — accept no-retry over duplicate real-world actions.
+                            _logger.LogWarning(
+                                "DEDUP KEPT: not unclaiming message {MessageId} because irreversible side effects " +
+                                "were already committed (WhatsApp send or order persistence). Retry suppressed to " +
+                                "prevent duplicate real-world actions.",
+                                message.Id);
+                        }
+                        else if (!string.IsNullOrWhiteSpace(message.Id))
+                        {
+                            // No irreversible side effects yet — safe to unclaim for queue-level retry.
                             try { await _stateStore.UnclaimMessageAsync(conversationId, message.Id, cancellationToken); }
                             catch (Exception uce)
                             {
@@ -2250,6 +2267,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             order.Id, order.PaymentMethod, order.CashCurrency, order.CashChangeRequired, order.Items.Count);
 
         await _orderRepository.AddOrderAsync(order, ct);
+        _sideEffectsCommitted = true; // Order persisted — irreversible
 
         _logger.LogInformation("FinalizeOrder: order {OrderId} saved successfully", order.Id);
 
@@ -2435,6 +2453,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             order.SubtotalAmount = order.Items.Sum(i => i.LineTotal ?? 0);
             order.TotalAmount = order.SubtotalAmount;
             await _orderRepository.AddOrderAsync(order, ct);
+            _sideEffectsCommitted = true; // Order persisted — irreversible
 
             var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
             var receipt = Msg.FashionReceipt(
@@ -2655,7 +2674,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private async Task SendAsync(OutgoingMessage msg, Guid businessId, string conversationId, CancellationToken ct)
     {
         var sent = await _whatsAppClient.SendTextMessageAsync(msg, ct);
-        if (!sent)
+        if (sent)
+        {
+            // WhatsApp message delivered — mark irreversible side effect committed.
+            // After this point, unclaiming the dedup record on failure would risk
+            // duplicate sends on retry, which is worse than accepting no-retry.
+            _sideEffectsCommitted = true;
+        }
+        else
         {
             _logger.LogError(
                 "SEND FAILED: to={To} phoneNumberId={PhoneNumberId} businessId={BusinessId} conversation={ConversationId} hasToken={HasToken}",

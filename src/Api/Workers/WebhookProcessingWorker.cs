@@ -180,7 +180,12 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 {
                     var (isTerminal, owned) = await pgq.FailAsync(item.ItemId, item.AttemptCount, claimedAtUtc, msg, stoppingToken);
                     if (isTerminal && owned)
-                        await SendFallbackReplyAsync(item.Message, stoppingToken);
+                    {
+                        var fallbackSent = await SendFallbackReplyAsync(item.Message, stoppingToken);
+                        if (fallbackSent)
+                            await pgq.CompleteTerminalAsync(item.ItemId, stoppingToken);
+                        // If fallback failed, item stays with TERMINAL_FAILURE and ProcessedAtUtc=NULL — visible to monitoring
+                    }
                 }
                 catch (Exception failEx) { _logger.LogError(failEx, "Failed to record timeout failure for queue item"); }
             }
@@ -200,7 +205,12 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 {
                     var (isTerminal, owned) = await pgq.FailAsync(item.ItemId, item.AttemptCount, claimedAtUtc, ex.Message, stoppingToken);
                     if (isTerminal && owned)
-                        await SendFallbackReplyAsync(item.Message, stoppingToken);
+                    {
+                        var fallbackSent = await SendFallbackReplyAsync(item.Message, stoppingToken);
+                        if (fallbackSent)
+                            await pgq.CompleteTerminalAsync(item.ItemId, stoppingToken);
+                        // If fallback failed, item stays with TERMINAL_FAILURE and ProcessedAtUtc=NULL — visible to monitoring
+                    }
                 }
                 catch (Exception failEx) { _logger.LogError(failEx, "Failed to return queue item for retry"); }
 
@@ -316,9 +326,14 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 {
                     try
                     {
+                        var terminalItemId = pgqFail.LastDequeuedItemId;
                         var isTerminal = await pgqFail.FailLastAsync(ex.Message, stoppingToken);
                         if (isTerminal && message is not null)
-                            await SendFallbackReplyAsync(message, stoppingToken);
+                        {
+                            var fallbackSent = await SendFallbackReplyAsync(message, stoppingToken);
+                            if (fallbackSent && terminalItemId.HasValue)
+                                await pgqFail.CompleteTerminalAsync(terminalItemId.Value, stoppingToken);
+                        }
                     }
                     catch (Exception failEx) { _logger.LogError(failEx, "Failed to return queue item for retry"); }
                 }
@@ -330,7 +345,11 @@ public sealed class WebhookProcessingWorker : BackgroundService
         _logger.LogInformation("WebhookProcessingWorker stopped (sequential mode)");
     }
 
-    private async Task SendFallbackReplyAsync(QueuedMessage message, CancellationToken ct)
+    /// <summary>
+    /// Send a customer-facing fallback reply after permanent processing failure.
+    /// Returns true if the fallback was delivered, false otherwise.
+    /// </summary>
+    private async Task<bool> SendFallbackReplyAsync(QueuedMessage message, CancellationToken ct)
     {
         var customerPhone = message.Payload.Entry
             .SelectMany(e => e.Changes)
@@ -345,7 +364,7 @@ public sealed class WebhookProcessingWorker : BackgroundService
             _logger.LogWarning(
                 "FALLBACK SKIP: no customer phone found in payload for business {BusinessId}",
                 message.BusinessContext.BusinessId);
-            return;
+            return false;
         }
 
         _logger.LogWarning(
@@ -372,19 +391,20 @@ public sealed class WebhookProcessingWorker : BackgroundService
                 _logger.LogWarning(
                     "FALLBACK SENT: fallback reply delivered to {CustomerPhone} for business {BusinessId}",
                     customerPhone, message.BusinessContext.BusinessId);
+                return true;
             }
-            else
-            {
-                _logger.LogError(
-                    "FALLBACK FAILED: WhatsApp API rejected fallback to {CustomerPhone} for business {BusinessId}",
-                    customerPhone, message.BusinessContext.BusinessId);
-            }
+
+            _logger.LogError(
+                "FALLBACK FAILED: WhatsApp API rejected fallback to {CustomerPhone} for business {BusinessId} — terminal item remains visible for operator review",
+                customerPhone, message.BusinessContext.BusinessId);
+            return false;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex,
-                "FALLBACK ERROR: exception sending fallback to {CustomerPhone} for business {BusinessId}",
+                "FALLBACK ERROR: exception sending fallback to {CustomerPhone} for business {BusinessId} — terminal item remains visible for operator review",
                 customerPhone, message.BusinessContext.BusinessId);
+            return false;
         }
     }
 
