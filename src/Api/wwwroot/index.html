@@ -3609,7 +3609,7 @@ function updateBizAdminButton(){
 let _bcvRate = null; // { usdRate, eurRate, rateDate, isStale, available }
 async function loadExchangeRate(){
   try {
-    const res = await fetch('/api/admin/exchange-rates/current', { cache: 'no-store' });
+    const res = await fetch('/api/admin/exchange-rates/current', { headers: jwtHeaders(), cache: 'no-store' });
     if (res.ok) _bcvRate = await res.json();
     else _bcvRate = null;
   } catch { _bcvRate = null; }
