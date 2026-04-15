@@ -3609,7 +3609,7 @@ function updateBizAdminButton(){
 let _bcvRate = null; // { usdRate, eurRate, rateDate, isStale, available }
 async function loadExchangeRate(){
   try {
-    const res = await fetch('/api/admin/exchange-rates/current', { headers: jwtHeaders(), cache: 'no-store' });
+    const res = await authFetch('/api/admin/exchange-rates/current', { cache: 'no-store' });
     if (res.ok) _bcvRate = await res.json();
     else _bcvRate = null;
   } catch { _bcvRate = null; }
@@ -3627,7 +3627,7 @@ async function loadBusinesses(){
     if(statusEl) statusEl.innerHTML='<span class="muted">Cargando negocios...</span>';
     var hdrs = jwtHeaders();
     console.log('[AUTH] loadBusinesses headers:', Object.keys(hdrs).join(', '), 'hasAuth=' + !!hdrs['Authorization']);
-    var res = await fetch('/api/admin/businesses', { headers: hdrs });
+    var res = await authFetch('/api/admin/businesses');
     if (!res.ok) {
       var detail = 'HTTP ' + res.status;
       try { var err = await res.json(); detail += ': ' + (err.error || JSON.stringify(err)); } catch(_){}
@@ -3752,7 +3752,7 @@ function toggleBizPanel(){
 
 async function loadBizProfile(bizId){
   try {
-    const res = await fetch('/api/admin/businesses/' + bizId, { headers: jwtHeaders() });
+    const res = await authFetch('/api/admin/businesses/' + bizId);
     if (bizId !== getBusinessId()) { console.log('[BIZPROFILE] business changed during fetch — discarding'); return; }
     if (!res.ok) {
       let detail = 'HTTP ' + res.status;
@@ -3810,9 +3810,9 @@ async function saveBizProfile(){
     notificationPhone: document.getElementById('bizNotifPhone').value.trim() || null,
   };
   try {
-    const res = await fetch('/api/admin/businesses/' + bid, {
+    const res = await authFetch('/api/admin/businesses/' + bid, {
       method: 'PUT',
-      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
     if (!res.ok) { document.getElementById('bizSaveMsg').innerHTML = '<span class="danger">Error guardando</span>'; return; }
@@ -3838,8 +3838,8 @@ async function uploadBizMenuPdf(){
   fd.append('file', fileInput.files[0]);
   document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="muted">Subiendo...</span>';
   try {
-    const res = await fetch('/api/admin/businesses/' + bid + '/menu-pdf', {
-      method: 'POST', headers: jwtHeaders(), body: fd
+    const res = await authFetch('/api/admin/businesses/' + bid + '/menu-pdf', {
+      method: 'POST', body: fd
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -3859,8 +3859,8 @@ async function deleteBizMenuPdf(){
   if (!bid) return;
   if (!confirm('Eliminar el PDF del menu? El bot usara el menu por defecto.')) return;
   try {
-    const res = await fetch('/api/admin/businesses/' + bid + '/menu-pdf', {
-      method: 'DELETE', headers: jwtHeaders()
+    const res = await authFetch('/api/admin/businesses/' + bid + '/menu-pdf', {
+      method: 'DELETE'
     });
     if (res.ok) {
       document.getElementById('bizMenuPdfMsg').innerHTML = '<span class="ok">PDF eliminado</span>';
@@ -3877,9 +3877,8 @@ async function toggleBizActive(){
   const action = biz && biz.isActive ? 'desactivar' : 'activar';
   if (!confirm('Seguro que deseas ' + action + ' este negocio?')) return;
   try {
-    const res = await fetch('/api/admin/businesses/' + bid + '/toggle', {
-      method: 'PATCH',
-      headers: jwtHeaders()
+    const res = await authFetch('/api/admin/businesses/' + bid + '/toggle', {
+      method: 'PATCH'
     });
     if (!res.ok) { showToast('Failed to update status', 'error'); return; }
     const result = await res.json();
@@ -3915,7 +3914,7 @@ document.getElementById('newBizType')?.addEventListener('change', async function
   const preview = document.getElementById('templatePreview');
   if (!this.value) { preview.style.display = 'none'; preview.innerHTML = ''; return; }
   try {
-    const res = await fetch('/api/admin/businesses/templates/' + this.value, { headers: jwtHeaders() });
+    const res = await authFetch('/api/admin/businesses/templates/' + this.value);
     if (!res.ok) { preview.style.display = 'none'; return; }
     const t = await res.json();
     let html = '<strong>' + esc(t.name) + '</strong> &mdash; ' + t.totalItems + ' items<br>';
@@ -4041,9 +4040,9 @@ async function submitCreateBiz(){
   document.getElementById('createBizMsg').innerHTML = '<span class="muted">Creando...</span>';
 
   try {
-    const res = await fetch('/api/admin/businesses', {
+    const res = await authFetch('/api/admin/businesses', {
       method: 'POST',
-      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
     });
     if (!res.ok) {
@@ -4062,9 +4061,8 @@ async function submitCreateBiz(){
       const fd = new FormData();
       fd.append('file', pdfInput.files[0]);
       try {
-        const pdfRes = await fetch('/api/admin/businesses/' + result.id + '/menu-pdf', {
+        const pdfRes = await authFetch('/api/admin/businesses/' + result.id + '/menu-pdf', {
           method: 'POST',
-          headers: jwtHeaders(),
           body: fd
         });
         if (pdfRes.ok) {
@@ -4145,7 +4143,7 @@ async function loadSummary(){
   var prevErr = heroEl ? heroEl.querySelector('.hero-error-msg') : null;
   if (prevErr) prevErr.remove();
   try {
-    var res = await fetch('/api/admin/analytics/summary?' + qs.toString(), { headers: jwtHeaders(), cache: 'no-store' });
+    var res = await authFetch('/api/admin/analytics/summary?' + qs.toString(), { cache: 'no-store' });
     if (!res.ok) { ids.forEach(function(id){ document.getElementById(id).textContent = '-'; }); showHeroError(); return; }
     var s = await res.json();
     document.getElementById('kpiOrdersTotal').textContent = s.totalOrders ?? 0;
@@ -4190,7 +4188,7 @@ async function loadExtended(){
   const qs = new URLSearchParams({ts: Date.now()});
   if (bid) qs.set('businessId', bid);
   try {
-    const res = await fetch('/api/admin/analytics/extended?' + qs.toString(), { headers: jwtHeaders(), cache: 'no-store' });
+    const res = await authFetch('/api/admin/analytics/extended?' + qs.toString(), { cache: 'no-store' });
     if (!res.ok) { console.warn('Extended analytics:', res.status); return; }
     const d = await res.json();
 
@@ -4275,7 +4273,7 @@ async function loadHandoffs(){
   if (bid) qs.set('businessId', bid);
   try {
     // Load from human endpoint (includes both handoff requested and human override)
-    const res = await fetch('/api/admin/handoffs/human?' + qs.toString(), { headers: jwtHeaders(), cache: 'no-store' });
+    const res = await authFetch('/api/admin/handoffs/human?' + qs.toString(), { cache: 'no-store' });
     if (!res.ok) return;
     const data = await res.json();
     const list = data.conversations || [];
@@ -4387,9 +4385,9 @@ async function sendHandoffReply(conversationId){
   if (!msg) { input.focus(); return; }
   input.disabled = true;
   try {
-    const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/reply', {
+    const res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/reply', {
       method: 'POST',
-      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message: msg })
     });
     if (!res.ok) {
@@ -4407,8 +4405,8 @@ async function sendHandoffReply(conversationId){
 async function returnToBot(conversationId){
   if (!confirm('Devolver esta conversacion al bot?')) return;
   try {
-    const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/return-to-bot', {
-      method: 'POST', headers: jwtHeaders()
+    const res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/return-to-bot', {
+      method: 'POST'
     });
     if (!res.ok) { showToast('Failed to return to bot', 'error'); return; }
     await load();
@@ -4417,8 +4415,8 @@ async function returnToBot(conversationId){
 
 async function resolveHandoff(conversationId){
   if (!confirm('Resolver handoff y reactivar el bot para esta conversacion?')) return;
-  const res = await fetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/resolve', {
-    method: 'POST', headers: jwtHeaders()
+  const res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/resolve', {
+    method: 'POST'
   });
   if (!res.ok) { showToast('Failed to resolve handoff', 'error'); return; }
   await load();
@@ -4480,7 +4478,7 @@ function applyGlobalModeUI() {
 // ── Founder dashboard data loader ──
 async function loadFounderDashboard() {
   try {
-    var res = await fetch('/api/admin/analytics/founder-overview', { headers: jwtHeaders(), cache: 'no-store' });
+    var res = await authFetch('/api/admin/analytics/founder-overview', { cache: 'no-store' });
     if (!res.ok) {
       console.warn('Founder overview failed:', res.status);
       showToast('Error cargando panel de fundador (HTTP ' + res.status + ')', 'error');
@@ -4557,7 +4555,7 @@ async function loadFounderInsights() {
   if (!content) return;
 
   try {
-    var res = await fetch('/api/founder/insights', { headers: jwtHeaders(), cache: 'no-store' });
+    var res = await authFetch('/api/founder/insights', { cache: 'no-store' });
     if (res.status === 403) { content.innerHTML = ''; return; }
     if (!res.ok) { content.innerHTML = '<div class="insights-empty">No se pudieron cargar los insights globales.</div>'; return; }
 
@@ -4841,9 +4839,9 @@ async function sendInsightsChat(scope, inputId, answerId, btnId) {
   if (answerText) answerText.textContent = 'Pensando\u2026';
 
   try {
-    var res = await fetch('/api/insights/chat', {
+    var res = await authFetch('/api/insights/chat', {
       method: 'POST',
-      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ question: q, scope: scope })
     });
 
@@ -4892,7 +4890,7 @@ async function loadBusinessInsights() {
   content.innerHTML = '<div class="insights-empty">Cargando insights del negocio...</div>';
 
   try {
-    var res = await fetch('/api/insights?windowDays=30', { headers: jwtHeaders(), cache: 'no-store' });
+    var res = await authFetch('/api/insights?windowDays=30', { cache: 'no-store' });
 
     if (res.status === 403) { panel.style.display = 'none'; return; }
     if (!res.ok) { content.innerHTML = '<div class="insights-empty">No se pudieron cargar los insights.</div>'; return; }
@@ -5115,7 +5113,7 @@ async function load() {
 
   const isHandoffFilter = status === 'NeedsHuman';
   const fetchUrl = '/api/orders?' + qs.toString().replace('status=NeedsHuman','');
-  const res = await fetch(fetchUrl, { cache: 'no-store', headers: jwtHeaders() });
+  const res = await authFetch(fetchUrl, { cache: 'no-store' });
   if (!res.ok) { document.getElementById('msg').textContent = 'Error cargando pedidos'; console.error(`${tag} fetch failed: ${res.status}`); return; }
 
   let data = await res.json();
@@ -5408,9 +5406,9 @@ async function updateStatus(btn) {
   // Clear unread on status change
   markOrderRead(id);
   try {
-    const res = await fetch(`/api/orders/${id}/status`, {
+    const res = await authFetch(`/api/orders/${id}/status`, {
       method: 'PATCH',
-      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status })
     });
     if (res.status === 409) { showToast('Este pedido fue actualizado por otro usuario. Recargando...', 'error'); await load(); return; }
@@ -5421,8 +5419,8 @@ async function updateStatus(btn) {
 
 async function verifyPayment(orderId){
   if (!confirm('Verificar el pago de este pedido?')) return;
-  const res = await fetch('/api/orders/' + orderId + '/verify-payment', {
-    method: 'PATCH', headers: jwtHeaders()
+  const res = await authFetch('/api/orders/' + orderId + '/verify-payment', {
+    method: 'PATCH'
   });
   if (!res.ok) { showToast('Failed to verify payment', 'error'); return; }
   await load();
@@ -5430,8 +5428,8 @@ async function verifyPayment(orderId){
 
 async function rejectPayment(orderId){
   if (!confirm('Rechazar el comprobante de pago?')) return;
-  const res = await fetch('/api/orders/' + orderId + '/reject-payment', {
-    method: 'PATCH', headers: jwtHeaders()
+  const res = await authFetch('/api/orders/' + orderId + '/reject-payment', {
+    method: 'PATCH'
   });
   if (!res.ok) { showToast('Failed to reject payment', 'error'); return; }
   await load();
@@ -5440,8 +5438,8 @@ async function rejectPayment(orderId){
 async function markChangeReturned(orderId){
   const ref = prompt('Referencia de transferencia (opcional):');
   if (ref === null) return; // user cancelled prompt
-  const res = await fetch('/api/orders/' + orderId + '/cash-change-returned', {
-    method: 'PATCH', headers: {...jwtHeaders(), 'Content-Type': 'application/json'},
+  const res = await authFetch('/api/orders/' + orderId + '/cash-change-returned', {
+    method: 'PATCH', headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({ reference: ref || null })
   });
   if (!res.ok) { showErrorToast('Error', 'No se pudo marcar el vuelto como devuelto'); return; }
@@ -5461,7 +5459,7 @@ async function showProofPreview(orderId){
   overlay.classList.add('open');
 
   try {
-    const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: jwtHeaders() });
+    const res = await authFetch('/api/orders/' + orderId + '/payment-proof');
     if (!res.ok) {
       // Try to parse JSON error body from the backend
       let serverMsg = '';
@@ -5527,7 +5525,7 @@ async function rejectFromModal(){
 
 async function openProofNewTab(orderId){
   try {
-    const res = await fetch('/api/orders/' + orderId + '/payment-proof', { headers: jwtHeaders() });
+    const res = await authFetch('/api/orders/' + orderId + '/payment-proof');
     if (!res.ok) {
       let msg = 'Error obteniendo comprobante (HTTP ' + res.status + ')';
       try { const j = await res.json(); if (j.error) msg = j.error; } catch(_){}
@@ -5545,7 +5543,7 @@ async function downloadOrdersCsv(){
     const bid = getBusinessId();
     const eqs = new URLSearchParams({take: 5000});
     if (bid) eqs.set('businessId', bid);
-    const res = await fetch('/api/admin/exports/orders.csv?' + eqs.toString(), { headers: jwtHeaders() });
+    const res = await authFetch('/api/admin/exports/orders.csv?' + eqs.toString());
     if (!res.ok) { showErrorToast('CSV Export Failed', 'Could not generate orders CSV. Please try again.'); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -5559,7 +5557,7 @@ async function downloadCustomersCsv(){
     const bid = getBusinessId();
     const cqs = new URLSearchParams({take: 5000});
     if (bid) cqs.set('businessId', bid);
-    const res = await fetch('/api/admin/exports/customers.csv?' + cqs.toString(), { headers: jwtHeaders() });
+    const res = await authFetch('/api/admin/exports/customers.csv?' + cqs.toString());
     if (!res.ok) { showErrorToast('CSV Export Failed', 'Could not generate customers CSV. Please try again.'); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
@@ -5589,6 +5587,14 @@ function jwtHeaders(){
     if (key) h['X-Admin-Key'] = key;
   }
   return h;
+}
+
+// Authenticated fetch: auto-injects jwtHeaders() so callers can't forget.
+// Use for all /api/... dashboard calls. Do NOT use for public/static assets.
+async function authFetch(url, options) {
+  var opts = options || {};
+  opts.headers = Object.assign({}, jwtHeaders(), opts.headers || {});
+  return fetch(url, opts);
 }
 
 function updateLoginUI(){
@@ -5673,7 +5679,7 @@ async function loadCrm(){
   if (bid) qs.set('businessId', bid);
   if (search) qs.set('search', search);
   try {
-    const res = await fetch('/api/admin/customers/crm?' + qs.toString(), { headers: jwtHeaders() });
+    const res = await authFetch('/api/admin/customers/crm?' + qs.toString());
     if (bid !== getBusinessId()) { console.log('[CRM] business changed during fetch — discarding'); return; }
     if (!res.ok) { body.textContent = 'Error loading customers'; return; }
     const data = await res.json();
@@ -5720,7 +5726,7 @@ async function loadUsers(){
   try {
     // Global admin (admin key) or Founder role gets cross-business view; regular owners see their business only
     var url = (getAdminKey() || getAuthRole() === 'Founder') ? '/api/admin/users/all' : '/api/admin/users';
-    var res = await fetch(url, { headers: jwtHeaders() });
+    var res = await authFetch(url);
     if (bidAtStart !== getBusinessId()) { console.log('[USERS] business changed during fetch — discarding'); return; }
     if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" class="danger">Error cargando usuarios</td></tr>'; return; }
     var users = await res.json();
@@ -5759,9 +5765,9 @@ async function updateUserRoleMulti(btn){
   var email = sel.getAttribute('data-uemail');
   var role = sel.value;
   try {
-    var res = await fetch('/api/admin/users/multi/' + encodeURIComponent(email), {
+    var res = await authFetch('/api/admin/users/multi/' + encodeURIComponent(email), {
       method: 'PATCH',
-      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: role })
     });
     if (!res.ok) { showToast('Failed to update role', 'error'); return; }
@@ -5771,9 +5777,9 @@ async function updateUserRoleMulti(btn){
 
 async function toggleUserActiveMulti(email, newActive){
   try {
-    var res = await fetch('/api/admin/users/multi/' + encodeURIComponent(email), {
+    var res = await authFetch('/api/admin/users/multi/' + encodeURIComponent(email), {
       method: 'PATCH',
-      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isActive: newActive })
     });
     if (!res.ok) { showToast('Failed to update status', 'error'); return; }
@@ -5829,9 +5835,9 @@ async function submitCreateUser(){
 
   document.getElementById('createUserMsg').innerHTML = '<span class="muted">Creando...</span>';
   try {
-    var res = await fetch('/api/admin/users/multi', {
+    var res = await authFetch('/api/admin/users/multi', {
       method: 'POST',
-      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: name, email: email, password: password, role: role, isActive: isActive, businessIds: businessIds })
     });
     if (!res.ok) {
@@ -5977,7 +5983,7 @@ async function updatePromoCount(){
   el.textContent = 'Loading...';
   const filter = document.getElementById('promoFilter').value;
   try {
-    const res = await fetch('/api/admin/promotions/recipients?filter=' + filter, { headers: jwtHeaders() });
+    const res = await authFetch('/api/admin/promotions/recipients?filter=' + filter);
     if (!res.ok) { el.textContent = 'Error loading count'; return; }
     const data = await res.json();
     el.textContent = data.count + ' recipient' + (data.count !== 1 ? 's' : '') + ' matched';
@@ -5993,9 +5999,9 @@ async function sendPromotion(){
   btn.textContent = 'Sending...';
   resultEl.style.display = 'none';
   try {
-    const res = await fetch('/api/admin/promotions/send', {
+    const res = await authFetch('/api/admin/promotions/send', {
       method: 'POST',
-      headers: { ...jwtHeaders(), 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, filter })
     });
     const data = await res.json();
