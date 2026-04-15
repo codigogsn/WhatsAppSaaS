@@ -4448,7 +4448,7 @@ function applyGlobalModeUI() {
   var founder = isFounderUser();
   var show = global ? 'none' : '';
   // Business-scoped dashboard sections
-  var ids = ['heroKpi','statusStrip','extAnalytics','handoffInbox','ordersFilters','ordersTable','customersPanel'];
+  var ids = ['heroKpi','statusStrip','extAnalytics','handoffInbox','ordersFilters','ordersTable'];
   for (var i = 0; i < ids.length; i++) {
     var el = document.getElementById(ids[i]);
     if (el) el.style.display = show;
