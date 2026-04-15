@@ -1090,6 +1090,22 @@
     .hero-alert-danger .value { color: var(--danger) !important; }
     .hero-alerts { justify-content: flex-start; gap: 16px; }
 
+    /* ═══ Action Alerts Strip ═══ */
+    .alerts-strip {
+      display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap;
+    }
+    .alerts-strip-item {
+      display: flex; flex-direction: column; gap: 4px;
+      padding: 14px 20px; border-radius: var(--radius-sm); flex: 1; min-width: 180px;
+    }
+    .alerts-strip-item .label {
+      font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .03em;
+    }
+    .alerts-strip-item .value {
+      font-size: 28px; font-weight: 700; line-height: 1.15; letter-spacing: -.02em;
+      font-variant-numeric: tabular-nums;
+    }
+
     /* ═══ Data Freshness Indicator ═══ */
     .freshness-bar {
       display: flex; justify-content: flex-end; align-items: center;
@@ -2750,71 +2766,19 @@ Tipo: burger"></textarea>
   <!-- ═══ View: Overview ═══ -->
   <div id="viewOverview">
 
-  <!-- Hero KPI Area -->
-  <div id="heroKpi" class="hero-kpi">
-    <!-- LEFT: Revenue focus -->
-    <div class="hero-panel hero-revenue">
-      <div class="hero-panel-title">Revenue</div>
-      <div class="hero-stat hero-stat-primary">
-        <div class="label">Ventas Hoy</div>
-        <div class="value" id="kpiRevenueToday">-</div>
-      </div>
-      <div class="hero-stat">
-        <div class="label">Ventas Totales</div>
-        <div class="value" id="kpiTotalRevenue">-</div>
-      </div>
-      <div class="hero-stat hero-stat-secondary">
-        <div class="label">Top Producto</div>
-        <div class="value" id="kpiTopItem">-</div>
-      </div>
+  <!-- ═══ BLOCK 1: Action Alerts Strip — only visible when attention needed ═══ -->
+  <div id="alertsStrip" class="alerts-strip" style="display:none;">
+    <div class="alerts-strip-item hero-alert-warning" id="alertPayments" style="display:none;">
+      <div class="label">Pagos Pendientes</div>
+      <div class="value" id="kpiPaymentsPending">0</div>
     </div>
-
-    <!-- CENTER: Business performance -->
-    <div class="hero-panel hero-performance">
-      <div class="hero-panel-title">Performance</div>
-      <div class="hero-mini-grid">
-        <div class="hero-stat">
-          <div class="label">Pedidos Hoy</div>
-          <div class="value" id="kpiOrdersToday">-</div>
-        </div>
-        <div class="hero-stat">
-          <div class="label">Pedidos (Total)</div>
-          <div class="value" id="kpiOrdersTotal">-</div>
-        </div>
-        <div class="hero-stat">
-          <div class="label">Clientes</div>
-          <div class="value" id="kpiUniqueCustomers">-</div>
-        </div>
-        <div class="hero-stat">
-          <div class="label">Ticket Prom.</div>
-          <div class="value" id="kpiAvgTicket">-</div>
-        </div>
-        <div class="hero-stat">
-          <div class="label">Semana</div>
-          <div class="value" id="kpiOrdersWeek">-</div>
-        </div>
-        <div class="hero-stat">
-          <div class="label">% Recurrentes</div>
-          <div class="value" id="kpiReturning">-</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- RIGHT: Operational alerts -->
-    <div class="hero-panel hero-alerts">
-      <div class="hero-panel-title">Alerts</div>
-      <div class="hero-stat hero-alert-warning">
-        <div class="label">Pagos Pendientes</div>
-        <div class="value" id="kpiPaymentsPending">0</div>
-      </div>
-      <div class="hero-stat hero-alert-danger" style="cursor:pointer;" onclick="acknowledgeHandoff('hero_stat');document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
-        <div class="label">Necesitan Humano</div>
-        <div class="value" id="kpiHandoffs">0</div>
-      </div>
+    <div class="alerts-strip-item hero-alert-danger" id="alertHandoffs" style="display:none;cursor:pointer;" onclick="acknowledgeHandoff('hero_stat');document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
+      <div class="label">Necesitan Humano</div>
+      <div class="value" id="kpiHandoffs">0</div>
     </div>
   </div>
 
-  <!-- Human Handoff Alert Banner -->
+  <!-- Human Handoff Alert Banner (expanded detail — shown when handoffs > 0) -->
   <div id="handoffAlertBanner" class="handoff-alert-banner" onclick="acknowledgeHandoff('banner');document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
     <div class="handoff-alert-icon">&#x1f6a8;</div>
     <div class="handoff-alert-body">
@@ -2824,9 +2788,30 @@ Tipo: burger"></textarea>
     <div class="handoff-alert-arrow">&#x276f;</div>
   </div>
 
-  <!-- Order Status Strip -->
+  <!-- ═══ BLOCK 2: Today's Pulse — 3 focused hero KPIs ═══ -->
+  <div id="heroKpi" class="hero-kpi" style="grid-template-columns: 1fr 1fr 1fr;">
+    <div class="hero-panel">
+      <div class="hero-panel-title">Ventas Hoy</div>
+      <div class="hero-stat hero-stat-primary">
+        <div class="value" id="kpiRevenueToday">-</div>
+      </div>
+    </div>
+    <div class="hero-panel">
+      <div class="hero-panel-title">Pedidos Hoy</div>
+      <div class="hero-stat hero-stat-primary">
+        <div class="value" id="kpiOrdersToday">-</div>
+      </div>
+    </div>
+    <div class="hero-panel">
+      <div class="hero-panel-title">Ticket Promedio</div>
+      <div class="hero-stat hero-stat-primary">
+        <div class="value" id="kpiAvgTicket">-</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ BLOCK 3: Operational Pipeline Status ═══ -->
   <div id="statusStrip" class="status-strip">
-    <div class="status-chip"><div class="status-chip-label">Cargados</div><div class="status-chip-value" id="kpiTotal">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pendiente</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparando</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--accent);">En Camino</div><div class="status-chip-value" style="color:var(--accent);" id="kpiOut">0</div></div>
@@ -2843,6 +2828,16 @@ Tipo: burger"></textarea>
       <div class="intel-strip-support" id="intelStripSupport"></div>
     </div>
     <button class="intel-strip-btn" onclick="toggleAssistDock()">Explorar</button>
+  </div>
+
+  <!-- ═══ BLOCK 5: Business Health — cumulative/period metrics ═══ -->
+  <div class="kpi" id="cumulativeMetrics">
+    <div class="card"><div class="label">Ventas Totales</div><div class="value" id="kpiTotalRevenue">-</div></div>
+    <div class="card"><div class="label">Pedidos Totales</div><div class="value" id="kpiOrdersTotal">-</div></div>
+    <div class="card"><div class="label">Clientes</div><div class="value" id="kpiUniqueCustomers">-</div></div>
+    <div class="card"><div class="label">Semana</div><div class="value" id="kpiOrdersWeek">-</div></div>
+    <div class="card"><div class="label">% Recurrentes</div><div class="value" id="kpiReturning">-</div></div>
+    <div class="card"><div class="label">Top Producto</div><div class="value" id="kpiTopItem">-</div></div>
   </div>
 
   <!-- Extended Analytics -->
@@ -4145,7 +4140,19 @@ async function loadSummary(){
     document.getElementById('kpiReturning').textContent = (s.returningCustomersPct ?? 0) + '%';
     document.getElementById('kpiTopItem').textContent = s.topSellingItem || '-';
     document.getElementById('kpiPaymentsPending').textContent = s.paymentsPendingVerification ?? 0;
+    syncAlertsStrip();
   } catch(e) { console.warn('loadSummary error:', e); ids.forEach(function(id){ document.getElementById(id).textContent = '-'; }); showHeroError(); }
+}
+// Sync alerts strip visibility — show only when action items exist
+function syncAlertsStrip() {
+  var payments = parseInt(document.getElementById('kpiPaymentsPending').textContent) || 0;
+  var handoffs = parseInt(document.getElementById('kpiHandoffs').textContent) || 0;
+  var strip = document.getElementById('alertsStrip');
+  var alertP = document.getElementById('alertPayments');
+  var alertH = document.getElementById('alertHandoffs');
+  if (alertP) alertP.style.display = payments > 0 ? '' : 'none';
+  if (alertH) alertH.style.display = handoffs > 0 ? '' : 'none';
+  if (strip) strip.style.display = (payments > 0 || handoffs > 0) ? 'flex' : 'none';
 }
 function showHeroError(){
   var hero = document.getElementById('heroKpi');
@@ -4226,7 +4233,8 @@ function renderHourlyChart(containerId, data, color){
 function setKpis(list){
   const c = { Pending:0, Preparing:0, OutForDelivery:0, Completed:0, Cancelled:0 };
   for (const o of list) c[o.status] = (c[o.status] || 0) + 1;
-  document.getElementById('kpiTotal').textContent = list.length;
+  var kpiTotalEl = document.getElementById('kpiTotal');
+  if (kpiTotalEl) kpiTotalEl.textContent = list.length;
   document.getElementById('kpiPending').textContent = c.Pending || 0;
   document.getElementById('kpiPreparing').textContent = c.Preparing || 0;
   document.getElementById('kpiOut').textContent = c.OutForDelivery || 0;
@@ -4254,6 +4262,7 @@ async function loadHandoffs(){
     const data = await res.json();
     const list = data.conversations || [];
     document.getElementById('kpiHandoffs').textContent = list.length;
+    syncAlertsStrip();
     const badge = document.getElementById('handoffBadge');
     if (badge) badge.textContent = list.length;
 
