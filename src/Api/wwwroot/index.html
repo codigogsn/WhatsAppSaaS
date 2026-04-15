@@ -3118,7 +3118,7 @@ function updateSidebarGlobalState() {
 }
 
 function clearSidebarActiveStates() {
-  var ids = ['sbCustomers', 'sbBizAdmin', 'sbUsersAdmin', 'sbAssist'];
+  var ids = ['sbOverview', 'sbOrders', 'sbCustomers', 'sbBizAdmin', 'sbUsersAdmin', 'sbAssist'];
   for (var i = 0; i < ids.length; i++) {
     var btn = document.getElementById(ids[i]);
     if (btn) btn.classList.remove('active');
@@ -3176,8 +3176,9 @@ function setDashboardView(view) {
     if (tabO) tabO.classList.add('active');
     if (tabP) tabP.classList.remove('active');
   }
-  // Sync sidebar active state
+  // Sync sidebar active state — clear ALL sidebar buttons first, then set the correct one
   if (typeof ENABLE_SIDEBAR !== 'undefined' && ENABLE_SIDEBAR) {
+    clearSidebarActiveStates();
     var sbO = document.getElementById('sbOverview');
     var sbP = document.getElementById('sbOrders');
     if (sbO) sbO.classList.toggle('active', view === 'overview');
