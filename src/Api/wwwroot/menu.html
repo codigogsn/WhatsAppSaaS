@@ -579,9 +579,6 @@
       </div>
     </div>
     <div class="brand-right">
-      <input id="adminKey" class="key-input" placeholder="Admin Key" />
-      <button onclick="saveKey()">Guardar</button>
-      <span id="keyMsg" class="small"></span>
       <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
         <span id="themeIcon">&#9790;</span>
       </button>
@@ -804,13 +801,6 @@ function esc(s){ return (s??'').toString().replace(/[&<>"']/g, m=>({'&':'&amp;',
 function getKey(){ return localStorage.getItem('ADMIN_KEY') || ''; }
 function getJwt(){ return localStorage.getItem('AUTH_TOKEN') || ''; }
 function isStaffMode(){ return localStorage.getItem('LOGIN_MODE') === 'staff'; }
-function saveKey(){
-  const v = document.getElementById('adminKey').value.trim();
-  if(!v){ localStorage.removeItem('ADMIN_KEY'); document.getElementById('keyMsg').innerHTML='<span style="color:var(--danger);">Borrada</span>'; return; }
-  localStorage.setItem('ADMIN_KEY',v);
-  document.getElementById('keyMsg').innerHTML='<span style="color:var(--success);">OK</span>';
-  loadBusinesses();
-}
 function authHeaders(){
   var h = {'Content-Type':'application/json'};
   var jwt = getJwt();
@@ -1637,14 +1627,6 @@ async function createUpsell(){
 // Init
 if (isStaffMode()) {
   localStorage.removeItem('ADMIN_KEY');
-  document.getElementById('adminKey').value = '';
-  document.getElementById('adminKey').style.display = 'none';
-  var guardarBtn = document.getElementById('adminKey').nextElementSibling;
-  if (guardarBtn && guardarBtn.tagName === 'BUTTON') guardarBtn.style.display = 'none';
-  var keyMsg = document.getElementById('keyMsg');
-  if (keyMsg) keyMsg.style.display = 'none';
-} else {
-  document.getElementById('adminKey').value = getKey();
 }
 loadBusinesses();
 </script>
