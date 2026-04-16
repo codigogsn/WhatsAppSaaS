@@ -4448,7 +4448,7 @@ function applyGlobalModeUI() {
   var founder = isFounderUser();
   var show = global ? 'none' : '';
   // Business-scoped dashboard sections
-  var ids = ['heroKpi','statusStrip','extAnalytics','handoffInbox','ordersFilters','ordersTable'];
+  var ids = ['heroKpi','extAnalytics'];
   for (var i = 0; i < ids.length; i++) {
     var el = document.getElementById(ids[i]);
     if (el) el.style.display = show;
@@ -5922,8 +5922,11 @@ updateSoundIcon();
 syncAutoToggleUI();
 // Request browser notification permission early
 if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
-// Load businesses then orders
-loadBusinesses().then(() => load());
+// Load businesses then set initial screen and load data
+loadBusinesses().then(() => {
+  if (getBusinessId()) navigateTo('overview');
+  load();
+});
 </script>
 <!-- Payment Proof Preview Modal -->
 <div class="modal-overlay" id="proofOverlay" onclick="closeProofModal()">
