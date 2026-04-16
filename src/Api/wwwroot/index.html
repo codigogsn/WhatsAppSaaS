@@ -5924,8 +5924,12 @@ syncAutoToggleUI();
 if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
 // Load businesses then set initial screen and load data
 loadBusinesses().then(() => {
-  if (getBusinessId()) navigateTo('overview');
-  load();
+  if (getBusinessId()) {
+    navigateTo('overview');
+    startAutoRefresh();
+  } else {
+    load();
+  }
 });
 </script>
 <!-- Payment Proof Preview Modal -->
