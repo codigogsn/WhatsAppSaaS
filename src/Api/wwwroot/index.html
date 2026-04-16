@@ -2280,11 +2280,6 @@
       <span class="freshness-text" id="freshnessText_topbar">Cargando...</span>
     </div>
     <div class="topbar-group">
-      <label class="toggle-switch" title="Auto-refresh cada 10s">
-        <input type="checkbox" id="autoRefreshToggle_topbar" onchange="onAutoToggle(this.checked)">
-        <span class="toggle-track"></span>
-        <span class="toggle-label">Auto</span>
-      </label>
       <button class="sound-toggle" id="soundToggle_topbar" onclick="toggleSound()" title="Sonido de notificaciones">
         <span id="soundIcon_topbar">&#128264;</span>
       </button>
@@ -2381,11 +2376,6 @@
       <span class="freshness-text" id="freshnessText">Cargando...</span>
     </div>
     <div class="context-bar-group">
-      <label class="toggle-switch" title="Auto-refresh cada 10s">
-        <input type="checkbox" id="autoRefreshToggle" onchange="onAutoToggle(this.checked)">
-        <span class="toggle-track"></span>
-        <span class="toggle-label">Auto</span>
-      </label>
       <button class="sound-toggle" id="soundToggle" onclick="toggleSound()" title="Sonido de notificaciones">
         <span id="soundIcon">&#128264;</span>
       </button>
@@ -3035,14 +3025,6 @@ const ENABLE_SIDEBAR = true;
       if (legacySel) { legacySel.value = topSelect.value; }
     });
   }
-  // Sync topbar auto-refresh toggle → legacy
-  var topAuto = document.getElementById('autoRefreshToggle_topbar');
-  if (topAuto) {
-    topAuto.addEventListener('change', function(){
-      var legacyCb = document.getElementById('autoRefreshToggle');
-      if (legacyCb) { legacyCb.checked = topAuto.checked; }
-    });
-  }
 })();
 
 // ═══ Sidebar Shell Activation ═══
@@ -3269,17 +3251,7 @@ function updateSoundIcon() {
   });
 }
 
-// ── Auto-refresh toggle ──
-function onAutoToggle(checked) {
-  if (checked) startAutoRefresh();
-  else stopAutoRefresh();
-}
-function syncAutoToggleUI() {
-  var cb = document.getElementById('autoRefreshToggle');
-  var cb2 = document.getElementById('autoRefreshToggle_topbar');
-  if (cb) cb.checked = _autoRefreshActive;
-  if (cb2) cb2.checked = _autoRefreshActive;
-}
+
 
 // ── New order notification ──
 const _unreadOrders = new Set(); // persistent unread state until user interaction
@@ -4432,12 +4404,10 @@ function startAutoRefresh() {
     if (_loadInProgress) return;
     load();
   }, 10000);
-  syncAutoToggleUI();
 }
 function stopAutoRefresh() {
   if (timer) { clearInterval(timer); timer = null; }
   _autoRefreshActive = false;
-  syncAutoToggleUI();
 }
 
 // ── Global mode: hide all business-scoped sections ──
@@ -5919,7 +5889,6 @@ if (createUserModal && createUserModal.parentElement !== document.body) {
 
 // Init controls state
 updateSoundIcon();
-syncAutoToggleUI();
 // Request browser notification permission early
 if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
 // Load businesses then set initial screen and load data
