@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>CODIGO — Login</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
   <style>
     :root {
       --font: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
@@ -257,6 +259,94 @@
     .eye-toggle:active { transform: translateY(-50%); background: none; box-shadow: none; }
     [data-theme="dark"] .eye-toggle { box-shadow: none; border: none; background: none; }
     [data-theme="dark"] .eye-toggle:hover { box-shadow: none; background: none; }
+
+    /* ═══ MerchantOS Phase 1 — Visual Foundation (auth screen) ═══ */
+    :root {
+      --font-ui:       'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+      --font-mono:     'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+      --font-editorial:'Instrument Serif', 'Times New Roman', serif;
+      --font: var(--font-ui);
+      --mos-radius-card: 16px;
+      --mos-radius-ctrl: 10px;
+      --mos-radius-pill: 999px;
+      --mos-ring: 0 0 0 2px rgba(255,255,255,.04), 0 0 0 4px rgba(120,170,255,.28);
+    }
+    [data-theme="dark"] {
+      --bg:             #0A0A0B;
+      --surface:        rgba(22,22,25,.72);
+      --card:           rgba(20,20,24,.70);
+      --text:           #F5F5F7;
+      --text-secondary: rgba(245,245,247,.72);
+      --muted:          rgba(245,245,247,.46);
+      --border:         rgba(255,255,255,.08);
+      --accent:         #7AA8FF;
+      --accent-hover:   #A6C4FF;
+      --accent-glow:    rgba(122,168,255,.18);
+      --danger:         #FF6B6B;
+      --input-bg:       rgba(255,255,255,.03);
+      --logo-color:     #F5F5F7;
+    }
+    body { font-family: var(--font-ui); letter-spacing: -.005em; }
+    [data-theme="dark"] body {
+      background:
+        radial-gradient(900px 520px at 20% 0%, rgba(122,168,255,.10), transparent 60%),
+        radial-gradient(780px 480px at 90% 100%, rgba(180,140,255,.06), transparent 65%),
+        #0A0A0B;
+      background-attachment: fixed;
+    }
+    [data-theme="dark"] body::before { opacity: .35; }
+    [data-theme="dark"] .login-card {
+      background: rgba(20,20,24,.72);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: var(--mos-radius-card);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.04),
+        0 20px 60px rgba(0,0,0,.55),
+        0 4px 14px rgba(0,0,0,.30);
+      -webkit-backdrop-filter: blur(28px) saturate(150%);
+      backdrop-filter: blur(28px) saturate(150%);
+    }
+    [data-theme="dark"] .login-card::before { box-shadow: none; }
+    [data-theme="dark"] .form-group input {
+      background: rgba(255,255,255,.03);
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: var(--mos-radius-ctrl);
+      box-shadow: inset 0 1px 0 rgba(0,0,0,.20);
+    }
+    [data-theme="dark"] .form-group input:hover { border-color: rgba(255,255,255,.14); }
+    [data-theme="dark"] .form-group input:focus {
+      border-color: rgba(122,168,255,.45);
+      box-shadow: var(--mos-ring), inset 0 1px 0 rgba(0,0,0,.20);
+      background: rgba(255,255,255,.04);
+    }
+    [data-theme="dark"] .login-btn {
+      background: #F5F5F7;
+      color: #0A0A0B;
+      border: 1px solid rgba(255,255,255,.20);
+      border-radius: var(--mos-radius-ctrl);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.60),
+        0 1px 2px rgba(0,0,0,.35);
+    }
+    [data-theme="dark"] .login-btn:hover {
+      background: #FFFFFF;
+      border-color: rgba(255,255,255,.32);
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,.70),
+        0 2px 6px rgba(0,0,0,.40);
+    }
+    [data-theme="dark"] .theme-toggle {
+      background: rgba(255,255,255,.05);
+      border: 1px solid rgba(255,255,255,.09);
+      box-shadow: none;
+    }
+    [data-theme="dark"] .theme-toggle:hover {
+      background: rgba(255,255,255,.08);
+      border-color: rgba(255,255,255,.14);
+    }
+    :root .login-card { border-radius: var(--mos-radius-card); }
+    :root .form-group input { border-radius: var(--mos-radius-ctrl); }
+    :root .login-btn { border-radius: var(--mos-radius-ctrl); }
   </style>
 </head>
 <body>
