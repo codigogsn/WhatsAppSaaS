@@ -2593,215 +2593,6 @@
     :root input, :root select, :root textarea { border-radius: var(--mos-radius-ctrl); }
     :root .pill, :root .role-badge { border-radius: var(--mos-radius-pill); }
 
-    /* ═══════════════════════════════════════════════════════════════════
-       MerchantOS — Phase 2 Layout / Distribution Pass
-       Scope: page composition, hierarchy, grouping, rhythm.
-       NOT a theme change. NO row/cell internals touched.
-       Layered AFTER Phase 1 to win cascade without rewrites.
-       ═══════════════════════════════════════════════════════════════════ */
-
-    /* ─── App container: wider canvas + intentional top breathing ─── */
-    .app-container {
-      max-width: 1360px;
-      padding: 28px 28px 56px;
-    }
-    /* Consistent rhythm between direct children of overview/orders */
-    #viewOverview > *:not(:last-child),
-    #viewOrders   > *:not(:last-child) { margin-bottom: 22px; }
-    #viewOverview, #viewOrders { padding-top: 0; }
-
-    /* ─── Section eyebrow: semantic group headers ─── */
-    .section-eyebrow {
-      display: flex; align-items: baseline; justify-content: space-between;
-      gap: 16px; padding: 4px 2px 0; margin: 0 0 10px;
-    }
-    .section-eyebrow-label {
-      font-family: var(--font-ui, 'Geist', 'Inter', sans-serif);
-      font-size: 11px; font-weight: 600; letter-spacing: .18em;
-      text-transform: uppercase; color: var(--text);
-      display: inline-flex; align-items: center; gap: 10px;
-    }
-    .section-eyebrow-label::before {
-      content: ''; display: inline-block;
-      width: 4px; height: 4px; border-radius: 50%;
-      background: currentColor; opacity: .55;
-    }
-    .section-eyebrow-hint {
-      font-family: var(--font-editorial, 'Instrument Serif', serif);
-      font-size: 14px; font-style: italic; color: var(--muted);
-      letter-spacing: -.005em; font-weight: 400;
-    }
-    .section-eyebrow + .hero-kpi,
-    .section-eyebrow + .kpi,
-    .section-eyebrow + .status-strip,
-    .section-eyebrow + .section-panel,
-    .section-eyebrow + .intel-strip,
-    .section-eyebrow + details { margin-top: 0 !important; }
-
-    /* ─── HERO KPI: more hero. Bigger padding, stronger stat, rhythm ─── */
-    #heroKpi.hero-kpi { gap: 16px; margin-bottom: 22px; }
-    #heroKpi .hero-panel {
-      padding: 26px 28px;
-      gap: 12px;
-      min-height: 128px;
-    }
-    #heroKpi .hero-panel-title {
-      font-size: 10.5px;
-      letter-spacing: .16em;
-      padding-bottom: 0;
-      border-bottom: none;
-      color: var(--muted);
-      font-weight: 600;
-    }
-    #heroKpi .hero-stat-primary .value {
-      font-size: 34px;
-      font-weight: 700;
-      letter-spacing: -.028em;
-      line-height: 1.05;
-      margin-top: 2px;
-    }
-
-    /* ─── Intelligence strip: elevated as its own callout ─── */
-    .intel-strip {
-      padding: 20px 24px;
-      border-radius: 16px;
-      margin-bottom: 22px;
-    }
-    .intel-strip.visible { gap: 20px; }
-    .intel-strip-title { font-size: 15px; letter-spacing: -.02em; }
-    .intel-strip-action { font-size: 13px; }
-    .intel-strip-btn { padding: 7px 16px; font-size: 11.5px; }
-    [data-theme="dark"] .intel-strip {
-      background: rgba(20,20,24,.78);
-      border: 1px solid rgba(255,255,255,.07);
-      border-left: 2px solid rgba(122,168,255,.28);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.03),
-        0 1px 2px rgba(0,0,0,.28);
-    }
-
-    /* ─── Business Health KPI block: structured grid, not a flex line ─── */
-    #cumulativeMetrics.kpi {
-      display: grid;
-      grid-template-columns: repeat(6, minmax(0, 1fr));
-      gap: 14px;
-      margin-bottom: 22px;
-    }
-    #cumulativeMetrics .card {
-      min-width: 0;
-      min-height: 104px;
-      padding: 18px 20px;
-    }
-    #cumulativeMetrics .card .label {
-      font-size: 10.5px;
-      letter-spacing: .14em;
-      font-weight: 600;
-    }
-    #cumulativeMetrics .card .value {
-      font-size: 22px;
-      letter-spacing: -.02em;
-    }
-    @media (max-width: 1180px) {
-      #cumulativeMetrics.kpi { grid-template-columns: repeat(3, minmax(0,1fr)); }
-    }
-    @media (max-width: 640px) {
-      #cumulativeMetrics.kpi { grid-template-columns: repeat(2, minmax(0,1fr)); }
-    }
-
-    /* ─── Extended Analytics: consistent grid rhythm across all rows ─── */
-    #extAnalytics.section-panel { border-radius: 16px; }
-    #extAnalytics summary {
-      padding: 18px 24px;
-      font-size: 11px;
-      letter-spacing: .16em;
-      text-transform: uppercase;
-      font-weight: 600;
-      color: var(--text);
-    }
-    #extAnalytics[open] summary { border-bottom: 1px solid var(--border-light); }
-    #extAnalytics[open] > *:not(summary) { padding: 0 24px 24px; }
-    #extAnalytics .kpi {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px;
-      margin-top: 18px !important;
-      margin-bottom: 0;
-    }
-    #extAnalytics .kpi .card { min-width: 0; padding: 16px 18px; }
-    /* Normalize charts row from inline flex to a 2-col grid */
-    #extAnalytics > div[style*="display:flex"] {
-      display: grid !important;
-      grid-template-columns: 1fr 1fr;
-      gap: 14px;
-      margin-top: 18px;
-      margin-bottom: 0;
-    }
-    #extAnalytics > div[style*="display:flex"] > .card { min-width: 0 !important; }
-    @media (max-width: 1180px) {
-      #extAnalytics .kpi { grid-template-columns: repeat(2, minmax(0,1fr)); }
-      #extAnalytics > div[style*="display:flex"] { grid-template-columns: 1fr; }
-    }
-    @media (max-width: 640px) {
-      #extAnalytics .kpi { grid-template-columns: 1fr; }
-    }
-
-    /* ─── Status strip: sharper pipeline rhythm ─── */
-    #statusStrip.status-strip { padding: 16px 8px; gap: 0; }
-    #statusStrip .status-chip { padding: 12px 8px; }
-    #statusStrip .status-chip-label {
-      font-size: 10.5px;
-      letter-spacing: .14em;
-      margin-bottom: 6px;
-    }
-    #statusStrip .status-chip-value {
-      font-size: 22px;
-      letter-spacing: -.02em;
-    }
-
-    /* ─── Shell sidebar rhythm: give groups air ─── */
-    .shell-sidebar { padding: 14px 0 16px; }
-    .shell-sidebar .sb-group { gap: 4px; padding: 0 6px; }
-    .shell-sidebar .sb-sep { width: 20px; margin: 10px 0; }
-    .shell-sidebar .sb-btn { width: 34px; height: 34px; border-radius: 9px; }
-    [data-theme="dark"] .shell-sidebar .sb-sep { background: rgba(255,255,255,.08); }
-
-    /* ─── Shell topbar rhythm ─── */
-    .shell-topbar { padding: 0 18px; gap: 12px; }
-    .shell-topbar .topbar-logo { letter-spacing: 4px; }
-
-    /* ─── Legacy context/toolbar rhythm ─── */
-    .context-bar { padding: 10px 28px; }
-    .nav-bar { padding: 6px 24px; gap: 6px; }
-
-    /* ─── Orders view breathing ─── */
-    #viewOrders .filters { padding: 16px 20px; }
-    #viewOrders #ordersFilters { margin-bottom: 18px; }
-
-    /* ─── Founder HQ: cleaner grid rhythm ─── */
-    .fd-grid { gap: 16px; margin-bottom: 24px; }
-    .fd-header { padding: 30px 32px 24px; margin-bottom: 24px; }
-
-    /* ─── Handoff alert banner: tighter hero companion ─── */
-    .handoff-alert-banner {
-      padding: 14px 22px;
-      border-radius: 14px;
-      margin-bottom: 0;
-    }
-
-    /* ─── Section panel: consistent 16px radius ─── */
-    .section-panel { border-radius: 16px; }
-    .section-panel summary { padding: 16px 24px; }
-    .section-panel[open] > *:not(summary) { padding: 0 24px 24px; }
-
-    /* ─── Mobile: tighten app-container, collapse eyebrow hint ─── */
-    @media (max-width: 768px) {
-      .app-container { padding: 18px 16px 40px; }
-      #heroKpi .hero-panel { padding: 20px 20px; min-height: 108px; }
-      #heroKpi .hero-stat-primary .value { font-size: 28px; }
-      .section-eyebrow-hint { display: none; }
-      .section-eyebrow { margin-bottom: 8px; }
-    }
-
   </style>
 </head>
 <body>
@@ -3325,10 +3116,6 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- ═══ BLOCK 2: Today's Pulse — 3 focused hero KPIs ═══ -->
-  <div class="section-eyebrow" id="eyebrowToday">
-    <span class="section-eyebrow-label">Hoy</span>
-    <span class="section-eyebrow-hint">Pulso del día</span>
-  </div>
   <div id="heroKpi" class="hero-kpi" style="grid-template-columns: 1fr 1fr 1fr;">
     <div class="hero-panel">
       <div class="hero-panel-title">Ventas Hoy</div>
@@ -3362,10 +3149,6 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- ═══ BLOCK 5: Business Health — cumulative/period metrics ═══ -->
-  <div class="section-eyebrow" id="eyebrowHealth">
-    <span class="section-eyebrow-label">Visión general</span>
-    <span class="section-eyebrow-hint">Métricas acumulativas del negocio</span>
-  </div>
   <div class="kpi" id="cumulativeMetrics">
     <div class="card"><div class="label">Ventas Totales</div><div class="value" id="kpiTotalRevenue">-</div></div>
     <div class="card"><div class="label">Pedidos Totales</div><div class="value" id="kpiOrdersTotal">-</div></div>
@@ -3376,10 +3159,6 @@ Tipo: burger"></textarea>
   </div>
 
   <!-- Extended Analytics -->
-  <div class="section-eyebrow" id="eyebrowAnalytics">
-    <span class="section-eyebrow-label">Analíticas</span>
-    <span class="section-eyebrow-hint">Operación, embudo y productos</span>
-  </div>
   <details id="extAnalytics" class="section-panel">
     <summary>Analíticas Avanzadas</summary>
 
@@ -3458,10 +3237,6 @@ Tipo: burger"></textarea>
   </details>
 
   <!-- Pipeline Status Strip -->
-  <div class="section-eyebrow" id="eyebrowPipeline">
-    <span class="section-eyebrow-label">Pipeline</span>
-    <span class="section-eyebrow-hint">Estado operativo en tiempo real</span>
-  </div>
   <div id="statusStrip" class="status-strip">
     <div class="status-chip"><div class="status-chip-label" style="color:var(--muted);">Pendiente</div><div class="status-chip-value" style="color:var(--muted);" id="kpiPending">0</div></div>
     <div class="status-chip"><div class="status-chip-label" style="color:var(--warning);">Preparando</div><div class="status-chip-value" style="color:var(--warning);" id="kpiPreparing">0</div></div>
@@ -6146,7 +5921,6 @@ function applyRoleVisibility(){
   var customers = document.getElementById('btnCustomers');
   // Sections
   var extAnalytics = document.getElementById('extAnalytics');
-  var eyebrowAnalytics = document.getElementById('eyebrowAnalytics');
   var customersPanel = document.getElementById('customersPanel');
 
   if (admin) {
@@ -6154,7 +5928,6 @@ function applyRoleVisibility(){
     if (newBiz) newBiz.style.display = '';
     if (customers) customers.style.display = '';
     if (extAnalytics) extAnalytics.style.display = '';
-    if (eyebrowAnalytics) eyebrowAnalytics.style.display = '';
     if (customersPanel) customersPanel.style.display = '';
     return;
   }
@@ -6165,14 +5938,12 @@ function applyRoleVisibility(){
     if (newBiz) newBiz.style.display = 'none';
     if (customers) customers.style.display = '';
     if (extAnalytics) extAnalytics.style.display = '';
-    if (eyebrowAnalytics) eyebrowAnalytics.style.display = '';
   }
 
   if (role === 'Operator') {
     if (newBiz) newBiz.style.display = 'none';
     if (customers) customers.style.display = 'none';
     if (extAnalytics) extAnalytics.style.display = 'none';
-    if (eyebrowAnalytics) eyebrowAnalytics.style.display = 'none';
     if (customersPanel) customersPanel.style.display = 'none';
   }
 }
