@@ -5,9 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>CODIGO — Menu Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
   <style>
     :root {
       --font: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
@@ -567,128 +565,6 @@
     #menuPanel .primary:hover {
       box-shadow: 0 4px 12px rgba(0,122,255,.18);
     }
-
-    /* ═══════════════════════════════════════════════════════════════════
-       MerchantOS — Phase 1 Visual Foundation (menu manager shell)
-       Scope: tokens, ambient wash, typography, cards, buttons, inputs,
-       pills, modals. Menu-item internals (rows, item grids) untouched.
-       ═══════════════════════════════════════════════════════════════════ */
-    :root {
-      --font-ui:       'Geist', 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
-      --font-mono:     'Geist Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
-      --font-editorial:'Instrument Serif', 'Times New Roman', serif;
-      --font: var(--font-ui);
-      --mos-radius-card: 16px;
-      --mos-radius-ctrl: 10px;
-      --mos-radius-pill: 999px;
-      --mos-ring: 0 0 0 2px rgba(255,255,255,.04), 0 0 0 4px rgba(120,170,255,.28);
-    }
-    [data-theme="dark"] {
-      --bg:             #0A0A0B;
-      --surface:        rgba(22,22,25,.72);
-      --surface-2:      rgba(30,30,34,.68);
-      --card:           rgba(20,20,24,.70);
-      --text:           #F5F5F7;
-      --text-secondary: rgba(245,245,247,.72);
-      --muted:          rgba(245,245,247,.46);
-      --border:         rgba(255,255,255,.08);
-      --border-light:   rgba(255,255,255,.05);
-      --accent:         #7AA8FF;
-      --accent-hover:   #A6C4FF;
-      --accent-subtle:  rgba(122,168,255,.10);
-      --accent-glow:    rgba(122,168,255,.18);
-      --success:        #5FD98A;
-      --success-bg:     rgba(95,217,138,.10);
-      --warning:        #F5C26B;
-      --warning-bg:     rgba(245,194,107,.10);
-      --danger:         #FF6B6B;
-      --danger-bg:      rgba(255,107,107,.10);
-      --header-bg:      rgba(14,14,16,.78);
-      --header-border:  rgba(255,255,255,.06);
-      --input-bg:       rgba(255,255,255,.03);
-      --logo-color:     #F5F5F7;
-    }
-    body { font-family: var(--font-ui); letter-spacing: -.005em; }
-    [data-theme="dark"] body {
-      background:
-        radial-gradient(1100px 580px at 15% -5%, rgba(122,168,255,.08), transparent 60%),
-        radial-gradient(900px  560px at 90% 10%, rgba(180,140,255,.05), transparent 65%),
-        #0A0A0B;
-      background-attachment: fixed;
-    }
-    [data-theme="dark"] .brand-header {
-      background: rgba(14,14,16,.80);
-      border-bottom: 1px solid rgba(255,255,255,.05);
-      box-shadow: none;
-    }
-    [data-theme="dark"] .card,
-    [data-theme="dark"] #menuPanel .card {
-      background: var(--card);
-      border: 1px solid rgba(255,255,255,.06);
-      border-radius: var(--mos-radius-card);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.03),
-        0 1px 2px rgba(0,0,0,.28);
-      -webkit-backdrop-filter: blur(14px) saturate(130%);
-      backdrop-filter: blur(14px) saturate(130%);
-    }
-    [data-theme="dark"] .card::before { box-shadow: none; }
-    [data-theme="dark"] button {
-      background: rgba(255,255,255,.04);
-      border: 1px solid rgba(255,255,255,.09);
-      color: var(--text);
-      border-radius: var(--mos-radius-ctrl);
-      box-shadow: none;
-    }
-    [data-theme="dark"] button:hover {
-      background: rgba(255,255,255,.07);
-      border-color: rgba(255,255,255,.14);
-      box-shadow: none;
-    }
-    [data-theme="dark"] button.primary,
-    [data-theme="dark"] #menuPanel .primary {
-      background: #F5F5F7;
-      color: #0A0A0B;
-      border: 1px solid rgba(255,255,255,.20);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.60),
-        0 1px 2px rgba(0,0,0,.35);
-    }
-    [data-theme="dark"] button.primary:hover,
-    [data-theme="dark"] #menuPanel .primary:hover {
-      background: #FFFFFF;
-      border-color: rgba(255,255,255,.32);
-      box-shadow:
-        inset 0 1px 0 rgba(255,255,255,.70),
-        0 2px 6px rgba(0,0,0,.40);
-    }
-    [data-theme="dark"] input,
-    [data-theme="dark"] select,
-    [data-theme="dark"] textarea {
-      background: rgba(255,255,255,.03);
-      border: 1px solid rgba(255,255,255,.08);
-      color: var(--text);
-      border-radius: var(--mos-radius-ctrl);
-      box-shadow: inset 0 1px 0 rgba(0,0,0,.20);
-    }
-    [data-theme="dark"] input:focus,
-    [data-theme="dark"] select:focus,
-    [data-theme="dark"] textarea:focus {
-      border-color: rgba(122,168,255,.45);
-      box-shadow: var(--mos-ring), inset 0 1px 0 rgba(0,0,0,.20);
-      background: rgba(255,255,255,.04);
-    }
-    [data-theme="dark"] .pill {
-      border-radius: var(--mos-radius-pill);
-      background: rgba(255,255,255,.04);
-      border: 1px solid rgba(255,255,255,.08);
-      color: var(--text-secondary);
-      box-shadow: none;
-    }
-    :root .card { border-radius: var(--mos-radius-card); }
-    :root button { border-radius: var(--mos-radius-ctrl); }
-    :root input, :root select, :root textarea { border-radius: var(--mos-radius-ctrl); }
-    :root .pill { border-radius: var(--mos-radius-pill); }
   </style>
 </head>
 <body>
