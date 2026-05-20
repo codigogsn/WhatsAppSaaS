@@ -1199,6 +1199,15 @@
     .pill-Cancelled { background: rgba(255,59,48,.08); color: #DC2626; }
     .pill-active { background: var(--success-bg); color: var(--success); }
     .pill-inactive { background: var(--danger-bg); color: var(--danger); }
+    /* Role pills — own palette, intentionally distinct from order-status pills */
+    .pill-role-founder  { background: rgba(175,82,222,.12); color: #8944AB; }
+    .pill-role-owner    { background: rgba(0,122,255,.10);  color: #0062CC; }
+    .pill-role-manager  { background: rgba(14,116,144,.12); color: #0E7490; }
+    .pill-role-operator { background: rgba(142,142,147,.16); color: #5F5F66; }
+    [data-theme="dark"] .pill-role-founder  { background: rgba(191,110,235,.16); border-color: rgba(200,130,240,.20); color: #D8A8F0; }
+    [data-theme="dark"] .pill-role-owner    { background: rgba(10,130,255,.16);  border-color: rgba(70,160,255,.20);  color: #6FB4FF; }
+    [data-theme="dark"] .pill-role-manager  { background: rgba(34,180,210,.16);  border-color: rgba(70,200,225,.20);  color: #6FD4E6; }
+    [data-theme="dark"] .pill-role-operator { background: rgba(160,160,170,.16);  border-color: rgba(190,190,200,.18); color: #C2C2CC; }
 
     /* ═══ Buttons — unified system ═══ */
     button {
@@ -2646,7 +2655,7 @@ Tipo: burger"></textarea>
         </div>
         <div>
           <label>Password *</label>
-          <input id="newUserPassword" type="password" placeholder="Min 6 caracteres" />
+          <input id="newUserPassword" type="password" placeholder="Min 8, 1 mayuscula, 1 numero" />
         </div>
         <div>
           <label>Rol</label>
@@ -2656,12 +2665,12 @@ Tipo: burger"></textarea>
             <option value="Owner">Propietario</option>
           </select>
         </div>
-        <div class="full">
+        <div class="full" id="newUserBizGroup">
           <label>Sedes / Negocios Asignados *</label>
           <div id="newUserBizList" style="max-height:200px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;background:var(--bg);"></div>
           <small class="muted" style="margin-top:4px;display:block;">Selecciona uno o mas negocios</small>
         </div>
-        <div>
+        <div id="newUserActiveGroup">
           <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;">
             <input id="newUserActive" type="checkbox" checked style="width:auto;" /> Usuario activo
           </label>
@@ -5691,6 +5700,26 @@ async function loadCrm(){
 }
 
 var roleLabels = {Founder:'Founder',Owner:'Propietario',Manager:'Gerente',Operator:'Operador'};
+
+// ─── User-management mode — single source of truth (Phase 5, frontend-only) ───
+// 'multi'  : Founder or global admin-key → cross-business endpoints (/api/admin/users/multi*)
+// 'scoped' : Owner → JWT-business-scoped endpoints (/api/admin/users, /api/admin/users/{id})
+function userMgmtMode(){
+  return (getAdminKey() || getAuthRole() === 'Founder') ? 'multi' : 'scoped';
+}
+// Roles assignable from the UI. Founder is NEVER offered here.
+function userMgmtRoleOptions(){
+  return userMgmtMode() === 'multi'
+    ? ['Owner', 'Manager', 'Operator']
+    : ['Manager', 'Operator'];
+}
+// PATCH URL for one existing user, resolved per mode.
+function userMgmtUserUrl(id, email){
+  return userMgmtMode() === 'multi'
+    ? '/api/admin/users/multi/' + encodeURIComponent(email || '')
+    : '/api/admin/users/' + encodeURIComponent(id || '');
+}
+
 async function loadUsers(){
   var tbody = document.getElementById('usersTbody');
   var bidAtStart = getBusinessId();
@@ -5707,24 +5736,35 @@ async function loadUsers(){
     for (var i = 0; i < users.length; i++) {
       var u = users[i];
       var bizNames = (u.businesses || []).map(function(b){ return esc(b.name); }).join(', ') || '<span class="muted">—</span>';
-      var rolePill = u.role === 'Founder' ? 'Completed' : u.role === 'Owner' ? 'Completed' : u.role === 'Manager' ? 'Preparing' : 'Pending';
+      var roleClass = 'pill-role-' + String(u.role || '').toLowerCase();
       var roleLabel = roleLabels[u.role] || u.role;
+      var actionsCell;
+      if (u.role === 'Founder') {
+        // Founder accounts are managed by server-side seeding only — never editable from this UI.
+        actionsCell = '<td><span class="muted" style="font-size:11px;">&mdash;</span></td>';
+      } else {
+        var roleOpts = userMgmtRoleOptions();
+        if (roleOpts.indexOf(u.role) === -1) roleOpts = [u.role].concat(roleOpts);
+        var roleOptsHtml = roleOpts.map(function(r){
+          return '<option value="' + esc(r) + '"' + (u.role === r ? ' selected' : '') + '>' + esc(roleLabels[r] || r) + '</option>';
+        }).join('');
+        actionsCell =
+          '<td style="white-space:nowrap;">' +
+            '<select data-uemail="' + esc(u.email) + '" data-uid="' + esc(u.id || '') + '" class="user-role-sel" style="font-size:11px;padding:3px 6px;">' +
+              roleOptsHtml +
+            '</select> ' +
+            '<button onclick="updateUserRoleMulti(this)" class="small" style="font-size:11px;padding:3px 8px;">Cambiar</button> ' +
+            '<button onclick="toggleUserActiveMulti(this)" data-uid="' + esc(u.id || '') + '" data-uemail="' + esc(u.email) + '" data-active="' + (u.isActive ? '1' : '0') + '" class="small ' + (u.isActive ? 'warn' : 'success') + '" style="font-size:11px;padding:3px 8px;">' + (u.isActive ? 'Desact.' : 'Activar') + '</button>' +
+          '</td>';
+      }
       var tr = document.createElement('tr');
       tr.innerHTML =
         '<td style="font-weight:500;">' + esc(u.name) + '</td>' +
         '<td style="font-size:12px;color:var(--muted);">' + esc(u.email) + '</td>' +
-        '<td><span class="pill pill-' + rolePill + '">' + esc(roleLabel) + '</span></td>' +
+        '<td><span class="pill ' + roleClass + '">' + esc(roleLabel) + '</span></td>' +
         '<td style="font-size:12px;max-width:200px;">' + bizNames + '</td>' +
         '<td>' + (u.isActive ? '<span class="pill pill-active">Activo</span>' : '<span class="pill pill-inactive">Inactivo</span>') + '</td>' +
-        '<td style="white-space:nowrap;">' +
-          '<select data-uemail="' + esc(u.email) + '" class="user-role-sel" style="font-size:11px;padding:3px 6px;">' +
-            '<option value="Operator"' + (u.role==='Operator'?' selected':'') + '>Operador</option>' +
-            '<option value="Manager"' + (u.role==='Manager'?' selected':'') + '>Gerente</option>' +
-            '<option value="Owner"' + (u.role==='Owner'?' selected':'') + '>Propietario</option>' +
-          '</select> ' +
-          '<button onclick="updateUserRoleMulti(this)" class="small" style="font-size:11px;padding:3px 8px;">Cambiar</button> ' +
-          '<button onclick="toggleUserActiveMulti(\'' + esc(u.email) + '\',' + !u.isActive + ')" class="small ' + (u.isActive ? 'warn' : 'success') + '" style="font-size:11px;padding:3px 8px;">' + (u.isActive ? 'Desact.' : 'Activar') + '</button>' +
-        '</td>';
+        actionsCell;
       tbody.appendChild(tr);
     }
   } catch(e) {
@@ -5732,29 +5772,41 @@ async function loadUsers(){
   }
 }
 
+// Row action — change role. Endpoint resolved by userMgmtMode() (multi vs scoped).
 async function updateUserRoleMulti(btn){
   var sel = btn.parentElement.querySelector('.user-role-sel');
   var email = sel.getAttribute('data-uemail');
+  var id = sel.getAttribute('data-uid');
   var role = sel.value;
   try {
-    var res = await authFetch('/api/admin/users/multi/' + encodeURIComponent(email), {
+    var res = await authFetch(userMgmtUserUrl(id, email), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ role: role })
     });
-    if (!res.ok) { showToast('Failed to update role', 'error'); return; }
+    if (!res.ok) {
+      var err = await res.json().catch(function(){ return {}; });
+      showToast(err.error || 'Failed to update role', 'error'); return;
+    }
     await loadUsers();
   } catch(e) { showToast(e.message, 'error'); }
 }
 
-async function toggleUserActiveMulti(email, newActive){
+// Row action — activate/deactivate. Endpoint resolved by userMgmtMode() (multi vs scoped).
+async function toggleUserActiveMulti(btn){
+  var id = btn.getAttribute('data-uid');
+  var email = btn.getAttribute('data-uemail');
+  var newActive = btn.getAttribute('data-active') !== '1';
   try {
-    var res = await authFetch('/api/admin/users/multi/' + encodeURIComponent(email), {
+    var res = await authFetch(userMgmtUserUrl(id, email), {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ isActive: newActive })
     });
-    if (!res.ok) { showToast('Failed to update status', 'error'); return; }
+    if (!res.ok) {
+      var err = await res.json().catch(function(){ return {}; });
+      showToast(err.error || 'Failed to update status', 'error'); return;
+    }
     await loadUsers();
   } catch(e) { showToast(e.message, 'error'); }
 }
@@ -5763,21 +5815,35 @@ function openCreateUser(){
   var overlay = document.getElementById('createUserModal');
   document.getElementById('createUserMsg').textContent = '';
   ['newUserName','newUserEmail','newUserPassword'].forEach(function(id){ document.getElementById(id).value = ''; });
-  document.getElementById('newUserRole').value = 'Operator';
   document.getElementById('newUserActive').checked = true;
-  // Populate business checkboxes
+  var mode = userMgmtMode();
+  // Role options — single source of truth; Founder is never offered.
+  var roleSel = document.getElementById('newUserRole');
+  roleSel.innerHTML = userMgmtRoleOptions().map(function(r){
+    return '<option value="' + esc(r) + '">' + esc(roleLabels[r] || r) + '</option>';
+  }).join('');
+  roleSel.value = 'Operator';
+  // Business multi-select + active toggle are only meaningful in cross-business (multi) mode.
+  // Scoped Owners: the new user is created in the Owner's JWT business, always active.
+  var bizGroup = document.getElementById('newUserBizGroup');
+  var activeGroup = document.getElementById('newUserActiveGroup');
+  if (bizGroup) bizGroup.style.display = (mode === 'multi') ? '' : 'none';
+  if (activeGroup) activeGroup.style.display = (mode === 'multi') ? '' : 'none';
+  // Populate business checkboxes (multi mode only)
   var container = document.getElementById('newUserBizList');
   container.innerHTML = '';
-  var list = (typeof businessList !== 'undefined' && Array.isArray(businessList)) ? businessList.filter(function(b){ return b.isActive && !b.isJunk; }) : [];
-  if (list.length === 0) {
-    container.innerHTML = '<span class="muted">No hay negocios disponibles</span>';
-  } else {
-    for (var i = 0; i < list.length; i++) {
-      var b = list[i];
-      var lbl = document.createElement('label');
-      lbl.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border-light);';
-      lbl.innerHTML = '<input type="checkbox" value="' + esc(b.id) + '" class="newUserBizCb" style="width:auto;flex-shrink:0;" /> <span>' + esc(b.name) + '</span>';
-      container.appendChild(lbl);
+  if (mode === 'multi') {
+    var list = (typeof businessList !== 'undefined' && Array.isArray(businessList)) ? businessList.filter(function(b){ return b.isActive && !b.isJunk; }) : [];
+    if (list.length === 0) {
+      container.innerHTML = '<span class="muted">No hay negocios disponibles</span>';
+    } else {
+      for (var i = 0; i < list.length; i++) {
+        var b = list[i];
+        var lbl = document.createElement('label');
+        lbl.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border-light);';
+        lbl.innerHTML = '<input type="checkbox" value="' + esc(b.id) + '" class="newUserBizCb" style="width:auto;flex-shrink:0;" /> <span>' + esc(b.name) + '</span>';
+        container.appendChild(lbl);
+      }
     }
   }
   overlay.classList.add('open');
@@ -5792,6 +5858,7 @@ function closeCreateUser(){
 }
 
 async function submitCreateUser(){
+  var mode = userMgmtMode();
   var name = document.getElementById('newUserName').value.trim();
   var email = document.getElementById('newUserEmail').value.trim();
   var password = document.getElementById('newUserPassword').value;
@@ -5800,27 +5867,40 @@ async function submitCreateUser(){
   var bizCheckboxes = document.querySelectorAll('.newUserBizCb:checked');
   var businessIds = [];
   bizCheckboxes.forEach(function(cb){ businessIds.push(cb.value); });
+  var msg = document.getElementById('createUserMsg');
 
-  if (!name || !email || !password) { document.getElementById('createUserMsg').innerHTML = '<span class="danger">Todos los campos son requeridos</span>'; return; }
-  if (password.length < 6) { document.getElementById('createUserMsg').innerHTML = '<span class="danger">Password min 6 caracteres</span>'; return; }
-  if (businessIds.length === 0) { document.getElementById('createUserMsg').innerHTML = '<span class="danger">Selecciona al menos un negocio</span>'; return; }
+  if (!name || !email || !password) { msg.innerHTML = '<span class="danger">Todos los campos son requeridos</span>'; return; }
+  // Password policy — aligned with backend (min 8 chars, 1 uppercase, 1 digit).
+  if (password.length < 8) { msg.innerHTML = '<span class="danger">Password: minimo 8 caracteres</span>'; return; }
+  if (!/[A-Z]/.test(password)) { msg.innerHTML = '<span class="danger">Password: incluye al menos 1 mayuscula</span>'; return; }
+  if (!/[0-9]/.test(password)) { msg.innerHTML = '<span class="danger">Password: incluye al menos 1 numero</span>'; return; }
+  if (mode === 'multi' && businessIds.length === 0) { msg.innerHTML = '<span class="danger">Selecciona al menos un negocio</span>'; return; }
 
-  document.getElementById('createUserMsg').innerHTML = '<span class="muted">Creando...</span>';
+  msg.innerHTML = '<span class="muted">Creando...</span>';
   try {
-    var res = await authFetch('/api/admin/users/multi', {
+    var url, payload;
+    if (mode === 'multi') {
+      url = '/api/admin/users/multi';
+      payload = { name: name, email: email, password: password, role: role, isActive: isActive, businessIds: businessIds };
+    } else {
+      // Scoped Owner: businessId is taken from the JWT server-side; new user is created active.
+      url = '/api/admin/users';
+      payload = { name: name, email: email, password: password, role: role };
+    }
+    var res = await authFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name, email: email, password: password, role: role, isActive: isActive, businessIds: businessIds })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
       var err = await res.json().catch(function(){ return {}; });
-      document.getElementById('createUserMsg').innerHTML = '<span class="danger">' + esc(err.error || 'Error') + '</span>';
+      msg.innerHTML = '<span class="danger">' + esc(err.error || 'Error') + '</span>';
       return;
     }
-    document.getElementById('createUserMsg').innerHTML = '<span class="ok">Usuario creado en ' + businessIds.length + ' negocio(s)</span>';
+    msg.innerHTML = '<span class="ok">Usuario creado' + (mode === 'multi' ? ' en ' + businessIds.length + ' negocio(s)' : '') + '</span>';
     setTimeout(function(){ closeCreateUser(); loadUsers(); }, 1500);
   } catch(e) {
-    document.getElementById('createUserMsg').innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
+    msg.innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
   }
 }
 
