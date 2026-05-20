@@ -5702,10 +5702,13 @@ async function loadCrm(){
 var roleLabels = {Founder:'Founder',Owner:'Propietario',Manager:'Gerente',Operator:'Operador'};
 
 // ─── User-management mode — single source of truth (Phase 5, frontend-only) ───
-// 'multi'  : Founder or global admin-key → cross-business endpoints (/api/admin/users/multi*)
-// 'scoped' : Owner → JWT-business-scoped endpoints (/api/admin/users, /api/admin/users/{id})
+// 'multi'  : Founder → cross-business endpoints (/api/admin/users/multi*)
+// 'scoped' : Owner  → JWT-business-scoped endpoints (/api/admin/users, /api/admin/users/{id})
+// Decided by the authenticated ROLE only. A stale ADMIN_KEY left in localStorage
+// must NOT force 'multi' — an Owner with a leftover key would otherwise hit the
+// Founder-only /multi endpoint and fail with "Global admin or Founder role required".
 function userMgmtMode(){
-  return (getAdminKey() || getAuthRole() === 'Founder') ? 'multi' : 'scoped';
+  return getAuthRole() === 'Founder' ? 'multi' : 'scoped';
 }
 // Roles assignable from the UI. Founder is NEVER offered here.
 function userMgmtRoleOptions(){
@@ -5725,8 +5728,8 @@ async function loadUsers(){
   var bidAtStart = getBusinessId();
   tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
   try {
-    // Global admin (admin key) or Founder role gets cross-business view; regular owners see their business only
-    var url = (getAdminKey() || getAuthRole() === 'Founder') ? '/api/admin/users/all' : '/api/admin/users';
+    // Founder gets the cross-business view; Owners see their own business only (same mode resolver as create).
+    var url = (userMgmtMode() === 'multi') ? '/api/admin/users/all' : '/api/admin/users';
     var res = await authFetch(url);
     if (bidAtStart !== getBusinessId()) { console.log('[USERS] business changed during fetch — discarding'); return; }
     if (!res.ok) { tbody.innerHTML = '<tr><td colspan="6" class="danger">Error cargando usuarios</td></tr>'; return; }
