@@ -22,9 +22,20 @@ public sealed class SignatureValidator : ISignatureValidator
 
     public bool IsValid(string payload, string signature)
     {
-        if (string.IsNullOrEmpty(_options.AppSecret))
+        // All configured secrets: primary AppSecret + comma-separated AdditionalAppSecrets.
+        // Entries are trimmed, empties dropped, de-duplicated. A webhook signed by ANY of
+        // our Meta apps is accepted — each candidate is a full HMAC-SHA256 + fixed-time compare.
+        var candidates = new List<string>();
+        if (!string.IsNullOrWhiteSpace(_options.AppSecret))
+            candidates.Add(_options.AppSecret.Trim());
+        if (!string.IsNullOrWhiteSpace(_options.AdditionalAppSecrets))
+            candidates.AddRange(_options.AdditionalAppSecrets
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+        candidates = candidates.Distinct().ToList();
+
+        if (candidates.Count == 0)
         {
-            _logger.LogError("SIGNATURE VALIDATION FAIL-CLOSED: AppSecret not configured — rejecting request");
+            _logger.LogError("SIGNATURE VALIDATION FAIL-CLOSED: no app secrets configured — rejecting request");
             return false;
         }
 
@@ -42,24 +53,19 @@ public sealed class SignatureValidator : ISignatureValidator
             return false;
         }
 
-        var expectedHex = signature[prefix.Length..];
-
-        var keyBytes = Encoding.UTF8.GetBytes(_options.AppSecret);
+        var expectedBytes = Encoding.UTF8.GetBytes(signature[prefix.Length..].ToLowerInvariant());
         var payloadBytes = Encoding.UTF8.GetBytes(payload);
 
-        using var hmac = new HMACSHA256(keyBytes);
-        var hash = hmac.ComputeHash(payloadBytes);
-        var computedHex = Convert.ToHexString(hash).ToLowerInvariant();
-
-        var isValid = CryptographicOperations.FixedTimeEquals(
-            Encoding.UTF8.GetBytes(computedHex),
-            Encoding.UTF8.GetBytes(expectedHex.ToLowerInvariant()));
-
-        if (!isValid)
+        // Accept if the signature matches ANY configured secret.
+        foreach (var secret in candidates)
         {
-            _logger.LogWarning("Signature validation failed");
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+            var computedHex = Convert.ToHexString(hmac.ComputeHash(payloadBytes)).ToLowerInvariant();
+            if (CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(computedHex), expectedBytes))
+                return true;
         }
 
-        return isValid;
+        _logger.LogWarning("Signature validation failed");
+        return false;
     }
 }

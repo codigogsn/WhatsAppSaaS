@@ -17,6 +17,14 @@ public sealed class WhatsAppOptions
 
     public string? AppSecret { get; set; }
 
+    /// <summary>
+    /// Additional Meta app secrets (comma-separated) used to validate incoming
+    /// webhook signatures. Lets webhooks signed by other Meta apps/WABAs validate
+    /// alongside the primary <see cref="AppSecret"/>. Falls back to env var
+    /// WHATSAPP_ADDITIONAL_APP_SECRETS.
+    /// </summary>
+    public string? AdditionalAppSecrets { get; set; }
+
     public bool RequireSignatureValidation { get; set; } = false;
 
     /// <summary>

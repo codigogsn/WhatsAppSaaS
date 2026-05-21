@@ -28,6 +28,13 @@ public static class ServiceCollectionExtensions
                                 ?? Environment.GetEnvironmentVariable("WhatsApp__AppSecret");
                 if (!string.IsNullOrWhiteSpace(envSecret))
                     opts.AppSecret = envSecret;
+
+                // Env var override for additional Meta app secrets (comma-separated) —
+                // validates webhooks signed by other Meta apps/WABAs.
+                var envAdditional = Environment.GetEnvironmentVariable("WHATSAPP_ADDITIONAL_APP_SECRETS")
+                                    ?? Environment.GetEnvironmentVariable("WhatsApp__AdditionalAppSecrets");
+                if (!string.IsNullOrWhiteSpace(envAdditional))
+                    opts.AdditionalAppSecrets = envAdditional;
             });
 
         // ── AiParser options ────────────────────────────
