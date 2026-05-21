@@ -44,12 +44,14 @@ public sealed class WhatsAppClient : IWhatsAppClient
             return false;
         }
 
-        // Token resolution order: env var > message.AccessToken (per-business) > appsettings
-        var accessToken = Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN")
-                          ?? Environment.GetEnvironmentVariable("META_ACCESS_TOKEN");
+        // Token resolution order: per-business token > env var > appsettings.
+        // Per-business MUST win so each tenant sends with its own Meta app's token;
+        // the global env var is only a fallback for businesses with no stored token.
+        var accessToken = message.AccessToken;
 
         if (string.IsNullOrWhiteSpace(accessToken))
-            accessToken = message.AccessToken;
+            accessToken = Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN")
+                          ?? Environment.GetEnvironmentVariable("META_ACCESS_TOKEN");
 
         if (string.IsNullOrWhiteSpace(accessToken))
             accessToken = _options.AccessToken;
