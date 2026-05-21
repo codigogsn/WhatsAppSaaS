@@ -5988,16 +5988,24 @@ function openEditSedes(btn){
     return '<option value="' + esc(r) + '">' + esc(roleLabels[r] || r) + '</option>';
   }).join('');
   roleSel.value = role;
-  // Business checkboxes — all active businesses; the user's current sedes pre-checked.
+  // Business checkboxes. The user's CURRENT sedes are always shown and pre-checked —
+  // even if inactive/junk — so this full-replacement save can never silently drop them.
+  // GUID match is case-insensitive (id casing can differ between endpoints).
   var container = document.getElementById('editSedesBizList');
   container.innerHTML = '';
-  var list = (typeof businessList !== 'undefined' && Array.isArray(businessList)) ? businessList.filter(function(b){ return b.isActive && !b.isJunk; }) : [];
+  var currentSet = {};
+  currentIds.forEach(function(id){ currentSet[String(id).toLowerCase()] = true; });
+  var all = (typeof businessList !== 'undefined' && Array.isArray(businessList)) ? businessList : [];
+  // Show active non-junk businesses (for adding) PLUS any business the user is already assigned to.
+  var list = all.filter(function(b){
+    return (b.isActive && !b.isJunk) || currentSet[String(b.id).toLowerCase()];
+  });
   if (list.length === 0) {
     container.innerHTML = '<span class="muted">No hay negocios cargados — recarga negocios primero.</span>';
   } else {
     for (var i = 0; i < list.length; i++) {
       var b = list[i];
-      var checked = currentIds.indexOf(b.id) !== -1 ? ' checked' : '';
+      var checked = currentSet[String(b.id).toLowerCase()] ? ' checked' : '';
       var lbl = document.createElement('label');
       lbl.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border-light);';
       lbl.innerHTML = '<input type="checkbox" value="' + esc(b.id) + '" class="editSedesCb"' + checked + ' style="width:auto;flex-shrink:0;" /> <span>' + esc(b.name) + '</span>';
