@@ -957,7 +957,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
-                                Body = Msg.ContinueOrder,
+                                Body = !string.IsNullOrWhiteSpace(businessContext.Greeting)
+                                       ? businessContext.Greeting
+                                       : Msg.ContinueOrder,
                                 PhoneNumberId = phoneNumberId,
                                 AccessToken = businessContext.AccessToken
                             }, businessContext.BusinessId, conversationId, cancellationToken);
