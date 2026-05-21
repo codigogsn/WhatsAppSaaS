@@ -2684,6 +2684,28 @@ Tipo: burger"></textarea>
     </div>
   </div>
 
+  <div id="editSedesModal" class="modal-overlay" onclick="if(event.target===this)closeEditSedes()">
+    <div class="modal">
+      <h3 id="editSedesTitle">Sedes</h3>
+      <div class="form-grid">
+        <div>
+          <label>Rol</label>
+          <select id="editSedesRole"></select>
+        </div>
+        <div class="full">
+          <label>Sedes / Negocios Asignados *</label>
+          <div id="editSedesBizList" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:var(--radius);padding:10px 12px;background:var(--bg);"></div>
+          <small class="muted" style="margin-top:4px;display:block;">Marca todas las sedes del usuario. Esta lista reemplaza la asignacion actual.</small>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:18px;">
+        <button class="primary" onclick="submitEditSedes()">Guardar Sedes</button>
+        <button onclick="closeEditSedes()">Cancelar</button>
+        <span id="editSedesMsg" class="small" style="margin-left:4px;"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- Global mode placeholder -->
   <div id="globalModeBanner" class="global-banner" style="display:none;">
     <div class="global-banner-icon">&#9776;</div>
@@ -5762,6 +5784,15 @@ async function loadUsers(){
         var deleteBtnHtml = canDelete
           ? ' <button onclick="deleteUser(this)" data-uid="' + esc(u.id) + '" data-uname="' + esc(u.name || u.email) + '" data-multi="' + (isMultiSede ? '1' : '0') + '" class="small" style="font-size:11px;padding:3px 8px;background:var(--danger);border-color:var(--danger);color:#fff;">Eliminar</button>'
           : '';
+        // Editar Sedes button — multi mode only (row carries businesses[]; UpdateMulti is Founder-gated).
+        // Hidden for the current logged-in user. Founder rows never reach this branch.
+        var canEditSedes = userMgmtMode() === 'multi'
+          && !!u.id
+          && String(u.email || '').toLowerCase() !== currentEmail;
+        var bizIds = (u.businesses || []).map(function(b){ return b.id; }).join(',');
+        var sedesBtnHtml = canEditSedes
+          ? ' <button onclick="openEditSedes(this)" data-uemail="' + esc(u.email) + '" data-urole="' + esc(u.role || '') + '" data-bizids="' + esc(bizIds) + '" class="small" style="font-size:11px;padding:3px 8px;">Sedes</button>'
+          : '';
         actionsCell =
           '<td style="white-space:nowrap;">' +
             '<select data-uemail="' + esc(u.email) + '" data-uid="' + esc(u.id || '') + '" class="user-role-sel" style="font-size:11px;padding:3px 6px;">' +
@@ -5769,6 +5800,7 @@ async function loadUsers(){
             '</select> ' +
             '<button onclick="updateUserRoleMulti(this)" class="small" style="font-size:11px;padding:3px 8px;">Cambiar</button> ' +
             '<button onclick="toggleUserActiveMulti(this)" data-uid="' + esc(u.id || '') + '" data-uemail="' + esc(u.email) + '" data-active="' + (u.isActive ? '1' : '0') + '" class="small ' + (u.isActive ? 'warn' : 'success') + '" style="font-size:11px;padding:3px 8px;">' + (u.isActive ? 'Desact.' : 'Activar') + '</button>' +
+            sedesBtnHtml +
             deleteBtnHtml +
           '</td>';
       }
@@ -5934,6 +5966,81 @@ async function submitCreateUser(){
     }
     msg.innerHTML = '<span class="ok">Usuario creado' + (mode === 'multi' ? ' en ' + businessIds.length + ' negocio(s)' : '') + '</span>';
     setTimeout(function(){ closeCreateUser(); loadUsers(); }, 1500);
+  } catch(e) {
+    msg.innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
+  }
+}
+
+// ── Editar Sedes — reassign businesses for an existing user via PATCH /api/admin/users/multi/{email} ──
+function openEditSedes(btn){
+  var email = btn.getAttribute('data-uemail') || '';
+  var role = btn.getAttribute('data-urole') || 'Operator';
+  var currentIds = (btn.getAttribute('data-bizids') || '').split(',').filter(Boolean);
+  var overlay = document.getElementById('editSedesModal');
+  overlay.dataset.email = email;
+  document.getElementById('editSedesMsg').textContent = '';
+  document.getElementById('editSedesTitle').textContent = 'Sedes de ' + email;
+  // Role select — pre-set to the user's current role (preserved unless changed).
+  var roleSel = document.getElementById('editSedesRole');
+  var roleOpts = userMgmtRoleOptions();
+  if (roleOpts.indexOf(role) === -1) roleOpts = [role].concat(roleOpts);
+  roleSel.innerHTML = roleOpts.map(function(r){
+    return '<option value="' + esc(r) + '">' + esc(roleLabels[r] || r) + '</option>';
+  }).join('');
+  roleSel.value = role;
+  // Business checkboxes — all active businesses; the user's current sedes pre-checked.
+  var container = document.getElementById('editSedesBizList');
+  container.innerHTML = '';
+  var list = (typeof businessList !== 'undefined' && Array.isArray(businessList)) ? businessList.filter(function(b){ return b.isActive && !b.isJunk; }) : [];
+  if (list.length === 0) {
+    container.innerHTML = '<span class="muted">No hay negocios cargados — recarga negocios primero.</span>';
+  } else {
+    for (var i = 0; i < list.length; i++) {
+      var b = list[i];
+      var checked = currentIds.indexOf(b.id) !== -1 ? ' checked' : '';
+      var lbl = document.createElement('label');
+      lbl.style.cssText = 'display:flex;align-items:center;gap:8px;padding:5px 4px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border-light);';
+      lbl.innerHTML = '<input type="checkbox" value="' + esc(b.id) + '" class="editSedesCb"' + checked + ' style="width:auto;flex-shrink:0;" /> <span>' + esc(b.name) + '</span>';
+      container.appendChild(lbl);
+    }
+  }
+  overlay.classList.add('open');
+  document.body.style.overflow = 'hidden';
+  overlay.scrollTop = 0;
+}
+function closeEditSedes(){
+  var overlay = document.getElementById('editSedesModal');
+  overlay.classList.remove('open');
+  document.body.style.overflow = '';
+  overlay.scrollTop = 0;
+}
+async function submitEditSedes(){
+  var overlay = document.getElementById('editSedesModal');
+  var email = overlay.dataset.email || '';
+  var role = document.getElementById('editSedesRole').value;
+  var msg = document.getElementById('editSedesMsg');
+  var businessIds = [];
+  document.querySelectorAll('.editSedesCb:checked').forEach(function(cb){ businessIds.push(cb.value); });
+
+  if (!email) { msg.innerHTML = '<span class="danger">Falta el email del usuario</span>'; return; }
+  // Block 0 selected — UpdateMulti full-replacement would remove every assignment and lock the user out.
+  if (businessIds.length === 0) { msg.innerHTML = '<span class="danger">Selecciona al menos una sede</span>'; return; }
+
+  msg.innerHTML = '<span class="muted">Guardando...</span>';
+  try {
+    var res = await authFetch('/api/admin/users/multi/' + encodeURIComponent(email), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: role, businessIds: businessIds })
+    });
+    if (!res.ok) {
+      var err = await res.json().catch(function(){ return {}; });
+      msg.innerHTML = '<span class="danger">' + esc(err.error || 'No se pudo actualizar las sedes') + '</span>';
+      return;
+    }
+    msg.innerHTML = '<span class="ok">Sedes actualizadas (' + businessIds.length + ')</span>';
+    showToast('Sedes actualizadas', 'success');
+    setTimeout(function(){ closeEditSedes(); loadUsers(); }, 1200);
   } catch(e) {
     msg.innerHTML = '<span class="danger">' + esc(e.message) + '</span>';
   }
