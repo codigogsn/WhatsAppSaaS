@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using WhatsAppSaaS.Api.Auth;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Domain.Entities;
@@ -45,11 +46,27 @@ public sealed class OrdersController : ControllerBase
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
 
-        // Founder can view any business; other JWT users are scoped to their own
-        var jwtBizId = GetJwtBusinessId();
+        // Founder can view any business. Non-Founder JWT users are scoped to the
+        // FULL set of businesses they are assigned to (JWT "businessIds" claim) —
+        // not just their single primary business. A ?businessId selection is honored
+        // only when it is one the caller is assigned to.
         var jwtRole = User.FindFirstValue(ClaimTypes.Role);
-        if (jwtBizId.HasValue && jwtRole != "Founder")
-            businessId = jwtBizId.Value;
+        var scopeBizIds = new List<Guid>();
+        if (jwtRole != "Founder")
+        {
+            var allowedBizIds = AdminAuth.GetBusinessIds(User);
+            if (allowedBizIds.Count > 0)
+            {
+                if (!businessId.HasValue || !allowedBizIds.Contains(businessId.Value))
+                {
+                    // no selection, or a business the caller is not assigned to →
+                    // scope to ALL the caller's businesses
+                    businessId = null;
+                    scopeBizIds = allowedBizIds;
+                }
+                // else: requested businessId is one of theirs → keep the single filter
+            }
+        }
 
         if (take < 1) take = 1;
         if (take > 200) take = 200;
@@ -60,7 +77,11 @@ public sealed class OrdersController : ControllerBase
             if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
 
             var where = "WHERE 1=1";
-            if (businessId.HasValue) where += " AND o.\"BusinessId\" = @bid";
+            if (businessId.HasValue)
+                where += " AND o.\"BusinessId\" = @bid";
+            else if (scopeBizIds.Count > 0)
+                where += " AND o.\"BusinessId\" IN (" +
+                         string.Join(",", Enumerable.Range(0, scopeBizIds.Count).Select(i => "@sb" + i)) + ")";
             if (!string.IsNullOrWhiteSpace(status)) where += " AND o.\"Status\" = @status";
 
             // Query orders
@@ -71,6 +92,8 @@ public sealed class OrdersController : ControllerBase
             """;
             AddP(cmd, "take", take);
             if (businessId.HasValue) AddP(cmd, "bid", businessId.Value);
+            else if (scopeBizIds.Count > 0)
+                for (var i = 0; i < scopeBizIds.Count; i++) AddP(cmd, "sb" + i, scopeBizIds[i]);
             if (!string.IsNullOrWhiteSpace(status)) AddP(cmd, "status", status);
 
             var orders = new List<(Dictionary<string, object?> Data, string Id)>();
