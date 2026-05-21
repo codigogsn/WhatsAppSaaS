@@ -5726,6 +5726,7 @@ function userMgmtUserUrl(id, email){
 async function loadUsers(){
   var tbody = document.getElementById('usersTbody');
   var bidAtStart = getBusinessId();
+  var currentEmail = String((getJwtUser() || {}).email || '').toLowerCase();
   tbody.innerHTML = '<tr><td colspan="6" class="muted">Cargando...</td></tr>';
   try {
     // Founder gets the cross-business view; Owners see their own business only (same mode resolver as create).
@@ -5751,6 +5752,16 @@ async function loadUsers(){
         var roleOptsHtml = roleOpts.map(function(r){
           return '<option value="' + esc(r) + '"' + (u.role === r ? ' selected' : '') + '>' + esc(roleLabels[r] || r) + '</option>';
         }).join('');
+        // Delete button — hidden for the current logged-in user, active Owners, and rows
+        // with no id. (Founder rows never reach this branch.) Multi-sede users get a
+        // warning in the confirm dialog. Permanent hard delete of one BusinessUser row.
+        var canDelete = !!u.id
+          && String(u.email || '').toLowerCase() !== currentEmail
+          && !(u.role === 'Owner' && u.isActive);
+        var isMultiSede = !u.businesses || (u.businesses.length > 1);
+        var deleteBtnHtml = canDelete
+          ? ' <button onclick="deleteUser(this)" data-uid="' + esc(u.id) + '" data-uname="' + esc(u.name || u.email) + '" data-multi="' + (isMultiSede ? '1' : '0') + '" class="small" style="font-size:11px;padding:3px 8px;background:var(--danger);border-color:var(--danger);color:#fff;">Eliminar</button>'
+          : '';
         actionsCell =
           '<td style="white-space:nowrap;">' +
             '<select data-uemail="' + esc(u.email) + '" data-uid="' + esc(u.id || '') + '" class="user-role-sel" style="font-size:11px;padding:3px 6px;">' +
@@ -5758,6 +5769,7 @@ async function loadUsers(){
             '</select> ' +
             '<button onclick="updateUserRoleMulti(this)" class="small" style="font-size:11px;padding:3px 8px;">Cambiar</button> ' +
             '<button onclick="toggleUserActiveMulti(this)" data-uid="' + esc(u.id || '') + '" data-uemail="' + esc(u.email) + '" data-active="' + (u.isActive ? '1' : '0') + '" class="small ' + (u.isActive ? 'warn' : 'success') + '" style="font-size:11px;padding:3px 8px;">' + (u.isActive ? 'Desact.' : 'Activar') + '</button>' +
+            deleteBtnHtml +
           '</td>';
       }
       var tr = document.createElement('tr');
@@ -5810,6 +5822,26 @@ async function toggleUserActiveMulti(btn){
       var err = await res.json().catch(function(){ return {}; });
       showToast(err.error || 'Failed to update status', 'error'); return;
     }
+    await loadUsers();
+  } catch(e) { showToast(e.message, 'error'); }
+}
+
+// Row action — permanent HARD delete of one BusinessUser row via DELETE /api/admin/users/{id}.
+async function deleteUser(btn){
+  var id = btn.getAttribute('data-uid');
+  var name = btn.getAttribute('data-uname') || 'este usuario';
+  if (!id) { showToast('Falta el id del usuario', 'error'); return; }
+  var msg = 'Eliminar permanentemente a ' + name + '?\nEsta acción no se puede deshacer.';
+  if (btn.getAttribute('data-multi') === '1')
+    msg += '\n\nEste usuario puede existir en varias sedes. Esta acción eliminará SOLO esta asignación.';
+  if (!confirm(msg)) return;
+  try {
+    var res = await authFetch('/api/admin/users/' + encodeURIComponent(id), { method: 'DELETE' });
+    if (!res.ok) {
+      var err = await res.json().catch(function(){ return {}; });
+      showToast(err.error || 'No se pudo eliminar el usuario', 'error'); return;
+    }
+    showToast('Usuario eliminado', 'success');
     await loadUsers();
   } catch(e) { showToast(e.message, 'error'); }
 }
