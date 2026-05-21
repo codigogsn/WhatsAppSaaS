@@ -364,8 +364,8 @@ public class AdminBusinessesController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Create([FromBody] CreateBusinessRequest req, CancellationToken ct)
     {
-        if (!IsGlobalAdmin())
-            return Unauthorized();
+        if (!IsGlobalAdmin() && !AdminAuth.IsFounder(User))
+            return Unauthorized(new { error = "Founder role or global admin key required" });
 
         if (string.IsNullOrWhiteSpace(req.Name))
             return BadRequest(new { error = "Name is required" });
