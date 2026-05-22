@@ -61,7 +61,7 @@ public class ParserHardeningTests
             new Mock<ILogger<WebhookProcessor>>().Object);
 
         // Set active catalog for static helper access (include extras for modifier tests)
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
     }
 
     // ═══════════════════════════════════════════════════════════

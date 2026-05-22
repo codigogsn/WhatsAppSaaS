@@ -13,7 +13,7 @@ public class OrderParserAccuracyTests
 {
     public OrderParserAccuracyTests()
     {
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -814,10 +814,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "Coca Cola", Aliases = new[] { "coca cola", "cocacola" }, Price = 0.02m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = corruptCatalog;
+            WebhookProcessor.ActiveCatalog.Value = corruptCatalog;
 
             var state = new ConversationFields();
 
@@ -841,7 +841,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -944,10 +944,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "Coca Cola", Aliases = new[] { "coca cola" }, Price = 0.02m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = corruptCatalog;
+            WebhookProcessor.ActiveCatalog.Value = corruptCatalog;
 
             // Resolve "hamburguesas" via NormalizeMenuItemName with corrupt catalog
             var resolved = WebhookProcessor.NormalizeMenuItemName("hamburguesas");
@@ -965,7 +965,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -979,10 +979,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "Hamburguesa Clasica", Aliases = new[] { "hamburguesa" }, Price = 6.50m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = normalCatalog;
+            WebhookProcessor.ActiveCatalog.Value = normalCatalog;
 
             // With normal price, the catalog entry price is used directly
             var entry = normalCatalog.FirstOrDefault(m =>
@@ -993,7 +993,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -1007,10 +1007,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 0.02m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = corruptCatalog;
+            WebhookProcessor.ActiveCatalog.Value = corruptCatalog;
 
             var parsed = WebhookProcessor.ParseOrderText("dame 2 hamburguesas y 1 coca cola");
             var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
@@ -1025,7 +1025,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -1044,10 +1044,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "coca cola", Aliases = new[] { "cocacola", "coca" }, Price = 0.02m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+            WebhookProcessor.ActiveCatalog.Value = incompleteCatalog;
 
             var input = "me vas a dar 3 perros clasicos 2 papas grandes y una cocacola";
             var parsed = WebhookProcessor.ParseOrderText(input);
@@ -1060,7 +1060,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -1072,10 +1072,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 1.50m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+            WebhookProcessor.ActiveCatalog.Value = incompleteCatalog;
 
             var parsed = WebhookProcessor.ParseOrderText("3 perros clasicos");
             var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
@@ -1086,7 +1086,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -1098,10 +1098,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 1.50m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+            WebhookProcessor.ActiveCatalog.Value = incompleteCatalog;
 
             var parsed = WebhookProcessor.ParseOrderText("2 papas grandes");
             var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
@@ -1112,7 +1112,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -1124,10 +1124,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 1.50m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+            WebhookProcessor.ActiveCatalog.Value = incompleteCatalog;
 
             var parsed = WebhookProcessor.ParseOrderText("una cocacola");
             var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
@@ -1137,7 +1137,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -1149,10 +1149,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "coca cola", Aliases = new[] { "cocacola" }, Price = 0.02m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+            WebhookProcessor.ActiveCatalog.Value = incompleteCatalog;
 
             var parsed = WebhookProcessor.ParseOrderText("quiero 3 perros clasicos 2 papas grandes y una cocacola");
             var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
@@ -1164,7 +1164,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -1176,10 +1176,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "coca cola", Aliases = new[] { "cocacola", "coca cola" }, Price = 0.02m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+            WebhookProcessor.ActiveCatalog.Value = incompleteCatalog;
 
             var parsed = WebhookProcessor.ParseOrderText("dame 3 perros clasicos, 2 papas grandes y una cocacola");
             var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
@@ -1191,7 +1191,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -1204,10 +1204,10 @@ public class OrderParserAccuracyTests
             new() { Canonical = "hamburguesa", Aliases = Array.Empty<string>(), Price = 0.06m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+            WebhookProcessor.ActiveCatalog.Value = incompleteCatalog;
 
             var parsed = WebhookProcessor.ParseOrderText("1 hamburguesa clasica");
             var items = parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
@@ -1219,7 +1219,7 @@ public class OrderParserAccuracyTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 }

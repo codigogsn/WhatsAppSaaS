@@ -15,7 +15,7 @@ public class CashFlowStateTests
 {
     public CashFlowStateTests()
     {
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
     }
 
     // ═══════════════════════════════════════════════════════════

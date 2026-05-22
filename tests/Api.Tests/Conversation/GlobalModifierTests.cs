@@ -57,7 +57,7 @@ public class GlobalModifierTests
             _stateStoreMock.Object,
             new Mock<ILogger<WebhookProcessor>>().Object);
 
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
     }
 
     // ═══════════════════════════════════════════════════════════

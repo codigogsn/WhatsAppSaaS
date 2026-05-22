@@ -336,7 +336,7 @@ internal static class Msg
 
     private static string ResolveCategoryKey(string itemName)
     {
-        var catalog = WebhookProcessor.ActiveCatalog ?? WebhookProcessor.MenuCatalog;
+        var catalog = WebhookProcessor.ActiveCatalog.Value ?? WebhookProcessor.MenuCatalog;
         var entry = catalog.FirstOrDefault(e =>
             e.Canonical.Equals(itemName, StringComparison.OrdinalIgnoreCase));
         var cat = entry?.Category?.ToLowerInvariant() ?? "";

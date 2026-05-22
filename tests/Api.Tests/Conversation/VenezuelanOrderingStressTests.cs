@@ -466,7 +466,7 @@ public class VenezuelanOrderingStressTests
     [Fact]
     public void Swap_ParsePattern_CambiaXPorY()
     {
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
         WebhookProcessor.TryParseOrderModification(
             "cambia la coca cola por una pepsi", out var mod).Should().BeTrue();
         mod.Type.Should().Be(WebhookProcessor.ModificationType.Swap);
@@ -588,7 +588,7 @@ public class VenezuelanOrderingStressTests
     [InlineData("perro", "Perro Clasico")]
     public void Typo_FuzzyMatchResolvesItem(string typo, string expected)
     {
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
         var resolved = WebhookProcessor.NormalizeMenuItemName(typo);
         resolved.Should().Be(expected);
     }
@@ -605,7 +605,7 @@ public class VenezuelanOrderingStressTests
     [Fact]
     public void Typo_ModificationWithTypos()
     {
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
         var result = WebhookProcessor.TryParseOrderModification("agrega 2 hamburgesas mas", out var mod);
         result.Should().BeTrue();
         mod.Type.Should().Be(WebhookProcessor.ModificationType.Add);
@@ -1000,7 +1000,7 @@ public class VenezuelanOrderingStressTests
     /// </summary>
     private static List<(string Name, int Quantity)> ParseQuick(string input)
     {
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
         WebhookProcessor.TryParseQuickOrder(input, out var items, out _, out _);
         return items;
     }

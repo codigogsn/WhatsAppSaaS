@@ -3880,7 +3880,7 @@ public class WebhookProcessorTests
     [InlineData("cambia las papas medianas por papas grandes")]
     public void TryParseOrderModification_Swap_Detected(string input)
     {
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
         var result = WebhookProcessor.TryParseOrderModification(input, out var mod);
         result.Should().BeTrue();
         mod.Type.Should().Be(WebhookProcessor.ModificationType.Swap);
@@ -3892,7 +3892,7 @@ public class WebhookProcessorTests
     [Fact]
     public void TryParseOrderModification_Swap_ResolvesCorrectItems()
     {
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
         var result = WebhookProcessor.TryParseOrderModification(
             "cambia la hamburguesa clasica por una hamburguesa doble", out var mod);
         result.Should().BeTrue();

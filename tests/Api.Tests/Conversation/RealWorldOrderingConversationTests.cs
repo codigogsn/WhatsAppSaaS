@@ -18,7 +18,7 @@ public class RealWorldOrderingConversationTests
 {
     public RealWorldOrderingConversationTests()
     {
-        WebhookProcessor.ActiveCatalog = TestCatalogHelper.MenuCatalogWithExtras;
+        WebhookProcessor.ActiveCatalog.Value = TestCatalogHelper.MenuCatalogWithExtras;
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -53,13 +53,13 @@ public class RealWorldOrderingConversationTests
         foreach (var p in parsed.Where(p => !string.IsNullOrWhiteSpace(p.Name)))
         {
             // Simulate AddOrIncreaseItem: look up price from catalog
-            var catalog = WebhookProcessor.ActiveCatalog ?? WebhookProcessor.MenuCatalog;
+            var catalog = WebhookProcessor.ActiveCatalog.Value ?? WebhookProcessor.MenuCatalog;
             var entry = catalog.FirstOrDefault(m =>
                 m.Canonical.Equals(p.Name, StringComparison.OrdinalIgnoreCase));
             var unitPrice = entry?.Price ?? 0m;
 
             // Price fallback to demo catalog (mirrors production logic)
-            if (unitPrice < 0.10m && WebhookProcessor.ActiveCatalog != null)
+            if (unitPrice < 0.10m && WebhookProcessor.ActiveCatalog.Value != null)
             {
                 var demoEntry = WebhookProcessor.FindDemoPriceFallback(p.Name);
                 if (demoEntry != null && demoEntry.Price > unitPrice)
@@ -459,10 +459,10 @@ public class RealWorldOrderingConversationTests
             new() { Canonical = "coca cola", Aliases = new[] { "cocacola", "coca" }, Price = 1.50m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = incompleteCatalog;
+            WebhookProcessor.ActiveCatalog.Value = incompleteCatalog;
 
             var state = SimulateGreeting("hola");
 
@@ -487,7 +487,7 @@ public class RealWorldOrderingConversationTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 
@@ -508,10 +508,10 @@ public class RealWorldOrderingConversationTests
                 Price = 0.02m },
         };
 
-        var savedCatalog = WebhookProcessor.ActiveCatalog;
+        var savedCatalog = WebhookProcessor.ActiveCatalog.Value;
         try
         {
-            WebhookProcessor.ActiveCatalog = corruptCatalog;
+            WebhookProcessor.ActiveCatalog.Value = corruptCatalog;
 
             var state = SimulateGreeting("hola");
             var reply = SimulateOrderMessage(state, "dame 2 hamburguesas y 1 coca cola");
@@ -538,7 +538,7 @@ public class RealWorldOrderingConversationTests
         }
         finally
         {
-            WebhookProcessor.ActiveCatalog = savedCatalog;
+            WebhookProcessor.ActiveCatalog.Value = savedCatalog;
         }
     }
 

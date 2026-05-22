@@ -85,8 +85,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Load business menu from DB; fallback to demo catalog
         _activeMenu = await LoadBusinessMenuAsync(businessContext.BusinessId, cancellationToken);
-        ActiveCatalog = _activeMenu;
-        _staticLogger = _logger;
+        ActiveCatalog.Value = _activeMenu;
+        _staticLogger.Value = _logger;
 
         // Resolve BCV rate once per request (never blocks processing)
         try
@@ -1167,7 +1167,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 if (targets.Count > 0)
                                 {
                                     // Look up modifier price from catalog
-                                    var modEntry = (ActiveCatalog ?? MenuCatalog).FirstOrDefault(e =>
+                                    var modEntry = (ActiveCatalog.Value ?? MenuCatalog).FirstOrDefault(e =>
                                         e.Canonical.Equals(NormalizeMenuItemName(orderMod.ModifierText) ?? "", StringComparison.OrdinalIgnoreCase));
                                     var modPrice = modEntry?.Price ?? 0m;
 
@@ -1481,7 +1481,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (state.Items.Count > 0 && HasModifierIntent(rawText))
                     {
                         // Try applying as a global modifier directly
-                        var catalog = ActiveCatalog ?? MenuCatalog;
+                        var catalog = ActiveCatalog.Value ?? MenuCatalog;
                         if (TryApplyGlobalModifier(state, rawText, catalog))
                         {
                             var safeReply = BuildOrderReplyFromState(state, _bcvRate);
@@ -2986,7 +2986,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private static List<MenuEntry> FindMenuItemsFromQuestion(string normalizedText, MenuEntry[] catalog)
     {
         var cleaned = CleanQuestionText(normalizedText);
-        _staticLogger?.LogDebug("BRAIN: question cleaned raw='{Raw}' cleaned='{Cleaned}'", normalizedText, cleaned);
+        _staticLogger.Value?.LogDebug("BRAIN: question cleaned raw='{Raw}' cleaned='{Cleaned}'", normalizedText, cleaned);
 
         if (string.IsNullOrWhiteSpace(cleaned) || cleaned.Length < 3)
             return new List<MenuEntry>();
@@ -3195,7 +3195,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         else
         {
             // Try to match the response text against candidates
-            var catalog = ActiveCatalog ?? MenuCatalog;
+            var catalog = ActiveCatalog.Value ?? MenuCatalog;
             var match = NormalizeMenuItemName(rawText, catalog);
 
             if (match != null)
@@ -3249,7 +3249,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private static void AddOrIncreaseItem(ConversationFields state, string name, int qty, string? modifiers = null)
     {
         // Look up unit price from active catalog, fall back to demo catalog if price is missing/invalid
-        var catalog = ActiveCatalog ?? MenuCatalog;
+        var catalog = ActiveCatalog.Value ?? MenuCatalog;
         var entry = catalog.FirstOrDefault(m =>
             m.Canonical.Equals(name, StringComparison.OrdinalIgnoreCase));
         var unitPrice = entry?.Price ?? 0m;
@@ -3259,9 +3259,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // If active catalog returned no price or a suspiciously low price,
         // check the demo catalog as fallback (handles corrupted DB menu data)
-        if (unitPrice < 0.10m && ActiveCatalog != null)
+        if (unitPrice < 0.10m && ActiveCatalog.Value != null)
         {
-            _staticLogger?.LogInformation("PRICE FALLBACK start item={Item} dbPrice={DbPrice}", displayName, unitPrice);
+            _staticLogger.Value?.LogInformation("PRICE FALLBACK start item={Item} dbPrice={DbPrice}", displayName, unitPrice);
             var demoEntry = FindDemoPriceFallback(name);
             if (demoEntry != null && demoEntry.Price > unitPrice)
             {
@@ -3353,7 +3353,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     {
         if (state.Items.Count == 0) return false;
 
-        var catalog = ActiveCatalog ?? MenuCatalog;
+        var catalog = ActiveCatalog.Value ?? MenuCatalog;
 
         // Check for grouped/global modifier targeting first
         // e.g. "extra de queso en las 3 hamburguesas", "extra queso en todas las hamburguesas"
@@ -3505,7 +3505,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     /// </summary>
     internal static List<ModifierSegment> ParseModifierSegments(string rawText)
     {
-        var catalog = ActiveCatalog ?? MenuCatalog;
+        var catalog = ActiveCatalog.Value ?? MenuCatalog;
         var result = new List<ModifierSegment>();
 
         // Normalize: strip "de" from "extra de queso" → "extra queso" for matching
@@ -4126,13 +4126,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
         public decimal Price { get; init; }
     }
 
-    // Active catalog for current request (set by ProcessAsync, used by static helpers)
-    [ThreadStatic]
-    internal static MenuEntry[]? ActiveCatalog;
+    // Active catalog for current request (set by ProcessAsync, used by static helpers).
+    // AsyncLocal — NOT [ThreadStatic] — so the value flows across async/await
+    // continuations. ProcessAsync hops threads at every await; the static parser
+    // helpers must still see the per-business menu set at the start of the request.
+    internal static readonly AsyncLocal<MenuEntry[]?> ActiveCatalog = new();
 
     // Logger for static helpers (set by ProcessAsync alongside ActiveCatalog)
-    [ThreadStatic]
-    private static ILogger? _staticLogger;
+    private static readonly AsyncLocal<ILogger?> _staticLogger = new();
 
     /// <summary>
     /// Finds the best matching demo catalog entry for an item with a corrupted DB price.
@@ -4144,7 +4145,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     /// </summary>
     internal static MenuEntry? FindDemoPriceFallback(string itemName, ILogger? logger = null)
     {
-        var log = logger ?? _staticLogger;
+        var log = logger ?? _staticLogger.Value;
         var stripped = StripAccents(itemName.Trim().ToLowerInvariant());
         var singularized = SingularizeWords(stripped);
 
@@ -4344,15 +4345,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     internal static string? NormalizeMenuItemName(string rawItem)
     {
-        var result = NormalizeMenuItemName(rawItem, ActiveCatalog ?? MenuCatalog);
+        var result = NormalizeMenuItemName(rawItem, ActiveCatalog.Value ?? MenuCatalog);
         // If active (DB) catalog couldn't resolve the item, try demo catalog as fallback.
         // This handles production DBs with incomplete menus — common items like perros,
         // papas, etc. can still be parsed even if the DB doesn't have matching entries.
-        if (result == null && ActiveCatalog != null)
+        if (result == null && ActiveCatalog.Value != null)
         {
             result = NormalizeMenuItemName(rawItem, MenuCatalog);
             if (result != null)
-                _staticLogger?.LogInformation(
+                _staticLogger.Value?.LogInformation(
                     "NormalizeMenuItemName DB catalog miss, demo fallback hit: raw={Raw} -> {Canon}",
                     rawItem, result);
         }
@@ -5333,7 +5334,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // No exact/fuzzy match. Check for ambiguity — e.g. "perro" matches both
         // "Perro Clasico" and "Perro Especial" but user didn't specify which.
-        var catalog = ActiveCatalog ?? MenuCatalog;
+        var catalog = ActiveCatalog.Value ?? MenuCatalog;
         var (partialMatch, confidence, alternatives) = FindMatchWithConfidence(itemText, catalog);
         if (alternatives is { Count: > 1 })
         {
