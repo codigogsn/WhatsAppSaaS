@@ -1377,7 +1377,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                                     if (payMethod == "pago_movil")
                                     {
-                                        await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, state.Items, cancellationToken);
+                                        await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, state.Items, state.DeliveryType, cancellationToken);
                                     }
                                     else if (payMethod == "zelle")
                                     {
@@ -1435,7 +1435,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 state.CheckoutPendingSinceUtc ??= DateTime.UtcNow;
 
                                 if (state.PaymentMethod == "pago_movil")
-                                    await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, state.Items, cancellationToken);
+                                    await SendPagoMovilDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, state.Items, state.DeliveryType, cancellationToken);
                                 else if (state.PaymentMethod == "zelle")
                                     await SendZelleDetailsAsync(message.From, phoneNumberId, businessContext, conversationId, cancellationToken);
                                 else
@@ -1893,7 +1893,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     private async Task SendPagoMovilDetailsAsync(
         string to, string phoneNumberId, BusinessContext biz, string conversationId,
-        IReadOnlyList<ConversationItemEntry> items, CancellationToken ct)
+        IReadOnlyList<ConversationItemEntry> items, string? deliveryType, CancellationToken ct)
     {
         // Per-business config → global options → env vars → placeholder
         var bank = FirstNonEmpty(biz.PaymentMobileBank, _paymentMobile.Bank,
@@ -1903,13 +1903,19 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var phone = FirstNonEmpty(biz.PaymentMobilePhone, _paymentMobile.Phone,
             Environment.GetEnvironmentVariable("PAYMENT_MOBILE_PHONE")) ?? "(no configurado)";
 
-        // Compute Bs amount from already-resolved BCV rate
+        // Compute Bs amount from the GRAND TOTAL (subtotal + delivery fee) so it
+        // matches the total shown in the order summary / receipt. Using items only
+        // here previously produced a smaller Bs amount than the receipt for any
+        // delivery order. Mirrors the fee logic in MessageTemplates.OrderSummaryWithTotal
+        // / BuildReceipt and WebhookProcessor's order-persist path.
         string? bsAmount = null;
         if (_bcvRate is not null && _bcvRate.Rate > 0)
         {
-            var total = items.Sum(i => i.UnitPrice * i.Quantity);
-            if (total > 0)
-                bsAmount = (total * _bcvRate.Rate).ToString("N2");
+            var subtotal = items.Sum(i => i.UnitPrice * i.Quantity);
+            var deliveryFee = deliveryType == "delivery" ? Msg.DeliveryFeeUsd : 0m;
+            var grandTotal = subtotal + deliveryFee;
+            if (grandTotal > 0)
+                bsAmount = (grandTotal * _bcvRate.Rate).ToString("N2");
         }
 
         // Message 1: Payment details
@@ -2521,7 +2527,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                 // Send pago movil details if applicable
                 if (pm == "pago_movil")
-                    await SendPagoMovilDetailsAsync(from, phoneNumberId, businessContext, conversationId, state.Items, ct);
+                    await SendPagoMovilDetailsAsync(from, phoneNumberId, businessContext, conversationId, state.Items, state.DeliveryType, ct);
 
                 // Send checkout form
                 state.CheckoutFormSent = true;

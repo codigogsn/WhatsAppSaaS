@@ -592,6 +592,76 @@ public class WebhookProcessorTests
         }
     }
 
+    // Regression: the pago-móvil "Monto: Bs." line was using items subtotal only,
+    // so a delivery order's Bs amount didn't match the receipt's grand total.
+    // With rate=1, subtotal=$17, delivery=$4, the message must show Bs. 21.00, not Bs. 17.00.
+    [Fact]
+    public async Task PagoMovil_BsAmount_UsesGrandTotalIncludingDelivery()
+    {
+        Environment.SetEnvironmentVariable("PAYMENT_MOBILE_BANK", "Banesco");
+        Environment.SetEnvironmentVariable("PAYMENT_MOBILE_ID", "V-12345678");
+        Environment.SetEnvironmentVariable("PAYMENT_MOBILE_PHONE", "0412-1234567");
+
+        try
+        {
+            var sentMessages = new List<OutgoingMessage>();
+            _whatsAppClientMock
+                .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+                .Callback<OutgoingMessage, CancellationToken>((m, _) => sentMessages.Add(m))
+                .ReturnsAsync(true);
+
+            var rateProviderMock = new Mock<IExchangeRateProvider>();
+            rateProviderMock
+                .Setup(x => x.GetRateAsync(It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ResolvedRate(1m, "USD", DateTime.UtcNow.Date, false));
+
+            // Local sut: same dependencies as _sut plus the rate provider.
+            var sut = new WebhookProcessor(
+                _aiParserMock.Object,
+                _whatsAppClientMock.Object,
+                _orderRepositoryMock.Object,
+                _stateStoreMock.Object,
+                new Mock<ILogger<WebhookProcessor>>().Object,
+                exchangeRateProvider: rateProviderMock.Object);
+
+            // Subtotal $17, delivery $4 → grand total $21. With rate 1.0, Bs = 21.00.
+            var state = new ConversationFields
+            {
+                DeliveryType = "delivery",
+                CheckoutFormSent = true
+            };
+            state.Items.Add(new ConversationItemEntry
+            {
+                Name = "Test Item",
+                Quantity = 1,
+                UnitPrice = 17m
+            });
+
+            _stateStoreMock
+                .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(state);
+
+            var formText = "Nombre: Juan\nCédula: V-12345\nTeléfono: 0412-1234567\nDirección: Calle 1\nPago: pago móvil";
+            var payload = CreateTextMessagePayload("5511999999999", formText);
+
+            await sut.ProcessAsync(payload, _testBusiness);
+
+            var pagoDetailMsg = sentMessages.FirstOrDefault(m => m.Body.Contains("Banesco"));
+            pagoDetailMsg.Should().NotBeNull("should send pago-móvil details");
+            pagoDetailMsg!.Body.Should().Contain("Bs.", "Bs amount line must be present");
+            pagoDetailMsg.Body.Should().MatchRegex(@"Bs\.\s+21[\.,]0{2}\b",
+                "Bs amount must equal grand total $21 × rate 1.0 = 21.00, not subtotal $17");
+            pagoDetailMsg.Body.Should().NotMatchRegex(@"Bs\.\s+17[\.,]0{2}\b",
+                "Bs amount must NOT equal subtotal $17 × rate 1.0 (the pre-fix bug)");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PAYMENT_MOBILE_BANK", null);
+            Environment.SetEnvironmentVariable("PAYMENT_MOBILE_ID", null);
+            Environment.SetEnvironmentVariable("PAYMENT_MOBILE_PHONE", null);
+        }
+    }
+
     // ── NEW: Confirmed receipt uses premium format ──
 
     [Fact]
