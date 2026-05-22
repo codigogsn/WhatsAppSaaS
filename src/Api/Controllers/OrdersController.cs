@@ -162,17 +162,21 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> GetById(Guid id)
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
-        var jwtBizId = GetJwtBusinessId();
+        var scopeBizIds = GetOrderScopeBusinessIds();
         try
         {
             var conn = _context.Database.GetDbConnection();
             if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
 
-            var bizScope = jwtBizId.HasValue ? """ AND CAST("BusinessId" AS TEXT) = @bid""" : "";
+            var bizScope = scopeBizIds is { Count: > 0 }
+                ? " AND CAST(\"BusinessId\" AS TEXT) IN (" +
+                  string.Join(",", Enumerable.Range(0, scopeBizIds.Count).Select(i => "@sb" + i)) + ")"
+                : "";
             using var cmd = conn.CreateCommand();
             cmd.CommandText = $"""SELECT * FROM "Orders" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@oid){bizScope} LIMIT 1""";
             AddP(cmd, "oid", id.ToString());
-            if (jwtBizId.HasValue) AddP(cmd, "bid", jwtBizId.Value.ToString());
+            if (scopeBizIds is { Count: > 0 })
+                for (var i = 0; i < scopeBizIds.Count; i++) AddP(cmd, "sb" + i, scopeBizIds[i].ToString());
 
             Dictionary<string, object?>? orderData = null;
             string orderId = "";
@@ -289,7 +293,7 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> UpdateStatus(Guid id, [FromBody] UpdateStatusRequest request)
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
-        var jwtBizId = GetJwtBusinessId();
+        var scopeBizIds = GetOrderScopeBusinessIds();
         var raw = (request?.Status ?? "").Trim();
 
         if (string.IsNullOrWhiteSpace(raw))
@@ -321,13 +325,17 @@ public sealed class OrdersController : ControllerBase
 
             using (var readCmd = conn.CreateCommand())
             {
-                var bizScope = jwtBizId.HasValue ? """ AND CAST("BusinessId" AS TEXT) = @bid""" : "";
+                var bizScope = scopeBizIds is { Count: > 0 }
+                    ? " AND CAST(\"BusinessId\" AS TEXT) IN (" +
+                      string.Join(",", Enumerable.Range(0, scopeBizIds.Count).Select(i => "@sb" + i)) + ")"
+                    : "";
                 readCmd.CommandText = $"""
                     SELECT "Status", "From", "PhoneNumberId", "LastNotifiedStatus", "LastNotifiedAtUtc"
                     FROM "Orders" WHERE "Id" = @oid{bizScope} LIMIT 1
                 """;
                 AddP(readCmd, "oid", id);
-                if (jwtBizId.HasValue) AddP(readCmd, "bid", jwtBizId.Value.ToString());
+                if (scopeBizIds is { Count: > 0 })
+                    for (var i = 0; i < scopeBizIds.Count; i++) AddP(readCmd, "sb" + i, scopeBizIds[i].ToString());
 
                 using var r = await readCmd.ExecuteReaderAsync();
                 if (await r.ReadAsync())
@@ -498,11 +506,12 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> VerifyPayment(Guid id)
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
-        var jwtBizId = GetJwtBusinessId();
-        var order = jwtBizId.HasValue
-            ? await _context.Orders.SingleOrDefaultAsync(o => o.Id == id && o.BusinessId == jwtBizId.Value)
-            : await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
+        var scopeBizIds = GetOrderScopeBusinessIds();
+        var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { error = "Order not found" });
+        if (scopeBizIds is not null &&
+            (!order.BusinessId.HasValue || !scopeBizIds.Contains(order.BusinessId.Value)))
+            return NotFound(new { error = "Order not found" });
 
         order.PaymentVerifiedAtUtc = DateTime.UtcNow;
         order.PaymentVerifiedBy = "dashboard";
@@ -543,11 +552,12 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> RejectPayment(Guid id)
     {
         if (!IsAdmin()) return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
-        var jwtBizId = GetJwtBusinessId();
-        var order = jwtBizId.HasValue
-            ? await _context.Orders.SingleOrDefaultAsync(o => o.Id == id && o.BusinessId == jwtBizId.Value)
-            : await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
+        var scopeBizIds = GetOrderScopeBusinessIds();
+        var order = await _context.Orders.SingleOrDefaultAsync(o => o.Id == id);
         if (order is null) return NotFound(new { error = "Order not found" });
+        if (scopeBizIds is not null &&
+            (!order.BusinessId.HasValue || !scopeBizIds.Contains(order.BusinessId.Value)))
+            return NotFound(new { error = "Order not found" });
 
         // Clear verification status but PRESERVE original proof evidence for audit/disputes
         order.PaymentVerifiedAtUtc = null;
@@ -597,7 +607,7 @@ public sealed class OrdersController : ControllerBase
     public async Task<IActionResult> MarkCashChangeReturned(Guid id, [FromBody] CashChangeReturnedRequest? req = null)
     {
         if (!IsAdmin()) return Unauthorized();
-        var jwtBizId = GetJwtBusinessId();
+        var scopeBizIds = GetOrderScopeBusinessIds();
 
         try
         {
@@ -611,7 +621,10 @@ public sealed class OrdersController : ControllerBase
 
             using (var readCmd = conn.CreateCommand())
             {
-                var bizScope = jwtBizId.HasValue ? """ AND CAST("BusinessId" AS TEXT) = @bid""" : "";
+                var bizScope = scopeBizIds is { Count: > 0 }
+                    ? " AND CAST(\"BusinessId\" AS TEXT) IN (" +
+                      string.Join(",", Enumerable.Range(0, scopeBizIds.Count).Select(i => "@sb" + i)) + ")"
+                    : "";
                 readCmd.CommandText = $"""
                     SELECT "From", "PhoneNumberId", "CustomerName", CAST("BusinessId" AS TEXT),
                            "CashChangeRequired", "CashChangeReturned",
@@ -620,7 +633,8 @@ public sealed class OrdersController : ControllerBase
                 """;
                 var p = readCmd.CreateParameter(); p.ParameterName = "oid"; p.Value = id.ToString();
                 readCmd.Parameters.Add(p);
-                if (jwtBizId.HasValue) AddP(readCmd, "bid", jwtBizId.Value.ToString());
+                if (scopeBizIds is { Count: > 0 })
+                    for (var i = 0; i < scopeBizIds.Count; i++) AddP(readCmd, "sb" + i, scopeBizIds[i].ToString());
 
                 using var reader = await readCmd.ExecuteReaderAsync();
                 if (!await reader.ReadAsync())
@@ -732,7 +746,7 @@ public sealed class OrdersController : ControllerBase
     {
         if (!IsAdmin())
             return Unauthorized(new { error = "Missing or invalid X-Admin-Key" });
-        var jwtBizId = GetJwtBusinessId();
+        var scopeBizIds = GetOrderScopeBusinessIds();
 
         try
         {
@@ -743,7 +757,8 @@ public sealed class OrdersController : ControllerBase
 
             if (order is null)
                 return NotFound(new { error = "Order not found" });
-            if (jwtBizId.HasValue && order.BusinessId != jwtBizId.Value)
+            if (scopeBizIds is not null &&
+                (!order.BusinessId.HasValue || !scopeBizIds.Contains(order.BusinessId.Value)))
                 return NotFound(new { error = "Order not found" });
 
             if (string.IsNullOrWhiteSpace(order.PaymentProofMediaId))
@@ -917,10 +932,22 @@ public sealed class OrdersController : ControllerBase
     private static string SafeContentType(string ct) =>
         AllowedProofTypes.Contains(ct) ? ct : "application/octet-stream";
 
-    private Guid? GetJwtBusinessId()
+    /// <summary>
+    /// Resolves the set of business IDs a single-order request may touch.
+    /// Returns <c>null</c> when no scoping applies — a Founder JWT, or an
+    /// X-Admin-Key caller with no JWT role. Otherwise returns the FULL set of
+    /// businesses in the caller's "businessIds" claim (multi-sede), mirroring
+    /// the membership logic in <see cref="GetAll"/>. A multi-sede Owner whose
+    /// JWT primary business differs from the order's business stays authorized
+    /// as long as the order belongs to one of their assigned sedes.
+    /// </summary>
+    private List<Guid>? GetOrderScopeBusinessIds()
     {
-        var claim = User.FindFirstValue("businessId");
-        return Guid.TryParse(claim, out var id) ? id : null;
+        var jwtRole = User.FindFirstValue(ClaimTypes.Role);
+        if (jwtRole == "Founder") return null;
+
+        var allowedBizIds = AdminAuth.GetBusinessIds(User);
+        return allowedBizIds.Count > 0 ? allowedBizIds : null;
     }
 
     private bool IsAdmin()
