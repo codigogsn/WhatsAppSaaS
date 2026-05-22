@@ -27,7 +27,7 @@ public class WebhookProcessorTests
 
         _orderRepositoryMock
             .Setup(x => x.AddOrderAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync((Order o, CancellationToken _) => o);
 
         // Default: return fresh state, no duplicate messages
         _stateStoreMock
@@ -475,7 +475,7 @@ public class WebhookProcessorTests
         _orderRepositoryMock
             .Setup(x => x.AddOrderAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()))
             .Callback<Order, CancellationToken>((o, _) => savedOrder = o)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync((Order o, CancellationToken _) => o);
 
         _whatsAppClientMock
             .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
@@ -2688,7 +2688,7 @@ public class WebhookProcessorTests
         _orderRepositoryMock
             .Setup(x => x.AddOrderAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()))
             .Callback<Order, CancellationToken>((o, _) => savedOrder = o)
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync((Order o, CancellationToken _) => o);
 
         _whatsAppClientMock
             .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))

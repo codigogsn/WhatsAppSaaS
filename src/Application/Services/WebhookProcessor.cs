@@ -2268,7 +2268,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
         _logger.LogInformation("FinalizeOrder: saving order {OrderId} — Payment={Pay} Cash={Cash} Change={Change} Items={Items}",
             order.Id, order.PaymentMethod, order.CashCurrency, order.CashChangeRequired, order.Items.Count);
 
-        await _orderRepository.AddOrderAsync(order, ct);
+        // AddOrderAsync returns the persisted order — a new row, or, when an active
+        // Pending order already exists for this customer, the reused existing order.
+        order = await _orderRepository.AddOrderAsync(order, ct);
         _sideEffectsCommitted = true; // Order persisted — irreversible
 
         _logger.LogInformation("FinalizeOrder: order {OrderId} saved successfully", order.Id);
@@ -2454,7 +2456,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
             order.SubtotalAmount = order.Items.Sum(i => i.LineTotal ?? 0);
             order.TotalAmount = order.SubtotalAmount;
-            await _orderRepository.AddOrderAsync(order, ct);
+            // AddOrderAsync returns the persisted order — a new row, or the reused
+            // existing Pending order when one already exists for this customer.
+            order = await _orderRepository.AddOrderAsync(order, ct);
             _sideEffectsCommitted = true; // Order persisted — irreversible
 
             var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();

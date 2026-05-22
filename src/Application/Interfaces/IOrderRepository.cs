@@ -4,7 +4,12 @@ namespace WhatsAppSaaS.Application.Interfaces;
 
 public interface IOrderRepository
 {
-    Task AddOrderAsync(Order order, CancellationToken ct = default);
+    /// <summary>
+    /// Persists a new order, OR — when an active Pending order already exists for the
+    /// same (BusinessId, From, PhoneNumberId) — reuses that order, updating it in place.
+    /// Returns the persisted order (new or reused) so callers continue against the real row.
+    /// </summary>
+    Task<Order> AddOrderAsync(Order order, CancellationToken ct = default);
     Task<Order?> GetLastCompletedOrderAsync(string fromPhone, Guid businessId, CancellationToken ct = default);
     Task<Customer?> GetCustomerByPhoneAsync(string fromPhone, Guid businessId, CancellationToken ct = default);
     Task<bool> AttachPaymentProofAsync(Guid orderId, string mediaId, CancellationToken ct = default);

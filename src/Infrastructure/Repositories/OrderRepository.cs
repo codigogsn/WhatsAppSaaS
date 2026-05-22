@@ -18,7 +18,7 @@ public sealed class OrderRepository : IOrderRepository
         _logger = logger;
     }
 
-    public async Task AddOrderAsync(Order order, CancellationToken ct = default)
+    public async Task<Order> AddOrderAsync(Order order, CancellationToken ct = default)
     {
         // Use WhatsApp sender (order.From) as primary identifier — this is what
         // greeting lookups use, so it must be the stored key for customer memory.
@@ -151,6 +151,19 @@ public sealed class OrderRepository : IOrderRepository
 
             await transaction.CommitAsync(ct);
             _logger.LogInformation("ORDER SAVE: SUCCESS Id={Id}", order.Id);
+            return order;
+        }
+        catch (DbUpdateException dbEx) when (IsActivePendingConflict(dbEx))
+        {
+            // An active Pending order already exists for this (BusinessId, From, PhoneNumberId).
+            // Do NOT create a duplicate — detach the rejected graph (Part A) and reuse the
+            // existing Pending order (Part B1) so the finalize flow continues against it.
+            _logger.LogWarning(
+                "ORDER SAVE: IX_Orders_ActivePending conflict — BusinessId={BusinessId} From={From} " +
+                "PhoneNumberId={PhoneNumberId}; reusing existing Pending order",
+                order.BusinessId, order.From, order.PhoneNumberId);
+            DetachOrderEntities();
+            return await ReuseExistingPendingOrderAsync(order, ct);
         }
         catch (DbUpdateException dbEx)
         {
@@ -170,12 +183,163 @@ public sealed class OrderRepository : IOrderRepository
                     inner?.GetType().Name ?? dbEx.GetType().Name,
                     inner?.Message ?? dbEx.Message);
             }
+            // Part A: detach the failed Order + OrderItems so the shared scoped DbContext
+            // is not re-flushed by a later SaveChangesAsync (e.g. conversation-state save).
+            DetachOrderEntities();
             throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "ORDER SAVE FAILED (unexpected): {Type}: {Message}",
                 ex.GetType().Name, ex.Message);
+            // Part A: detach the failed Order + OrderItems so the shared scoped DbContext
+            // is not re-flushed by a later SaveChangesAsync (e.g. conversation-state save).
+            DetachOrderEntities();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// True when the failure is the IX_Orders_ActivePending partial-unique-index
+    /// violation — i.e. an active Pending order already exists for this customer.
+    /// </summary>
+    private static bool IsActivePendingConflict(DbUpdateException ex)
+        => ex.InnerException is Npgsql.PostgresException { SqlState: "23505" } pg
+           && string.Equals(pg.ConstraintName, "IX_Orders_ActivePending", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Part A — detaches every tracked Order and OrderItem from the shared scoped
+    /// DbContext after a failed save, so a later SaveChangesAsync (e.g. conversation-state
+    /// persistence at WebhookProcessor) does not re-flush the rejected order INSERT.
+    /// Within a webhook message scope the only tracked orders are the failed attempt's.
+    /// </summary>
+    private void DetachOrderEntities()
+    {
+        foreach (var entry in _db.ChangeTracker.Entries<OrderItem>().ToList())
+            entry.State = EntityState.Detached;
+        foreach (var entry in _db.ChangeTracker.Entries<Order>().ToList())
+            entry.State = EntityState.Detached;
+    }
+
+    /// <summary>
+    /// Part B1 — reuse path. An active Pending order already exists for this
+    /// (BusinessId, From, PhoneNumberId); update it in place from <paramref name="incoming"/>
+    /// (cart/items, location, payment fields, totals) instead of inserting a duplicate,
+    /// and return it so the caller's finalize flow continues against the real order.
+    /// </summary>
+    private async Task<Order> ReuseExistingPendingOrderAsync(Order incoming, CancellationToken ct)
+    {
+        // Reuse is scoped to the SAME business — multi-business isolation preserved.
+        var existing = await _db.Orders
+            .Include(o => o.Items)
+            .FirstOrDefaultAsync(o => o.BusinessId == incoming.BusinessId
+                && o.From == incoming.From
+                && o.PhoneNumberId == incoming.PhoneNumberId
+                && o.Status == "Pending", ct);
+
+        if (existing is null)
+        {
+            // The conflicting row vanished between the failed INSERT and this read
+            // (e.g. cancelled concurrently). Nothing to reuse.
+            _logger.LogError(
+                "ORDER REUSE FAILED: IX_Orders_ActivePending conflict but no Pending order found to reuse — " +
+                "BusinessId={BusinessId} From={From} PhoneNumberId={PhoneNumberId}",
+                incoming.BusinessId, incoming.From, incoming.PhoneNumberId);
+            throw new InvalidOperationException(
+                "IX_Orders_ActivePending conflict but no existing Pending order could be loaded for reuse.");
+        }
+
+        _logger.LogInformation(
+            "ORDER REUSED: existingId={ExistingId} rejectedAttemptId={AttemptId} BusinessId={BusinessId} " +
+            "From={From} oldTotal={OldTotal} oldItems={OldItems} newItems={NewItems}",
+            existing.Id, incoming.Id, existing.BusinessId, existing.From,
+            existing.TotalAmount ?? 0m, existing.Items.Count, incoming.Items.Count);
+
+        var oldTotal = existing.TotalAmount ?? 0m;
+
+        // ── Replace cart / items ──
+        _db.OrderItems.RemoveRange(existing.Items.ToList());
+        existing.Items.Clear();
+        foreach (var i in incoming.Items)
+        {
+            existing.Items.Add(new OrderItem
+            {
+                Name = i.Name,
+                Quantity = i.Quantity,
+                UnitPrice = i.UnitPrice,
+                LineTotal = i.LineTotal
+            });
+        }
+
+        // ── Customer / delivery details ──
+        existing.CustomerId          = incoming.CustomerId;
+        existing.CustomerName        = incoming.CustomerName;
+        existing.CustomerIdNumber    = incoming.CustomerIdNumber;
+        existing.CustomerPhone       = incoming.CustomerPhone;
+        existing.Address             = incoming.Address;
+        existing.DeliveryType        = incoming.DeliveryType;
+        existing.SpecialInstructions = incoming.SpecialInstructions;
+
+        // ── Location ──
+        existing.LocationText = incoming.LocationText;
+        existing.LocationLat  = incoming.LocationLat;
+        existing.LocationLng  = incoming.LocationLng;
+
+        // ── Payment fields ──
+        existing.PaymentMethod              = incoming.PaymentMethod;
+        existing.PaymentProofMediaId        = incoming.PaymentProofMediaId;
+        existing.PaymentProofSubmittedAtUtc = incoming.PaymentProofSubmittedAtUtc;
+        existing.CashCurrency       = incoming.CashCurrency;
+        existing.CashTenderedAmount = incoming.CashTenderedAmount;
+        existing.CashBcvRateUsed    = incoming.CashBcvRateUsed;
+        existing.CashChangeRequired = incoming.CashChangeRequired;
+        existing.CashChangeAmount   = incoming.CashChangeAmount;
+        existing.CashChangeAmountBs = incoming.CashChangeAmountBs;
+        existing.CashPayoutBank     = incoming.CashPayoutBank;
+        existing.CashPayoutIdNumber = incoming.CashPayoutIdNumber;
+        existing.CashPayoutPhone    = incoming.CashPayoutPhone;
+
+        // ── Checkout flags ──
+        existing.CheckoutCompleted      = incoming.CheckoutCompleted;
+        existing.CheckoutCompletedAtUtc = incoming.CheckoutCompletedAtUtc;
+        existing.CheckoutFormSent       = incoming.CheckoutFormSent;
+
+        // ── Totals ──
+        existing.DeliveryFee = incoming.DeliveryFee;
+        existing.RecalculateTotal();
+
+        try
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(ct);
+            await _db.SaveChangesAsync(ct);
+
+            // Analytics preserved: the order was already counted in OrdersCount/TotalSpent
+            // at first creation. Do NOT increment OrdersCount again — only adjust TotalSpent
+            // by the delta so lifetime spend stays accurate after the cart changed.
+            var newTotal = existing.TotalAmount ?? 0m;
+            var spendDelta = newTotal - oldTotal;
+            if (existing.CheckoutCompleted && existing.CustomerId.HasValue && spendDelta != 0m)
+            {
+                await _db.Database.ExecuteSqlRawAsync("""
+                    UPDATE "Customers"
+                    SET "TotalSpent" = "TotalSpent" + @p0,
+                        "LastPurchaseAtUtc" = @p1
+                    WHERE "Id" = @p2
+                    """, spendDelta, DateTime.UtcNow, existing.CustomerId.Value);
+            }
+
+            await transaction.CommitAsync(ct);
+            _logger.LogInformation(
+                "ORDER REUSE SUCCESS: existingId={ExistingId} newTotal={NewTotal} items={Items} spendDelta={Delta}",
+                existing.Id, newTotal, existing.Items.Count, spendDelta);
+            return existing;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "ORDER REUSE FAILED: existingId={ExistingId} {Type}: {Message}",
+                existing.Id, ex.GetType().Name, ex.Message);
+            // Part A: keep the shared scoped DbContext clean even on a reuse failure.
+            DetachOrderEntities();
             throw;
         }
     }

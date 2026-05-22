@@ -34,7 +34,7 @@ public class GlobalModifierTests
 
         _orderRepositoryMock
             .Setup(x => x.AddOrderAsync(It.IsAny<Order>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+            .ReturnsAsync((Order o, CancellationToken _) => o);
 
         _stateStoreMock
             .Setup(x => x.IsMessageProcessedAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
