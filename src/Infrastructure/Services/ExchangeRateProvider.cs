@@ -18,7 +18,12 @@ public sealed class ExchangeRateProvider : IExchangeRateProvider
 
     public async Task<ResolvedRate?> GetRateAsync(string? currencyReference, CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(currencyReference) || currencyReference == "NONE")
+        // null/empty CurrencyReference defaults to BCV_USD — the same default the
+        // schema-repair backfill applies. Only the explicit opt-out "NONE" disables
+        // Bs conversion. This makes WhatsApp receipts/payment instructions show the
+        // Bs reference for any business that hasn't actively opted out.
+        var key = string.IsNullOrWhiteSpace(currencyReference) ? "BCV_USD" : currencyReference;
+        if (key == "NONE")
             return null;
 
         var today = DateTime.UtcNow.Date;
@@ -38,7 +43,7 @@ public sealed class ExchangeRateProvider : IExchangeRateProvider
 
             if (rate is null)
             {
-                _logger.LogWarning("No exchange rates found in DB — business currency ref {Ref} cannot be resolved", currencyReference);
+                _logger.LogWarning("No exchange rates found in DB — business currency ref {Ref} cannot be resolved", key);
                 return null;
             }
 
@@ -47,7 +52,7 @@ public sealed class ExchangeRateProvider : IExchangeRateProvider
                 rate.RateDate.ToString("yyyy-MM-dd"), today.ToString("yyyy-MM-dd"));
         }
 
-        return currencyReference switch
+        return key switch
         {
             "BCV_USD" => new ResolvedRate(rate.UsdRate, "USD", rate.RateDate, isStale),
             "BCV_EUR" => new ResolvedRate(rate.EurRate, "EUR", rate.RateDate, isStale),

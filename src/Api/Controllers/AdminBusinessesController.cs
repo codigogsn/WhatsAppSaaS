@@ -397,6 +397,9 @@ public class AdminBusinessesController : ControllerBase
             RestaurantType = req.RestaurantType?.Trim().ToLowerInvariant(),
             ZelleRecipient = req.ZelleRecipient?.Trim(),
             ZelleInstructions = req.ZelleInstructions?.Trim(),
+            // Default to BCV USD reference so Bs amounts appear in WhatsApp receipts
+            // and payment instructions. Set to "NONE" to explicitly opt out.
+            CurrencyReference = "BCV_USD",
             IsActive = true
         };
 
