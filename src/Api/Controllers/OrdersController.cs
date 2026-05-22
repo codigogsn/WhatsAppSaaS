@@ -319,7 +319,8 @@ public sealed class OrdersController : ControllerBase
             if (conn.State != System.Data.ConnectionState.Open) await conn.OpenAsync();
 
             // Step 1: Read current order fields with raw SQL
-            string? currentStatus = null, fromPhone = null, phoneNumberId = null, lastNotifiedStatus = null;
+            string? currentStatus = null, fromPhone = null, phoneNumberId = null,
+                    lastNotifiedStatus = null, businessIdStr = null;
             DateTime? lastNotifiedAtUtc = null;
             bool found = false;
 
@@ -330,7 +331,8 @@ public sealed class OrdersController : ControllerBase
                       string.Join(",", Enumerable.Range(0, scopeBizIds.Count).Select(i => "@sb" + i)) + ")"
                     : "";
                 readCmd.CommandText = $"""
-                    SELECT "Status", "From", "PhoneNumberId", "LastNotifiedStatus", "LastNotifiedAtUtc"
+                    SELECT "Status", "From", "PhoneNumberId", "LastNotifiedStatus", "LastNotifiedAtUtc",
+                           CAST("BusinessId" AS TEXT) AS "BusinessIdText"
                     FROM "Orders" WHERE "Id" = @oid{bizScope} LIMIT 1
                 """;
                 AddP(readCmd, "oid", id);
@@ -348,6 +350,7 @@ public sealed class OrdersController : ControllerBase
                     lastNotifiedAtUtc = r["LastNotifiedAtUtc"] is DBNull ? null
                         : r["LastNotifiedAtUtc"] is DateTime dt ? dt
                         : DateTime.TryParse(r["LastNotifiedAtUtc"]?.ToString(), out var p) ? p : null;
+                    businessIdStr = r["BusinessIdText"] is not DBNull ? r["BusinessIdText"]?.ToString() : null;
                 }
             }
 
@@ -433,11 +436,23 @@ public sealed class OrdersController : ControllerBase
                 {
                     try
                     {
+                        // Resolve the per-business WhatsApp token so the send uses the
+                        // tenant's own Meta app token (same pattern as MarkCashChangeReturned).
+                        string? accessToken = null;
+                        if (!string.IsNullOrWhiteSpace(businessIdStr))
+                        {
+                            using var tokenCmd = conn.CreateCommand();
+                            tokenCmd.CommandText = """SELECT "AccessToken" FROM "Businesses" WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@bid) LIMIT 1""";
+                            var tp = tokenCmd.CreateParameter(); tp.ParameterName = "bid"; tp.Value = businessIdStr; tokenCmd.Parameters.Add(tp);
+                            accessToken = await tokenCmd.ExecuteScalarAsync() as string;
+                        }
+
                         sendOk = await _whatsAppClient.SendTextMessageAsync(
                             new OutgoingMessage
                             {
                                 To = fromPhone!,
                                 PhoneNumberId = phoneNumberId!,
+                                AccessToken = accessToken,
                                 Body = message
                             });
 
@@ -531,10 +546,22 @@ public sealed class OrdersController : ControllerBase
         {
             try
             {
+                // Resolve the per-business WhatsApp token so the send uses the
+                // tenant's own Meta app token (same pattern as MarkCashChangeReturned).
+                string? accessToken = null;
+                if (order.BusinessId.HasValue)
+                {
+                    accessToken = await _context.Businesses.AsNoTracking()
+                        .Where(b => b.Id == order.BusinessId.Value)
+                        .Select(b => b.AccessToken)
+                        .FirstOrDefaultAsync();
+                }
+
                 await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
                 {
                     To = order.From,
                     PhoneNumberId = order.PhoneNumberId,
+                    AccessToken = accessToken,
                     Body = "\u2705 Tu pago ha sido verificado. \u00a1Gracias!"
                 });
             }
@@ -585,10 +612,22 @@ public sealed class OrdersController : ControllerBase
         {
             try
             {
+                // Resolve the per-business WhatsApp token so the send uses the
+                // tenant's own Meta app token (same pattern as MarkCashChangeReturned).
+                string? accessToken = null;
+                if (order.BusinessId.HasValue)
+                {
+                    accessToken = await _context.Businesses.AsNoTracking()
+                        .Where(b => b.Id == order.BusinessId.Value)
+                        .Select(b => b.AccessToken)
+                        .FirstOrDefaultAsync();
+                }
+
                 await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
                 {
                     To = order.From,
                     PhoneNumberId = order.PhoneNumberId,
+                    AccessToken = accessToken,
                     Body = "\u26a0\ufe0f Tu comprobante de pago fue rechazado. Por favor env\u00eda un nuevo comprobante."
                 });
             }
