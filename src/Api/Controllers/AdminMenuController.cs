@@ -1089,6 +1089,248 @@ public sealed class AdminMenuController : ControllerBase
         }
     }
 
+    // ── Reset Menu ──
+
+    public sealed class ResetMenuRequest
+    {
+        public Guid BusinessId { get; set; }
+        public string Confirm { get; set; } = "";
+    }
+
+    private const string ResetMenuConfirmString = "RESET MENU";
+
+    /// <summary>
+    /// Wipes the entire menu surface for one business in a single transaction:
+    /// MenuCategories + MenuItems + MenuItemAliases + Extras (+ extra link rows)
+    /// + UpsellRules. Does NOT touch Orders, OrderItems, Customers,
+    /// ConversationStates, MenuPdfs, Business settings, BusinessUsers, or any
+    /// payments / analytics row. Scoped strictly by BusinessId.
+    ///
+    /// Use ?dryRun=true to get would-delete counts without performing any writes.
+    /// A real (non-dryRun) call requires <see cref="ResetMenuRequest.Confirm"/>
+    /// to be exactly "RESET MENU".
+    /// </summary>
+    [HttpPost("reset")]
+    public async Task<IActionResult> ResetMenu(
+        [FromBody] ResetMenuRequest req,
+        [FromQuery] bool dryRun,
+        CancellationToken ct)
+    {
+        if (req.BusinessId == Guid.Empty)
+            return BadRequest(new { error = "businessId is required" });
+
+        // Auth: same three-path check used by every other mutation in this controller.
+        if (!await IsAuthorizedForBusinessAsync(req.BusinessId, ct))
+            return Unauthorized();
+
+        // Role gate: when authenticated via JWT, only Owner / Manager / Founder
+        // may reset. Operators can toggle availability but not nuke the menu.
+        // Admin-key paths (already accepted above) bypass this — they ARE the operator.
+        if (AdminAuth.HasValidJwtRole(User) && !AdminAuth.IsOwnerOrManager(User))
+            return Unauthorized(new { error = "Owner, Manager, or Founder role required" });
+
+        // Real (non-dryRun) calls require the typed confirmation string.
+        // Server-side check defends against UI bugs / direct API calls.
+        if (!dryRun && !string.Equals(req.Confirm, ResetMenuConfirmString, StringComparison.Ordinal))
+            return BadRequest(new
+            {
+                error = $"Confirmation string must be exactly '{ResetMenuConfirmString}'"
+            });
+
+        try
+        {
+            var conn = await GetOpenConnectionAsync(ct);
+
+            // Look up business name once for the response payload (helps the
+            // dashboard surface which tenant the counts/deletes apply to).
+            string? businessName = null;
+            using (var nameCmd = conn.CreateCommand())
+            {
+                nameCmd.CommandText = """SELECT "Name" FROM "Businesses" WHERE "Id" = @bid LIMIT 1""";
+                MakeParam(nameCmd, "bid", req.BusinessId);
+                var raw = await nameCmd.ExecuteScalarAsync(ct);
+                if (raw is not null and not DBNull) businessName = raw.ToString();
+            }
+
+            // ── Counts ──
+            // Single round-trip; same SELECTs whether dryRun or real, so the response
+            // payload has identical shape and the dashboard renders with one template.
+            int categories = 0, items = 0, aliases = 0, extras = 0, upsells = 0;
+            using (var countCmd = conn.CreateCommand())
+            {
+                countCmd.CommandText = """
+                    SELECT
+                      (SELECT COUNT(*) FROM "MenuCategories" WHERE "BusinessId" = @bid)                                AS categories,
+                      (SELECT COUNT(*) FROM "MenuItems" i JOIN "MenuCategories" c ON c."Id" = i."CategoryId"
+                          WHERE c."BusinessId" = @bid)                                                                  AS items,
+                      (SELECT COUNT(*) FROM "MenuItemAliases" a JOIN "MenuItems" i ON i."Id" = a."MenuItemId"
+                          JOIN "MenuCategories" c ON c."Id" = i."CategoryId" WHERE c."BusinessId" = @bid)               AS aliases,
+                      (SELECT COUNT(*) FROM "Extras"      WHERE "BusinessId" = @bid)                                    AS extras,
+                      (SELECT COUNT(*) FROM "UpsellRules" WHERE "BusinessId" = @bid)                                    AS upsells
+                """;
+                MakeParam(countCmd, "bid", req.BusinessId);
+                using var r = await countCmd.ExecuteReaderAsync(ct);
+                if (await r.ReadAsync(ct))
+                {
+                    categories = Convert.ToInt32(r["categories"]);
+                    items      = Convert.ToInt32(r["items"]);
+                    aliases    = Convert.ToInt32(r["aliases"]);
+                    extras     = Convert.ToInt32(r["extras"]);
+                    upsells    = Convert.ToInt32(r["upsells"]);
+                }
+            }
+
+            if (dryRun)
+            {
+                return Ok(new
+                {
+                    dryRun = true,
+                    businessId = req.BusinessId,
+                    businessName,
+                    deletedCategories = categories,
+                    deletedItems      = items,
+                    deletedAliases    = aliases,
+                    deletedExtras     = extras,
+                    deletedUpsells    = upsells,
+                    executedAtUtc     = DateTime.UtcNow
+                });
+            }
+
+            // ── Real wipe — single transaction ──
+            // Delete order is defensive against legacy schemas with missing
+            // FK cascades, and avoids the UpsellRules.SuggestedMenuItemId
+            // ON DELETE SET NULL trap (we want clean removal, not orphan rows).
+#pragma warning disable CA2007
+            using var tx = await conn.BeginTransactionAsync(ct);
+#pragma warning restore CA2007
+            try
+            {
+                // 1. UpsellRules first — by BusinessId, removes both SourceCategoryId
+                //    and SuggestedMenuItemId references before either is gone.
+                using (var c1 = conn.CreateCommand())
+                {
+                    c1.Transaction = tx;
+                    c1.CommandText = """DELETE FROM "UpsellRules" WHERE "BusinessId" = @bid""";
+                    MakeParam(c1, "bid", req.BusinessId);
+                    await c1.ExecuteNonQueryAsync(ct);
+                }
+
+                // 2a. ExtraMenuItems — explicit, in case the cascade is missing on legacy installs.
+                using (var c2a = conn.CreateCommand())
+                {
+                    c2a.Transaction = tx;
+                    c2a.CommandText = """
+                        DELETE FROM "ExtraMenuItems"
+                        WHERE "ExtraId" IN (SELECT "Id" FROM "Extras" WHERE "BusinessId" = @bid)
+                           OR "MenuItemId" IN (
+                               SELECT i."Id" FROM "MenuItems" i
+                               JOIN "MenuCategories" c ON c."Id" = i."CategoryId"
+                               WHERE c."BusinessId" = @bid
+                           )
+                    """;
+                    MakeParam(c2a, "bid", req.BusinessId);
+                    await c2a.ExecuteNonQueryAsync(ct);
+                }
+
+                // 2b. ExtraMenuCategories — explicit, in case the cascade is missing on legacy installs.
+                using (var c2b = conn.CreateCommand())
+                {
+                    c2b.Transaction = tx;
+                    c2b.CommandText = """
+                        DELETE FROM "ExtraMenuCategories"
+                        WHERE "ExtraId" IN (SELECT "Id" FROM "Extras" WHERE "BusinessId" = @bid)
+                           OR "MenuCategoryId" IN (
+                               SELECT "Id" FROM "MenuCategories" WHERE "BusinessId" = @bid
+                           )
+                    """;
+                    MakeParam(c2b, "bid", req.BusinessId);
+                    await c2b.ExecuteNonQueryAsync(ct);
+                }
+
+                // 2c. Extras — cascade would already have removed link rows above; this is the parent row.
+                using (var c2 = conn.CreateCommand())
+                {
+                    c2.Transaction = tx;
+                    c2.CommandText = """DELETE FROM "Extras" WHERE "BusinessId" = @bid""";
+                    MakeParam(c2, "bid", req.BusinessId);
+                    await c2.ExecuteNonQueryAsync(ct);
+                }
+
+                // 3. MenuItemAliases — explicit, in case the cascade is missing on legacy installs.
+                using (var c3 = conn.CreateCommand())
+                {
+                    c3.Transaction = tx;
+                    c3.CommandText = """
+                        DELETE FROM "MenuItemAliases"
+                        WHERE "MenuItemId" IN (
+                            SELECT i."Id" FROM "MenuItems" i
+                            JOIN "MenuCategories" c ON c."Id" = i."CategoryId"
+                            WHERE c."BusinessId" = @bid
+                        )
+                    """;
+                    MakeParam(c3, "bid", req.BusinessId);
+                    await c3.ExecuteNonQueryAsync(ct);
+                }
+
+                // 4. MenuItems — cascade is a safety net for any aliases not caught above.
+                using (var c4 = conn.CreateCommand())
+                {
+                    c4.Transaction = tx;
+                    c4.CommandText = """
+                        DELETE FROM "MenuItems"
+                        WHERE "CategoryId" IN (
+                            SELECT "Id" FROM "MenuCategories" WHERE "BusinessId" = @bid
+                        )
+                    """;
+                    MakeParam(c4, "bid", req.BusinessId);
+                    await c4.ExecuteNonQueryAsync(ct);
+                }
+
+                // 5. MenuCategories.
+                using (var c5 = conn.CreateCommand())
+                {
+                    c5.Transaction = tx;
+                    c5.CommandText = """DELETE FROM "MenuCategories" WHERE "BusinessId" = @bid""";
+                    MakeParam(c5, "bid", req.BusinessId);
+                    await c5.ExecuteNonQueryAsync(ct);
+                }
+
+                await tx.CommitAsync(ct);
+            }
+            catch
+            {
+                // Disposal would roll back anyway, but be explicit so failures
+                // are visible in the log line below.
+                await tx.RollbackAsync(ct);
+                throw;
+            }
+
+            // Audit log — Warning level so it shows up in any non-trivial Render
+            // log filter and is easy to correlate with the matching counts.
+            _logger.LogWarning(
+                "MENU RESET businessId={BusinessId} businessName={BusinessName} categories={Categories} items={Items} aliases={Aliases} extras={Extras} upsells={Upsells}",
+                req.BusinessId, businessName ?? "(unknown)", categories, items, aliases, extras, upsells);
+
+            return Ok(new
+            {
+                dryRun = false,
+                businessId = req.BusinessId,
+                businessName,
+                deletedCategories = categories,
+                deletedItems      = items,
+                deletedAliases    = aliases,
+                deletedExtras     = extras,
+                deletedUpsells    = upsells,
+                executedAtUtc     = DateTime.UtcNow
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Admin menu endpoint error");
+            return StatusCode(500, new { error = "ResetMenu failed: Unexpected server error" });
+        }
+    }
+
     private static void ParseTextInput(string raw, List<ParsedCategory> categories,
         List<ParsedExtra> extras, List<ParsedUpsell> upsells, List<string> warnings)
     {

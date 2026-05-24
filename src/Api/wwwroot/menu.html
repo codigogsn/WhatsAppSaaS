@@ -637,6 +637,21 @@
     </table>
   </div>
 
+  <!-- Zona peligrosa — destructive menu actions -->
+  <div class="card" style="border:1px solid rgba(200,0,0,.25);background:rgba(200,0,0,.03);margin-top:18px;">
+    <h3 style="color:var(--danger);">Zona peligrosa</h3>
+    <div class="helper">
+      <b>Restablecer menú</b> borra todas las categorías, productos, aliases, extras y upsells de este negocio.
+      No afecta pedidos, clientes, conversaciones, PDF del menú ni configuración del negocio.
+      Esta acción no puede deshacerse.
+    </div>
+    <div class="row">
+      <button onclick="openResetMenuModal()" style="color:var(--danger);border-color:rgba(200,0,0,.3);font-weight:600;">
+        Restablecer menú…
+      </button>
+    </div>
+  </div>
+
   </div><!-- /settings-section categorias -->
 
   <!-- ═══ SECTION: Productos ═══ -->
@@ -1233,6 +1248,102 @@ async function executeImport(){
   }
 }
 
+// ═══ Reset Menu (Zona peligrosa) ═══
+function openResetMenuModal(){
+  if(!bid()){ showToast('Selecciona un negocio primero'); return; }
+  document.getElementById('resetMenuConfirmInput').value='';
+  document.getElementById('resetMenuExecBtn').disabled=true;
+  document.getElementById('resetMenuResult').innerHTML='';
+  document.getElementById('resetMenuPreview').innerHTML='<span class="muted">Cargando previsualización…</span>';
+  document.getElementById('resetMenuBusinessName').textContent='—';
+  document.getElementById('resetMenuModal').style.display='flex';
+  previewResetMenu();
+}
+
+function closeResetMenuModal(){
+  document.getElementById('resetMenuModal').style.display='none';
+  document.getElementById('resetMenuConfirmInput').value='';
+  document.getElementById('resetMenuExecBtn').disabled=true;
+  document.getElementById('resetMenuResult').innerHTML='';
+}
+
+function validateResetConfirmInput(){
+  var v = document.getElementById('resetMenuConfirmInput').value;
+  // Exact string match — no trim, case-sensitive. Mirrors the server check.
+  document.getElementById('resetMenuExecBtn').disabled = (v !== 'RESET MENU');
+}
+
+async function previewResetMenu(){
+  if(!bid()) return;
+  try {
+    var res = await fetch('/api/admin/menu/reset?dryRun=true', {
+      method:'POST', headers:hdrs(),
+      body: JSON.stringify({businessId:bid(), confirm:''})
+    });
+    var data = await res.json();
+    if(!res.ok){
+      document.getElementById('resetMenuPreview').innerHTML =
+        '<span class="danger">Error: '+esc(data.error||JSON.stringify(data))+'</span>';
+      return;
+    }
+    document.getElementById('resetMenuBusinessName').textContent = data.businessName || '(sin nombre)';
+    var c=data.deletedCategories|0, i=data.deletedItems|0, a=data.deletedAliases|0,
+        e=data.deletedExtras|0, u=data.deletedUpsells|0;
+    var total=c+i+a+e+u;
+    if(total===0){
+      document.getElementById('resetMenuPreview').innerHTML =
+        '<span class="muted">Este negocio no tiene datos de menú. No hay nada que borrar.</span>';
+    } else {
+      document.getElementById('resetMenuPreview').innerHTML =
+        'Se eliminarán: <b>'+c+'</b> categorías, <b>'+i+'</b> productos, <b>'+a+'</b> aliases'
+        + (e ? ', <b>'+e+'</b> extras' : '')
+        + (u ? ', <b>'+u+'</b> upsells' : '')
+        + '.';
+    }
+  } catch(err){
+    document.getElementById('resetMenuPreview').innerHTML =
+      '<span class="danger">Error: '+esc(err.message)+'</span>';
+  }
+}
+
+async function executeResetMenu(){
+  if(!bid()) return;
+  var confirmInput = document.getElementById('resetMenuConfirmInput').value;
+  if(confirmInput !== 'RESET MENU'){ return; }  // belt-and-braces; button should be disabled
+  var btn = document.getElementById('resetMenuExecBtn');
+  var resultEl = document.getElementById('resetMenuResult');
+  btn.disabled = true;
+  btn.textContent = 'Eliminando…';
+  resultEl.innerHTML = '';
+  try {
+    var res = await fetch('/api/admin/menu/reset', {
+      method:'POST', headers:hdrs(),
+      body: JSON.stringify({businessId:bid(), confirm:'RESET MENU'})
+    });
+    var data = await res.json();
+    if(!res.ok){
+      resultEl.innerHTML = '<span class="danger">Error: '+esc(data.error||JSON.stringify(data))+'</span>';
+      btn.disabled = false;
+      btn.textContent = 'Eliminar menú permanentemente';
+      return;
+    }
+    var msg = 'Menú reseteado — '
+            + (data.deletedCategories|0)+' categorías, '
+            + (data.deletedItems|0)+' productos, '
+            + (data.deletedAliases|0)+' aliases'
+            + ((data.deletedExtras|0) ? ', '+(data.deletedExtras|0)+' extras' : '')
+            + ((data.deletedUpsells|0) ? ', '+(data.deletedUpsells|0)+' upsells' : '')
+            + ' eliminados';
+    closeResetMenuModal();
+    showToast(msg);
+    loadAll();
+  } catch(err){
+    resultEl.innerHTML = '<span class="danger">Error: '+esc(err.message)+'</span>';
+    btn.disabled = false;
+    btn.textContent = 'Eliminar menú permanentemente';
+  }
+}
+
 function showToast(msg){
   const t=document.createElement('div');
   t.textContent=msg;
@@ -1679,5 +1790,50 @@ Upsells:
     <div id="importResult"></div>
   </div>
 </div>
+
+<!-- ═══ Reset Menu Modal (Zona peligrosa) ═══ -->
+<div id="resetMenuModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:1000;align-items:center;justify-content:center;backdrop-filter:blur(4px);">
+  <div class="card" style="max-width:520px;width:90%;max-height:88vh;overflow-y:auto;border:1px solid rgba(200,0,0,.35);">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h3 style="margin:0;color:var(--danger);">Restablecer menú</h3>
+      <button onclick="closeResetMenuModal()" style="font-size:18px;background:none;border:none;color:var(--muted);cursor:pointer;box-shadow:none;">&times;</button>
+    </div>
+
+    <div id="resetMenuBusinessLabel" class="helper" style="margin-bottom:10px;">
+      Negocio: <b id="resetMenuBusinessName">—</b>
+    </div>
+
+    <div id="resetMenuPreview" style="margin-bottom:12px;font-size:13px;">
+      <span class="muted">Cargando previsualización…</span>
+    </div>
+
+    <div class="helper" style="background:rgba(200,0,0,.06);border:1px solid rgba(200,0,0,.18);padding:10px 12px;border-radius:6px;margin-bottom:12px;font-size:12.5px;">
+      <b>Esto borrará TODO el menú de este negocio:</b> categorías, productos, aliases, extras y upsells.<br>
+      <b>NO se eliminan:</b> pedidos, clientes, conversaciones, PDF del menú ni configuración del negocio.<br>
+      <b>Esta acción no puede deshacerse.</b> No hay restauración automática.
+    </div>
+
+    <div style="margin-bottom:10px;">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;">
+        Para continuar, escribe exactamente <code>RESET MENU</code>
+      </label>
+      <input id="resetMenuConfirmInput" type="text" autocomplete="off" spellcheck="false"
+             placeholder="RESET MENU"
+             oninput="validateResetConfirmInput()"
+             style="width:100%;font-family:'SF Mono',Menlo,monospace;" />
+    </div>
+
+    <div style="display:flex;gap:8px;margin-bottom:8px;">
+      <button id="resetMenuExecBtn" onclick="executeResetMenu()" disabled
+              style="background:var(--danger);color:#fff;border-color:rgba(200,0,0,.3);font-weight:600;">
+        Eliminar menú permanentemente
+      </button>
+      <button onclick="closeResetMenuModal()">Cancelar</button>
+    </div>
+
+    <div id="resetMenuResult" style="font-size:12.5px;"></div>
+  </div>
+</div>
+
 </body>
 </html>
