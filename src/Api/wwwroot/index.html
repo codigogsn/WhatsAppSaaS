@@ -4144,6 +4144,19 @@ function fmtDate(d){
   return dt.toLocaleDateString('es-VE', {day:'2-digit',month:'2-digit'}) + ' ' + dt.toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'});
 }
 
+// Returns YYYY-MM-DD in the BROWSER'S LOCAL timezone. We deliberately avoid
+// `Date#toISOString().slice(0,10)` because that emits a UTC calendar date —
+// for operators in Caracas (UTC-4) after 8pm local, the UTC date is already
+// the next day, which makes the "Hoy" filter exclude orders placed earlier
+// the same local day. See the dashboard date filter at load() for the matching
+// comparison.
+function localISODate(d){
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + dd;
+}
+
 // ── KPIs ──
 async function loadSummary(){
   var jwt = getJwt();
@@ -5139,8 +5152,18 @@ async function load() {
   // Front-end filters
   if (phone) { const p = phone.toLowerCase(); data = data.filter(o => ((o.customerPhone||'')+'').toLowerCase().includes(p)); }
   if (searchId) { const s = searchId.toLowerCase(); data = data.filter(o => (o.id||'').toLowerCase().includes(s)); }
-  if (dateFrom) { data = data.filter(o => (o.createdAtUtc||'').slice(0,10) >= dateFrom); }
-  if (dateTo) { const to = dateTo + 'T23:59:59'; data = data.filter(o => (o.createdAtUtc||'') <= to); }
+  // Date filters compare LOCAL calendar dates on both sides. The dateFrom /
+  // dateTo inputs hold local-date strings (see applyDatePreset → localISODate),
+  // and we project each order's UTC timestamp to the operator's local calendar
+  // date before string-comparing — symmetric, no implicit timezone assumption.
+  const beforeFilterCount = data.length;
+  if (dateFrom) { data = data.filter(o => o.createdAtUtc && localISODate(new Date(o.createdAtUtc)) >= dateFrom); }
+  if (dateTo)   { data = data.filter(o => o.createdAtUtc && localISODate(new Date(o.createdAtUtc)) <= dateTo); }
+  if (dateFrom || dateTo) {
+    console.log('[date-filter] applied dateFrom=' + (dateFrom||'(none)')
+      + ' dateTo=' + (dateTo||'(none)')
+      + ' before=' + beforeFilterCount + ' after=' + data.length);
+  }
   if (isHandoffFilter) { data = data.filter(o => getHandoff(o) !== null); }
 
   checkNewOrders(data);
@@ -6100,7 +6123,8 @@ updateLoginUI();
 // Date preset helper
 function applyDatePreset(preset) {
   var now = new Date();
-  var toISO = function(d){ return d.toISOString().slice(0,10); };
+  // Use LOCAL calendar date (operator's timezone), not UTC. See localISODate.
+  var toISO = localISODate;
   if (preset === 'today') {
     document.getElementById('dateFrom').value = toISO(now);
     document.getElementById('dateTo').value = '';
@@ -6110,11 +6134,18 @@ function applyDatePreset(preset) {
     document.getElementById('dateTo').value = toISO(now);
   }
   // 'custom' — leave inputs as-is
+  console.log('[date-filter] preset=' + preset
+    + ' today(local)=' + localISODate(new Date())
+    + ' today(utc)='   + new Date().toISOString().slice(0,10)
+    + ' dateFrom=' + document.getElementById('dateFrom').value
+    + ' dateTo='   + document.getElementById('dateTo').value);
 }
 
-// Set default date filter to today
-const today = new Date().toISOString().slice(0,10);
+// Set default date filter to today (LOCAL timezone — see localISODate).
+const today = localISODate(new Date());
 document.getElementById('dateFrom').value = today;
+console.log('[date-filter] init today(local)=' + today
+  + ' today(utc)=' + new Date().toISOString().slice(0,10));
 
 // Move modals to body to escape dashboard layout containment
 var createBizModal = document.getElementById('createBizModal');
