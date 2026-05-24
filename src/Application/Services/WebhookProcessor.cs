@@ -64,6 +64,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Per-request active menu (loaded from DB or fallback to demo)
     private MenuEntry[]? _activeMenu;
 
+    // True when _activeMenu came from the hardcoded demo MenuCatalog rather than
+    // from the tenant's real DB rows. Used to gate the demo-catalog leaks that
+    // were producing phantom products like "Coca Cola"/"Combo Clasico" in real
+    // tenant orders. Only empty/new tenants (or DB-load failures) should benefit
+    // from the demo fallback.
+    private bool _activeCatalogIsDemo;
+
     // Per-request BCV rate (resolved once, reused for summaries + receipt)
     private ResolvedRate? _bcvRate;
 
@@ -95,9 +102,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
             ? null
             : businessContext.OrderInstructions;
 
-        // Load business menu from DB; fallback to demo catalog
-        _activeMenu = await LoadBusinessMenuAsync(businessContext.BusinessId, cancellationToken);
+        // Load business menu from DB; fallback to demo catalog. The isDemo flag
+        // gates the demo retry in NormalizeMenuItemName(rawItem) and the demo
+        // price fallback in AddOrIncreaseItem so real tenants don't leak
+        // phantom products like "Coca Cola" / "Combo Clasico" into orders.
+        var (loadedCatalog, isDemo) = await LoadBusinessMenuAsync(businessContext.BusinessId, cancellationToken);
+        _activeMenu = loadedCatalog;
+        _activeCatalogIsDemo = isDemo;
         ActiveCatalog.Value = _activeMenu;
+        ActiveCatalogIsDemo.Value = isDemo;
         _staticLogger.Value = _logger;
 
         // Resolve BCV rate once per request (never blocks processing)
@@ -3276,15 +3289,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var displayName = entry?.Canonical ?? name;
 
         // If active catalog returned no price or a suspiciously low price,
-        // check the demo catalog as fallback (handles corrupted DB menu data)
+        // check the demo catalog as fallback (handles corrupted DB menu data).
+        // Gated on ActiveCatalogIsDemo so real tenants don't have their
+        // displayName overwritten with a demo canonical (e.g. "Coca Cola").
         if (unitPrice < 0.10m && ActiveCatalog.Value != null)
         {
-            _staticLogger.Value?.LogInformation("PRICE FALLBACK start item={Item} dbPrice={DbPrice}", displayName, unitPrice);
-            var demoEntry = FindDemoPriceFallback(name);
-            if (demoEntry != null && demoEntry.Price > unitPrice)
+            if (ActiveCatalogIsDemo.Value)
             {
-                unitPrice = demoEntry.Price;
-                if (displayName == name) displayName = demoEntry.Canonical ?? name;
+                _staticLogger.Value?.LogInformation("PRICE FALLBACK start item={Item} dbPrice={DbPrice}", displayName, unitPrice);
+                var demoEntry = FindDemoPriceFallback(name);
+                if (demoEntry != null && demoEntry.Price > unitPrice)
+                {
+                    unitPrice = demoEntry.Price;
+                    if (displayName == name) displayName = demoEntry.Canonical ?? name;
+                }
+            }
+            else
+            {
+                _staticLogger.Value?.LogInformation(
+                    "PRICE FALLBACK demo price suppressed rawItem={Item} dbPrice={DbPrice} catalogSize={CatalogSize} suppressedFallback=true",
+                    displayName, unitPrice, ActiveCatalog.Value.Length);
             }
         }
 
@@ -4150,6 +4174,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // helpers must still see the per-business menu set at the start of the request.
     internal static readonly AsyncLocal<MenuEntry[]?> ActiveCatalog = new();
 
+    // True when ActiveCatalog refers to the hardcoded demo MenuCatalog. Used by
+    // the static NormalizeMenuItemName(rawItem) overload to suppress the demo
+    // fallback for real tenants whose catalog simply doesn't contain the
+    // customer's text. Empty/new tenants and dev/preview keep the fallback.
+    internal static readonly AsyncLocal<bool> ActiveCatalogIsDemo = new();
+
     // Logger for static helpers (set by ProcessAsync alongside ActiveCatalog)
     private static readonly AsyncLocal<ILogger?> _staticLogger = new();
 
@@ -4337,43 +4367,55 @@ public sealed class WebhookProcessor : IWebhookProcessor
             Category = "salsas", Price = 0.50m },
     };
 
-    private async Task<MenuEntry[]> LoadBusinessMenuAsync(Guid businessId, CancellationToken ct)
+    private async Task<(MenuEntry[] Catalog, bool IsDemo)> LoadBusinessMenuAsync(Guid businessId, CancellationToken ct)
     {
-        if (_menuRepository is null) return MenuCatalog;
+        if (_menuRepository is null) return (MenuCatalog, true);
 
         try
         {
             var dbItems = await _menuRepository.GetAvailableItemsAsync(businessId, ct);
-            if (dbItems.Count == 0) return MenuCatalog;
+            if (dbItems.Count == 0) return (MenuCatalog, true);
 
-            return dbItems.Select(i => new MenuEntry
+            return (dbItems.Select(i => new MenuEntry
             {
                 Canonical = i.Name,
                 Aliases = i.Aliases.Select(a => a.Alias.ToLowerInvariant()).ToArray(),
                 Category = i.Category?.Name?.ToLowerInvariant(),
                 Price = i.Price
-            }).ToArray();
+            }).ToArray(), false);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to load business menu from DB for {BusinessId}, using demo catalog", businessId);
-            return MenuCatalog;
+            return (MenuCatalog, true);
         }
     }
 
     internal static string? NormalizeMenuItemName(string rawItem)
     {
         var result = NormalizeMenuItemName(rawItem, ActiveCatalog.Value ?? MenuCatalog);
-        // If active (DB) catalog couldn't resolve the item, try demo catalog as fallback.
-        // This handles production DBs with incomplete menus — common items like perros,
-        // papas, etc. can still be parsed even if the DB doesn't have matching entries.
+        // Demo fallback is only safe for empty/new tenants and dev/preview, where
+        // ActiveCatalog itself IS the demo MenuCatalog. For real tenants with a
+        // loaded DB menu, retrying against demo produced phantom products
+        // (Coca Cola, Combo Clasico, Papas Medianas, Hamburguesa Clasica) in
+        // real La Boyera orders. Gate the retry on ActiveCatalogIsDemo so real
+        // tenants surface "no match" instead.
         if (result == null && ActiveCatalog.Value != null)
         {
-            result = NormalizeMenuItemName(rawItem, MenuCatalog);
-            if (result != null)
+            if (ActiveCatalogIsDemo.Value)
+            {
+                result = NormalizeMenuItemName(rawItem, MenuCatalog);
+                if (result != null)
+                    _staticLogger.Value?.LogInformation(
+                        "NormalizeMenuItemName DB catalog miss, demo fallback hit: raw={Raw} -> {Canon}",
+                        rawItem, result);
+            }
+            else
+            {
                 _staticLogger.Value?.LogInformation(
-                    "NormalizeMenuItemName DB catalog miss, demo fallback hit: raw={Raw} -> {Canon}",
-                    rawItem, result);
+                    "NormalizeMenuItemName demo fallback SUPPRESSED rawItem={RawItem} catalogSize={CatalogSize} suppressedFallback=true",
+                    rawItem, ActiveCatalog.Value.Length);
+            }
         }
         return result;
     }
