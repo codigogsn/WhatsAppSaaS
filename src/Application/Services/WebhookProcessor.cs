@@ -5203,7 +5203,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Pattern: split where a letter is followed by whitespace, then a quantity
         // (digit or Spanish word number) followed by space and another letter.
         // This detects "...especiales 2 papas..." or "...especiales una coca..."
-        var splitPattern = @"(?<=\p{L})\s+(?=(?:\d+|un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+\p{L})";
+        //
+        // Negative lookahead on the digit branch: do NOT treat a number that is
+        // immediately followed by a weight unit (g/gr/grs/gramos) as a quantity.
+        // Otherwise "shawarma pollo 350 gramos" would split into
+        // ["shawarma pollo", "350 gramos"] and the weight token would never reach
+        // ExtractItemAndModifiers' size-aware matcher.
+        var splitPattern = @"(?<=\p{L})\s+(?=(?:\d+(?!\s*(?:gramos|grs|gr|g)\b)|un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+\p{L})";
         var parts = Regex.Split(segment, splitPattern, RegexOptions.IgnoreCase);
 
         if (parts.Length <= 1)
@@ -5290,13 +5296,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Strip trailing noise
         itemText = StripTrailingNoise(itemText);
 
+        // Extract explicit weight token (e.g. "350 gramos", "350 grs", "350gr", "350g")
+        // BEFORE matching, so size-variant catalog items (Shawarma 200 grs vs 350 grs)
+        // can be disambiguated after a base-name match. The numeric portion is captured;
+        // the whole weight token is stripped from itemText so it cannot pollute matching.
+        string? sizeToken = null;
+        var sizeMatch = Regex.Match(itemText, @"\b(\d{2,4})\s*(?:gramos|grs|gr|g)\b", RegexOptions.IgnoreCase);
+        if (sizeMatch.Success)
+        {
+            sizeToken = sizeMatch.Groups[1].Value;
+            itemText = (itemText[..sizeMatch.Index] + " " + itemText[(sizeMatch.Index + sizeMatch.Length)..]).Trim();
+            itemText = Regex.Replace(itemText, @"\s+", " ");
+        }
+
         // Try the full phrase first — "perros especiales" → "Perro Especial"
         var fullMatch = NormalizeMenuItemName(itemText);
         if (fullMatch != null)
         {
             return new ParsedItem
             {
-                Name = fullMatch,
+                Name = ApplySizePreference(fullMatch, sizeToken),
                 Quantity = 1,
                 Modifiers = modifiers
             };
@@ -5312,7 +5331,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             {
                 return new ParsedItem
                 {
-                    Name = collapsedMatch,
+                    Name = ApplySizePreference(collapsedMatch, sizeToken),
                     Quantity = 1,
                     Modifiers = modifiers
                 };
@@ -5343,7 +5362,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         {
             return new ParsedItem
             {
-                Name = bestMatch,
+                Name = ApplySizePreference(bestMatch, sizeToken),
                 Quantity = 1,
                 Modifiers = modifiers,
                 OriginalText = itemText
@@ -5356,6 +5375,22 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var (partialMatch, confidence, alternatives) = FindMatchWithConfidence(itemText, catalog);
         if (alternatives is { Count: > 1 })
         {
+            // If the customer included an explicit size token, try to resolve the
+            // ambiguity by preferring a candidate whose canonical encodes that size.
+            if (sizeToken != null)
+            {
+                var preferred = alternatives.FirstOrDefault(a => CanonicalHasSize(a, sizeToken));
+                if (preferred != null)
+                {
+                    return new ParsedItem
+                    {
+                        Name = preferred,
+                        Quantity = 1,
+                        Modifiers = modifiers,
+                        OriginalText = itemText
+                    };
+                }
+            }
             // Ambiguous — return a marker so the caller can ask for clarification
             return new ParsedItem
             {
@@ -5370,7 +5405,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         {
             return new ParsedItem
             {
-                Name = partialMatch,
+                Name = ApplySizePreference(partialMatch, sizeToken),
                 Quantity = 1,
                 Modifiers = modifiers,
                 OriginalText = itemText
@@ -5379,6 +5414,57 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         return null;
     }
+
+    // Matches "350g", "350 gr", "350 grs", "350 gramos" (case-insensitive).
+    private static readonly Regex WeightTokenRegex =
+        new(@"\b(\d{2,4})\s*(?:gramos|grs|gr|g)\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
+    /// <summary>
+    /// When the customer explicitly mentioned a weight (e.g. "350 gramos"),
+    /// prefer a catalog item that shares the same base name AND encodes that
+    /// size in its canonical (e.g. "Shawarma 350 grs"). Returns <paramref name="matched"/>
+    /// unchanged when no size was given, no sibling is found, or the catalog is empty.
+    /// Pure helper — does not modify any state.
+    /// </summary>
+    private static string ApplySizePreference(string matched, string? sizeToken)
+    {
+        if (string.IsNullOrWhiteSpace(sizeToken) || string.IsNullOrWhiteSpace(matched))
+            return matched;
+
+        // If the already-matched canonical already carries the requested size, keep it.
+        if (CanonicalHasSize(matched, sizeToken))
+            return matched;
+
+        var catalog = ActiveCatalog.Value ?? MenuCatalog;
+        if (catalog.Length == 0) return matched;
+
+        var matchedBase = StripWeightTokens(StripAccents(matched.ToLowerInvariant())).Trim();
+        if (string.IsNullOrWhiteSpace(matchedBase)) return matched;
+
+        foreach (var entry in catalog)
+        {
+            if (!CanonicalHasSize(entry.Canonical, sizeToken)) continue;
+
+            var entryBase = StripWeightTokens(StripAccents(entry.Canonical.ToLowerInvariant())).Trim();
+            if (entryBase == matchedBase)
+                return entry.Canonical;
+        }
+
+        return matched;
+    }
+
+    private static bool CanonicalHasSize(string canonical, string sizeToken)
+    {
+        if (string.IsNullOrWhiteSpace(canonical) || string.IsNullOrWhiteSpace(sizeToken))
+            return false;
+        return Regex.IsMatch(
+            canonical,
+            $@"\b{Regex.Escape(sizeToken)}\s*(?:gramos|grs|gr|g)\b",
+            RegexOptions.IgnoreCase);
+    }
+
+    private static string StripWeightTokens(string s)
+        => WeightTokenRegex.Replace(s, " ").Replace("  ", " ").Trim();
 
     // Extract standalone observations not already captured as item modifiers
     internal static string? ExtractEmbeddedObservation(string rawText, List<ParsedItem>? parsedItems = null)
