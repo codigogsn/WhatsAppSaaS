@@ -1600,11 +1600,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 _logger.LogInformation("BRAIN: intent=Order route=AI confidence={Conf} items={Count} conversation={ConversationId}",
                                     conf, brainItems.Count, conversationId);
 
+                                // AI items that could not be resolved to a priced catalog row.
+                                // We surface these via clarification instead of adding $0 raw lines
+                                // to state.Items (which would then march through observation /
+                                // delivery / checkout and only blow up at FinalizeOrderIfPossibleAsync).
+                                var unresolvedAiItems = new List<(string RawText, int Quantity)>();
+
                                 foreach (var item in brainItems)
                                 {
                                     if (!string.IsNullOrWhiteSpace(item.Name) && item.Quantity > 0)
                                     {
                                         var aiRaw = item.Name.Trim();
+
+                                        // Detect a customer-stated weight token in the AI's raw item
+                                        // text BEFORE normalization so size-aware promotion works on
+                                        // the AI path too (the size-token fix already shipped in
+                                        // ExtractItemAndModifiers only covers the quick-parse path).
+                                        string? aiSizeToken = null;
+                                        var aiSizeMatch = WeightTokenRegex.Match(aiRaw);
+                                        if (aiSizeMatch.Success) aiSizeToken = aiSizeMatch.Groups[1].Value;
+
                                         var canonical = NormalizeMenuItemName(aiRaw);
                                         string? aiModifier = null;
 
@@ -1643,11 +1658,71 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                             }
                                         }
 
-                                        AddOrIncreaseItem(state, canonical ?? aiRaw, item.Quantity, aiModifier);
+                                        // Last-chance fallback: run the AI item text through
+                                        // ExtractItemAndModifiers, which does word-by-word matching,
+                                        // size promotion (gramos/grs/gr/g AND bare 200/350) and
+                                        // flavor extraction. Handles cases like
+                                        // "shawarma de pollo 350" that don't match any single alias.
+                                        if (canonical == null)
+                                        {
+                                            var fallback = ExtractItemAndModifiers(aiRaw);
+                                            if (fallback != null && !string.IsNullOrWhiteSpace(fallback.Name))
+                                            {
+                                                canonical = fallback.Name;
+                                                if (!string.IsNullOrWhiteSpace(fallback.Modifiers))
+                                                {
+                                                    aiModifier = string.IsNullOrWhiteSpace(aiModifier)
+                                                        ? fallback.Modifiers
+                                                        : aiModifier + ", " + fallback.Modifiers;
+                                                }
+                                                _logger.LogInformation(
+                                                    "BRAIN: AI item fallback-resolved {Raw} -> {Canonical} modifier={Mod}",
+                                                    aiRaw, canonical, aiModifier ?? "(none)");
+                                            }
+                                        }
+
+                                        if (canonical == null)
+                                        {
+                                            // Unresolved: don't write a $0 raw line into the cart;
+                                            // queue for clarification with the original text intact.
+                                            unresolvedAiItems.Add((aiRaw, item.Quantity));
+                                            _logger.LogInformation(
+                                                "BRAIN: AI item UNRESOLVED queued for clarification raw='{Raw}' qty={Qty} conversation={ConversationId}",
+                                                aiRaw, item.Quantity, conversationId);
+                                            continue;
+                                        }
+
+                                        // Size-aware promotion: if the customer said "350 gramos"
+                                        // and the alias-resolved canonical is the 200 grs sibling,
+                                        // upgrade to the 350 grs row when one exists in the active
+                                        // catalog. Reuses the helper added in the quick-parse fix.
+                                        if (aiSizeToken != null)
+                                            canonical = ApplySizePreference(canonical, aiSizeToken);
+
+                                        // Fallback: customer wrote bare "200"/"350" without unit
+                                        // ("shawarma de pollo 350"). Limited to shawarma canonicals.
+                                        canonical = ApplyShawarmaSizeFromRaw(canonical, aiRaw);
+
+                                        // Preserve customer-stated flavor (pollo/carne/mixto/...) when
+                                        // the resolved canonical is a sized Shawarma row that doesn't
+                                        // already encode the flavor. Skip when aiModifier already
+                                        // contains the flavor (came in via the fallback path above).
+                                        var flavor = ExtractShawarmaFlavor(aiRaw, canonical);
+                                        if (flavor != null
+                                            && (string.IsNullOrWhiteSpace(aiModifier)
+                                                || !aiModifier.Contains(flavor, StringComparison.OrdinalIgnoreCase)))
+                                        {
+                                            aiModifier = string.IsNullOrWhiteSpace(aiModifier)
+                                                ? flavor
+                                                : aiModifier + ", " + flavor;
+                                        }
+
+                                        AddOrIncreaseItem(state, canonical, item.Quantity, aiModifier);
                                     }
                                 }
 
-                                // Early zero-price check: warn about unresolved AI items
+                                // Defensive net: should be impossible after the unresolved-gate above,
+                                // but if some other path ever introduces a $0 row, surface it here.
                                 var zeroPriceAiItems = state.Items.Where(i => i.UnitPrice <= 0m).ToList();
                                 if (zeroPriceAiItems.Count > 0)
                                 {
@@ -1655,6 +1730,43 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                         zeroPriceAiItems.Count,
                                         string.Join(", ", zeroPriceAiItems.Select(i => i.Name)),
                                         conversationId);
+                                }
+
+                                // ── STOP: any unresolved AI item → clarification, do NOT advance to checkout ──
+                                if (unresolvedAiItems.Count > 0)
+                                {
+                                    var clarifySb = new System.Text.StringBuilder();
+                                    if (state.Items.Count > 0)
+                                    {
+                                        clarifySb.AppendLine("Entendí esto:");
+                                        foreach (var it in state.Items)
+                                        {
+                                            var ln = $"  {it.Quantity}x {it.Name}";
+                                            if (!string.IsNullOrWhiteSpace(it.Modifiers)) ln += $" ({it.Modifiers})";
+                                            if (it.UnitPrice > 0) ln += $" — ${(it.UnitPrice * it.Quantity):0.00}";
+                                            clarifySb.AppendLine(ln);
+                                        }
+                                        clarifySb.AppendLine();
+                                    }
+                                    clarifySb.AppendLine("Pero no pude identificar:");
+                                    foreach (var u in unresolvedAiItems)
+                                        clarifySb.AppendLine($"  {u.Quantity}x {u.RawText}");
+                                    clarifySb.AppendLine();
+                                    clarifySb.Append("Por favor escribe ese producto como aparece en el menú o aclara cuál es.");
+
+                                    _logger.LogInformation(
+                                        "BRAIN: intent=Order route=AI action=ClarifyUnresolved unresolved={Count} resolved={Resolved} conversation={ConversationId}",
+                                        unresolvedAiItems.Count, state.Items.Count, conversationId);
+
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From, Body = clarifySb.ToString(),
+                                        PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                                    state.LastActivityUtc = DateTime.UtcNow;
+                                    await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                    continue;
                                 }
 
                                 if (!string.IsNullOrWhiteSpace(brainResult.Args?.Order?.DeliveryType))
@@ -5355,11 +5467,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var fullMatch = NormalizeMenuItemName(itemText);
         if (fullMatch != null)
         {
+            var name = ApplySizePreference(fullMatch, sizeToken);
+            name = ApplyShawarmaSizeFromRaw(name, t);
             return new ParsedItem
             {
-                Name = ApplySizePreference(fullMatch, sizeToken),
+                Name = name,
                 Quantity = 1,
-                Modifiers = modifiers
+                Modifiers = MergeFlavorModifier(modifiers, t, name)
             };
         }
 
@@ -5371,11 +5485,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
             var collapsedMatch = NormalizeMenuItemName(collapsed);
             if (collapsedMatch != null)
             {
+                var name = ApplySizePreference(collapsedMatch, sizeToken);
+                name = ApplyShawarmaSizeFromRaw(name, t);
                 return new ParsedItem
                 {
-                    Name = ApplySizePreference(collapsedMatch, sizeToken),
+                    Name = name,
                     Quantity = 1,
-                    Modifiers = modifiers
+                    Modifiers = MergeFlavorModifier(modifiers, t, name)
                 };
             }
         }
@@ -5402,11 +5518,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         if (bestMatch != null)
         {
+            var name = ApplySizePreference(bestMatch, sizeToken);
+            name = ApplyShawarmaSizeFromRaw(name, t);
             return new ParsedItem
             {
-                Name = ApplySizePreference(bestMatch, sizeToken),
+                Name = name,
                 Quantity = 1,
-                Modifiers = modifiers,
+                Modifiers = MergeFlavorModifier(modifiers, t, name),
                 OriginalText = itemText
             };
         }
@@ -5445,11 +5563,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
         if (partialMatch != null)
         {
+            var name = ApplySizePreference(partialMatch, sizeToken);
+            name = ApplyShawarmaSizeFromRaw(name, t);
             return new ParsedItem
             {
-                Name = ApplySizePreference(partialMatch, sizeToken),
+                Name = name,
                 Quantity = 1,
-                Modifiers = modifiers,
+                Modifiers = MergeFlavorModifier(modifiers, t, name),
                 OriginalText = itemText
             };
         }
@@ -5507,6 +5627,88 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     private static string StripWeightTokens(string s)
         => WeightTokenRegex.Replace(s, " ").Replace("  ", " ").Trim();
+
+    // ── Shawarma flavor extraction ──
+    // Closed vocabulary used by the AI-path cart-add loop to populate
+    // ConversationItemEntry.Modifiers with the customer-stated flavor when the
+    // resolved canonical is a sized Shawarma row that doesn't itself encode
+    // the flavor (Shawarma 200 grs / Shawarma 350 grs). Ordering matters —
+    // longer multi-word patterns come first so they win over their prefixes
+    // (e.g. "kibbe frito" before "kibbe", "tres sabores" before "3 sabores").
+    private static readonly (Regex Pattern, string Label)[] ShawarmaFlavorTokens =
+    [
+        (new Regex(@"\bkibbe\s+frito\b",       RegexOptions.IgnoreCase | RegexOptions.Compiled), "kibbe frito"),
+        (new Regex(@"\b(?:3|tres)\s+sabores\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "3 sabores"),
+        (new Regex(@"\b(?:4|cuatro)\s+sabores\b", RegexOptions.IgnoreCase | RegexOptions.Compiled), "4 sabores"),
+        (new Regex(@"\bkibbe\b",                RegexOptions.IgnoreCase | RegexOptions.Compiled), "kibbe"),
+        (new Regex(@"\bfalafel\b",              RegexOptions.IgnoreCase | RegexOptions.Compiled), "falafel"),
+        (new Regex(@"\bmixto\b",                RegexOptions.IgnoreCase | RegexOptions.Compiled), "mixto"),
+        (new Regex(@"\bpollo\b",                RegexOptions.IgnoreCase | RegexOptions.Compiled), "pollo"),
+        (new Regex(@"\bcarne\b",                RegexOptions.IgnoreCase | RegexOptions.Compiled), "carne"),
+    ];
+
+    /// <summary>
+    /// Returns a customer-stated shawarma flavor (pollo/carne/mixto/kibbe/etc.) when:
+    ///   • the resolved canonical starts with "Shawarma" (so we don't tag
+    ///     non-shawarma items like "Plato Pollo Crispy" or "Mina Burger de Pollo"),
+    ///   • the canonical doesn't itself already encode that flavor (so
+    ///     "Shawarma de Falafel" doesn't get a redundant "(falafel)").
+    /// Pure helper — does not modify state.
+    /// </summary>
+    /// <summary>
+    /// Merges an existing modifier string (e.g. "sin cebolla") with a
+    /// detected shawarma flavor (pollo / carne / mixto / kibbe / falafel /
+    /// 3 sabores / 4 sabores) extracted from <paramref name="rawText"/>.
+    /// Returns the existing modifier unchanged when no flavor applies.
+    /// </summary>
+    private static string? MergeFlavorModifier(string? existing, string rawText, string canonical)
+    {
+        var flavor = ExtractShawarmaFlavor(rawText, canonical);
+        if (string.IsNullOrWhiteSpace(flavor)) return existing;
+        if (string.IsNullOrWhiteSpace(existing)) return flavor;
+        return existing + ", " + flavor;
+    }
+
+    // Matches bare "200" or "350" used as shawarma sizes when the customer omits
+    // the weight unit ("2 shawarmas de pollo 350"). Limited to the two canonical
+    // shawarma weights to avoid collateral damage on prices/years/quantities.
+    private static readonly Regex BareShawarmaSizeRegex =
+        new(@"\b(200|350)\b", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Shawarma-only fallback for size promotion when the customer wrote the
+    /// bare size number without a weight unit. Safe on non-shawarma items
+    /// (returns <paramref name="canonical"/> unchanged). Internally reuses
+    /// <see cref="ApplySizePreference"/>, which is a no-op when the catalog
+    /// has no sized sibling.
+    /// </summary>
+    internal static string ApplyShawarmaSizeFromRaw(string canonical, string rawText)
+    {
+        if (string.IsNullOrWhiteSpace(canonical) || string.IsNullOrWhiteSpace(rawText)) return canonical;
+        if (!canonical.StartsWith("Shawarma", StringComparison.OrdinalIgnoreCase)) return canonical;
+        var m = BareShawarmaSizeRegex.Match(rawText);
+        if (!m.Success) return canonical;
+        return ApplySizePreference(canonical, m.Groups[1].Value);
+    }
+
+    internal static string? ExtractShawarmaFlavor(string rawText, string canonical)
+    {
+        if (string.IsNullOrWhiteSpace(rawText) || string.IsNullOrWhiteSpace(canonical))
+            return null;
+        if (!canonical.StartsWith("Shawarma", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var canonLower = canonical.ToLowerInvariant();
+        foreach (var (pat, label) in ShawarmaFlavorTokens)
+        {
+            if (!pat.IsMatch(rawText)) continue;
+            // Skip double-annotation when canonical already encodes the flavor.
+            if (canonLower.Contains(label, StringComparison.OrdinalIgnoreCase))
+                return null;
+            return label;
+        }
+        return null;
+    }
 
     // Extract standalone observations not already captured as item modifiers
     internal static string? ExtractEmbeddedObservation(string rawText, List<ParsedItem>? parsedItems = null)
