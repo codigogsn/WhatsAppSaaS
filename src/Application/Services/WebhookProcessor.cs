@@ -67,6 +67,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // Per-request BCV rate (resolved once, reused for summaries + receipt)
     private ResolvedRate? _bcvRate;
 
+    // Per-request custom ordering prompt (from Businesses.OrderInstructions);
+    // null/empty falls back to the generic Msg.MenuPdfPrompt template.
+    private string? _orderInstructions;
+
+    private string EffectiveWhatToOrder()
+        => string.IsNullOrWhiteSpace(_orderInstructions) ? Msg.WhatToOrder : _orderInstructions!;
+
     // Per-request vertical strategy (resolved from business config)
     private IVerticalStrategy _verticalStrategy = null!;
 
@@ -82,6 +89,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // Resolve vertical strategy for this business
         _verticalStrategy = _verticalStrategyFactory.GetStrategy(businessContext.VerticalType);
+
+        // Per-business custom ordering prompt (null/empty → use Msg.MenuPdfPrompt fallback)
+        _orderInstructions = string.IsNullOrWhiteSpace(businessContext.OrderInstructions)
+            ? null
+            : businessContext.OrderInstructions;
 
         // Load business menu from DB; fallback to demo catalog
         _activeMenu = await LoadBusinessMenuAsync(businessContext.BusinessId, cancellationToken);
@@ -390,7 +402,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.AwaitingBrainClarification = false;
                         _logger.LogInformation("BRAIN: intent=ClarificationConfirm action=ResumeStagedOrder conversation={ConversationId} items={Items}",
                             conversationId, state.Items.Count);
-                        var confirmReply = BuildOrderReplyFromState(state, _bcvRate);
+                        var confirmReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From, Body = confirmReply.Body, Buttons = confirmReply.Buttons,
@@ -665,7 +677,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         {
                             // User skips observation — advance to confirmation
                             state.ObservationAnswered = true;
-                            var nextReply = BuildOrderReplyFromState(state, _bcvRate);
+                            var nextReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -699,7 +711,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         }
 
                         // Now continue to order confirmation gate
-                        var obsReply = BuildOrderReplyFromState(state, _bcvRate);
+                        var obsReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -726,7 +738,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = Msg.OrderSummaryWithTotal(state.Items, _bcvRate, state.DeliveryType) + "\n\n" + Msg.WhatToOrder,
+                            Body = Msg.OrderSummaryWithTotal(state.Items, _bcvRate, state.DeliveryType) + "\n\n" + EffectiveWhatToOrder(),
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -762,7 +774,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             && state.ObservationAnswered)
                         {
                             state.OrderConfirmed = true;
-                            var gateReply = BuildOrderReplyFromState(state, _bcvRate);
+                            var gateReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
 
                             await SendAsync(new OutgoingMessage
                             {
@@ -785,7 +797,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             && string.IsNullOrWhiteSpace(state.CustomerPhone)
                             && string.IsNullOrWhiteSpace(state.Address))
                         {
-                            var formReply = BuildOrderReplyFromState(state, _bcvRate);
+                            var formReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -828,7 +840,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.CheckoutFormSent = false;
                         state.DeliveryDataConfirmed = false;
 
-                        var editReply = BuildOrderReplyFromState(state, _bcvRate);
+                        var editReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
@@ -1065,7 +1077,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         if (standaloneDelivery != null)
                         {
                             state.DeliveryType = standaloneDelivery;
-                            var deliveryReply = BuildOrderReplyFromState(state, _bcvRate);
+                            var deliveryReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
 
                             await SendAsync(new OutgoingMessage
                             {
@@ -1214,7 +1226,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         {
                             state.CashCurrency = t switch { "cash_usd" => "USD", "cash_eur" => "EUR", _ => "Bs" };
                             state.AwaitingCashCurrency = false;
-                            var cashReply1 = BuildOrderReplyFromState(state, _bcvRate);
+                            var cashReply1 = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                             await SendAsync(new OutgoingMessage { To = message.From, Body = cashReply1.Body, Buttons = cashReply1.Buttons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
                             state.LastActivityUtc = DateTime.UtcNow;
                             await _stateStore.SaveAsync(conversationId, state, cancellationToken);
@@ -1285,7 +1297,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             else
                             {
                                 // No change or exact payment — continue checkout
-                                var cashReply2 = BuildOrderReplyFromState(state, _bcvRate);
+                                var cashReply2 = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                                 await SendAsync(new OutgoingMessage { To = message.From, Body = cashReply2.Body, Buttons = cashReply2.Buttons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
                             }
                             state.LastActivityUtc = DateTime.UtcNow;
@@ -1340,7 +1352,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     // Payout data acknowledged — transition directly to checkout form.
                                     // No Confirmar/Editar buttons here: payout is not a confirmation step.
                                     // BuildOrderReplyFromState will set CheckoutFormSent and return the form.
-                                    var checkoutReply = BuildOrderReplyFromState(state, _bcvRate);
+                                    var checkoutReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                                     var checkoutBody = "\u2705 Datos de vuelto recibidos.\n\n" + checkoutReply.Body;
                                     await SendAsync(new OutgoingMessage { To = message.From, Body = checkoutBody, Buttons = checkoutReply.Buttons, PhoneNumberId = phoneNumberId, AccessToken = businessContext.AccessToken }, businessContext.BusinessId, conversationId, cancellationToken);
 
@@ -1396,7 +1408,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 }
                             }
 
-                            var payReply = BuildOrderReplyFromState(state, _bcvRate);
+                            var payReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -1484,7 +1496,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         var catalog = ActiveCatalog.Value ?? MenuCatalog;
                         if (TryApplyGlobalModifier(state, rawText, catalog))
                         {
-                            var safeReply = BuildOrderReplyFromState(state, _bcvRate);
+                            var safeReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -1522,7 +1534,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         var resolved = TryResolveAmbiguity(state, rawText);
                         if (resolved)
                         {
-                            var ambReply = BuildOrderReplyFromState(state, _bcvRate);
+                            var ambReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                             await SendAsync(new OutgoingMessage
                             {
                                 To = message.From,
@@ -1659,7 +1671,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     conf, conversationId);
 
                                 // High confidence → proceed to normal order flow
-                                var brainReply = BuildOrderReplyFromState(state, _bcvRate);
+                                var brainReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
                                 await SendAsync(new OutgoingMessage
                                 {
                                     To = message.From, Body = brainReply.Body, Buttons = brainReply.Buttons,
@@ -1734,7 +1746,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             continue;
                         }
 
-                        var quickReply = BuildOrderReplyFromState(state, _bcvRate);
+                        var quickReply = BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -1871,7 +1883,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         await SendAsync(new OutgoingMessage
         {
             To = to,
-            Body = Msg.MenuPdfPrompt,
+            Body = EffectiveWhatToOrder(),
             PhoneNumberId = phoneNumberId,
             AccessToken = biz.AccessToken
         }, biz.BusinessId, conversationId, ct);
@@ -2040,7 +2052,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         {
             RestaurantIntent.OrderCreate => BuildOrderReply(parsed, state),
             RestaurantIntent.HumanHandoff => Msg.HandoffInitiated,
-            _ => Msg.WhatToOrder
+            _ => EffectiveWhatToOrder()
         };
     }
 
@@ -2058,13 +2070,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 state.DeliveryType = NormalizeDeliveryType(parsed.Args.Order.DeliveryType);
         }
 
-        return BuildOrderReplyFromState(state, _bcvRate);
+        return BuildOrderReplyFromState(state, _bcvRate, _orderInstructions);
     }
 
-    internal static BotReply BuildOrderReplyFromState(ConversationFields state, ResolvedRate? bcvRate = null)
+    internal static BotReply BuildOrderReplyFromState(ConversationFields state, ResolvedRate? bcvRate = null, string? customPrompt = null)
     {
         if (state.Items.Count == 0)
-            return Msg.WhatToOrder;
+            return string.IsNullOrWhiteSpace(customPrompt) ? Msg.WhatToOrder : customPrompt!;
 
         // Observation step — YES/NO gate before confirmation
         if (!state.ExtrasOffered && !state.ObservationAnswered)

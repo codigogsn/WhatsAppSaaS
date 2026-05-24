@@ -19,4 +19,5 @@ public sealed record BusinessContext(
     string VerticalType = "restaurant",
     string? ZelleRecipient = null,
     string? ZelleInstructions = null,
-    bool InteractiveMenuEnabled = false);
+    bool InteractiveMenuEnabled = false,
+    string? OrderInstructions = null);

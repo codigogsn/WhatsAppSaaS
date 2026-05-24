@@ -49,6 +49,10 @@ public class Business
     // Feature flag: interactive WhatsApp list-based menu browsing (default OFF)
     public bool InteractiveMenuEnabled { get; set; } = false;
 
+    // Custom prompt shown to customers explaining how to order via WhatsApp.
+    // Null/empty falls back to Msg.MenuPdfPrompt (generic burger/fries example).
+    public string? OrderInstructions { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

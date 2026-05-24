@@ -2455,6 +2455,17 @@
               <label>Logo URL</label>
               <input id="bizLogoUrl" placeholder="https://..." />
             </div>
+            <div class="full">
+              <label>Instrucciones para ordenar por WhatsApp</label>
+              <textarea id="bizOrderInstructions" rows="10" maxlength="3000"
+                placeholder="¿Qué deseas ordenar?&#10;&#10;IMPORTANTE:&#10;Escribe UN producto por línea.&#10;&#10;✅ Correcto:&#10;2 shawarma pollo 350 gramos&#10;2 coca cola&#10;&#10;Observaciones después:&#10;sin cebolla&#10;extra pepinillo&#10;&#10;NO escribas todo el pedido en una sola oración."
+                style="width:100%;min-height:180px;font-family:inherit;resize:vertical;"></textarea>
+              <small class="muted">Se muestra al cliente después del menú PDF. Deja vacío para usar el mensaje genérico por defecto.</small>
+              <div style="margin-top:4px;">
+                <button type="button" class="small" onclick="document.getElementById('bizOrderInstructions').value='';"
+                  style="font-size:11px;padding:2px 8px;">Limpiar</button>
+              </div>
+            </div>
           </div>
         </div>
         <div class="settings-section" data-section="pagos">
@@ -3775,6 +3786,7 @@ async function loadBizProfile(bizId){
     document.getElementById('bizPmId').value = b.paymentMobileId || '';
     document.getElementById('bizPmPhone').value = b.paymentMobilePhone || '';
     document.getElementById('bizNotifPhone').value = b.notificationPhone || '';
+    document.getElementById('bizOrderInstructions').value = b.orderInstructions || '';
     document.getElementById('bizMenuPdfStatus').textContent = b.menuPdfUrl ? 'PDF activo: ' + b.menuPdfUrl : 'Sin PDF personalizado (usa menu por defecto)';
     document.getElementById('bizMenuPdfMsg').textContent = '';
     document.getElementById('bizMenuPdf').value = '';
@@ -3811,6 +3823,7 @@ async function saveBizProfile(){
     paymentMobileId: document.getElementById('bizPmId').value.trim() || null,
     paymentMobilePhone: document.getElementById('bizPmPhone').value.trim() || null,
     notificationPhone: document.getElementById('bizNotifPhone').value.trim() || null,
+    orderInstructions: document.getElementById('bizOrderInstructions').value.trim() || null,
   };
   try {
     const res = await authFetch('/api/admin/businesses/' + bid, {

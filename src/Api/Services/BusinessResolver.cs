@@ -126,7 +126,8 @@ public class BusinessResolver : IBusinessResolver
             MenuPdfUrl: _menuPdfUrl,
             ZelleRecipient: biz.ZelleRecipient,
             ZelleInstructions: biz.ZelleInstructions,
-            InteractiveMenuEnabled: biz.InteractiveMenuEnabled);
+            InteractiveMenuEnabled: biz.InteractiveMenuEnabled,
+            OrderInstructions: biz.OrderInstructions);
     }
 
     private async Task<BusinessContext?> FindByPhoneNumberIdAsync(string id, CancellationToken ct)
@@ -177,7 +178,8 @@ public class BusinessResolver : IBusinessResolver
             Col("CurrencyReference"),
             Col("VerticalType") ?? "restaurant",
             Col("ZelleRecipient"), Col("ZelleInstructions"),
-            InteractiveMenuEnabled: Col("InteractiveMenuEnabled") is "True" or "true" or "1");
+            InteractiveMenuEnabled: Col("InteractiveMenuEnabled") is "True" or "true" or "1",
+            OrderInstructions: Col("OrderInstructions"));
     }
 
     public static string? EnvResolve(params string[] keys)

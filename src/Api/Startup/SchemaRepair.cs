@@ -46,6 +46,7 @@ public static class SchemaRepair
         ExecSql(conn, """CREATE UNIQUE INDEX IF NOT EXISTS "IX_WebhookQueue_MessageId" ON "WebhookQueue" ("MessageId") WHERE "MessageId" IS NOT NULL AND "ProcessedAtUtc" IS NULL""");
         Log.Information("QUEUE SCHEMA: WebhookQueue ensured");
         ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "InteractiveMenuEnabled" boolean NOT NULL DEFAULT false""");
+        ExecSql(conn, """ALTER TABLE "Businesses" ADD COLUMN IF NOT EXISTS "OrderInstructions" text""");
         // Prevent duplicate active orders per customer/phone per business.
         // First repair any existing duplicates so the unique index can be created.
         RepairDuplicatePendingOrders(conn);

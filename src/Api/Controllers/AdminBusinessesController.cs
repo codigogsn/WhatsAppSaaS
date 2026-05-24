@@ -123,6 +123,7 @@ public class AdminBusinessesController : ControllerBase
                 MenuPdfUrl = Col("MenuPdfUrl"),
                 ZelleRecipient = Col("ZelleRecipient"),
                 ZelleInstructions = Col("ZelleInstructions"),
+                OrderInstructions = Col("OrderInstructions"),
                 IsActive = true // we filtered for active
             };
             if (DateTime.TryParse(Col("CreatedAtUtc"), out var created))
@@ -259,6 +260,7 @@ public class AdminBusinessesController : ControllerBase
                     menuPdfUrl = Col("MenuPdfUrl"),
                     zelleRecipient = Col("ZelleRecipient"),
                     zelleInstructions = Col("ZelleInstructions"),
+                    orderInstructions = Col("OrderInstructions"),
                     createdAtUtc = Col("CreatedAtUtc")
                 });
             }
@@ -321,6 +323,7 @@ public class AdminBusinessesController : ControllerBase
             biz.MenuPdfUrl,
             biz.ZelleRecipient,
             biz.ZelleInstructions,
+            biz.OrderInstructions,
             biz.CreatedAtUtc
         });
     }
@@ -341,6 +344,15 @@ public class AdminBusinessesController : ControllerBase
         public string? RestaurantType { get; set; }
         public string? ZelleRecipient { get; set; }
         public string? ZelleInstructions { get; set; }
+        public string? OrderInstructions { get; set; }
+    }
+
+    private const int OrderInstructionsMaxLength = 3000;
+
+    private static string? NormalizeOrderInstructions(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        return raw.Trim();
     }
 
     // GET /api/admin/businesses/templates
@@ -372,6 +384,10 @@ public class AdminBusinessesController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.PhoneNumberId))
             return BadRequest(new { error = "PhoneNumberId is required" });
 
+        var orderInstructions = NormalizeOrderInstructions(req.OrderInstructions);
+        if (orderInstructions is not null && orderInstructions.Length > OrderInstructionsMaxLength)
+            return BadRequest(new { error = $"OrderInstructions must be {OrderInstructionsMaxLength} characters or fewer" });
+
         // Check uniqueness
         var exists = await _db.Businesses.AnyAsync(b => b.PhoneNumberId == req.PhoneNumberId.Trim(), ct);
         if (exists)
@@ -397,6 +413,7 @@ public class AdminBusinessesController : ControllerBase
             RestaurantType = req.RestaurantType?.Trim().ToLowerInvariant(),
             ZelleRecipient = req.ZelleRecipient?.Trim(),
             ZelleInstructions = req.ZelleInstructions?.Trim(),
+            OrderInstructions = orderInstructions,
             // Default to BCV USD reference so Bs amounts appear in WhatsApp receipts
             // and payment instructions. Set to "NONE" to explicitly opt out.
             CurrencyReference = "BCV_USD",
@@ -580,6 +597,7 @@ public class AdminBusinessesController : ControllerBase
         public string? NotificationPhone { get; set; }
         public string? ZelleRecipient { get; set; }
         public string? ZelleInstructions { get; set; }
+        public string? OrderInstructions { get; set; }
     }
 
     // PUT /api/admin/businesses/{id}
@@ -589,6 +607,10 @@ public class AdminBusinessesController : ControllerBase
     {
         var biz = await AuthorizeBusinessAsync(id, ct);
         if (biz is null) return Unauthorized();
+
+        var orderInstructions = NormalizeOrderInstructions(req.OrderInstructions);
+        if (orderInstructions is not null && orderInstructions.Length > OrderInstructionsMaxLength)
+            return BadRequest(new { error = $"OrderInstructions must be {OrderInstructionsMaxLength} characters or fewer" });
 
         try
         {
@@ -605,7 +627,8 @@ public class AdminBusinessesController : ControllerBase
                     "Address" = @address, "LogoUrl" = @logo,
                     "PaymentMobileBank" = @pmBank, "PaymentMobileId" = @pmId,
                     "PaymentMobilePhone" = @pmPhone, "NotificationPhone" = @notif,
-                    "ZelleRecipient" = @zRecip, "ZelleInstructions" = @zInstr
+                    "ZelleRecipient" = @zRecip, "ZelleInstructions" = @zInstr,
+                    "OrderInstructions" = @orderInstr
                 WHERE LOWER(CAST("Id" AS TEXT)) = LOWER(@id)
             """;
             AddParam(cmd, "name", name);
@@ -619,6 +642,7 @@ public class AdminBusinessesController : ControllerBase
             AddParam(cmd, "notif", (object?)req.NotificationPhone?.Trim() ?? DBNull.Value);
             AddParam(cmd, "zRecip", (object?)req.ZelleRecipient?.Trim() ?? DBNull.Value);
             AddParam(cmd, "zInstr", (object?)req.ZelleInstructions?.Trim() ?? DBNull.Value);
+            AddParam(cmd, "orderInstr", (object?)orderInstructions ?? DBNull.Value);
             AddParam(cmd, "id", id.ToString());
             await cmd.ExecuteNonQueryAsync(ct);
 
@@ -635,7 +659,8 @@ public class AdminBusinessesController : ControllerBase
                 paymentMobilePhone = req.PaymentMobilePhone?.Trim(),
                 notificationPhone = req.NotificationPhone?.Trim(),
                 zelleRecipient = req.ZelleRecipient?.Trim(),
-                zelleInstructions = req.ZelleInstructions?.Trim()
+                zelleInstructions = req.ZelleInstructions?.Trim(),
+                orderInstructions
             });
         }
         catch (Exception ex)
