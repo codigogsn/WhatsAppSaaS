@@ -597,20 +597,6 @@ internal static class Msg
     internal static string HandoffInitiated
         => "Entendido. Tu conversaci\u00f3n fue derivada a un agente humano.\n\nUn miembro de nuestro equipo te atender\u00e1 en breve \ud83d\ude4f";
 
-    // Sent once per handoff cycle, immediately after HandoffInitiated, to
-    // give the operator the structured context they need (what happened,
-    // what they wanted, prior order state, delivery vs pickup). Gated by
-    // ConversationFields.HumanHandoffGreetingSent.
-    internal static string OperatorHandoffGreeting(string businessName)
-        => "\ud83d\udc4b Hola, te est\u00e1s comunicando con un operador de "
-         + (string.IsNullOrWhiteSpace(businessName) ? "nuestro equipo" : businessName.Trim())
-         + ".\n\nPara ayudarte m\u00e1s r\u00e1pido cu\u00e9ntanos:\n\n"
-         + "\u2022 Qu\u00e9 ocurri\u00f3\n"
-         + "\u2022 Qu\u00e9 quer\u00edas pedir\n"
-         + "\u2022 Si ya hab\u00edas iniciado un pedido\n"
-         + "\u2022 Delivery o pickup\n\n"
-         + "Estamos leyendo esta conversaci\u00f3n.";
-
     internal static string HandoffWaiting
         => "Tu consulta est\u00e1 siendo atendida por nuestro equipo. Te responderemos pronto.";
 

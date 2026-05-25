@@ -1215,6 +1215,8 @@
     .hf-bubble { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 13px; line-height: 1.4; word-break: break-word; }
     .hf-bubble.customer { align-self: flex-start; background: var(--bg, #1a1a1a); border: 1px solid var(--border-light); border-bottom-left-radius: 4px; }
     .hf-bubble.operator { align-self: flex-end; background: rgba(59,130,246,.12); border: 1px solid rgba(59,130,246,.2); border-bottom-right-radius: 4px; }
+    .hf-bubble.bot { align-self: center; max-width: 92%; background: transparent; border: 1px dashed var(--border-light); color: var(--muted); font-size: 12px; font-style: italic; padding: 6px 12px; }
+    .hf-bubble.bot::before { content: "BOT · "; font-style: normal; font-weight: 600; letter-spacing: .3px; opacity: .7; }
     .hf-bubble-time { font-size: 10px; color: var(--muted); margin-top: 2px; }
     .hf-empty { font-size: 12px; color: var(--muted); padding: 12px 0; text-align: center; }
 
@@ -4906,7 +4908,9 @@ function _handoffBuildChat(log){
   var html = '<div class="hf-chat">';
   for (var i = 0; i < log.length; i++) {
     var m = log[i];
-    var cls = m.sender === 'operator' ? 'operator' : 'customer';
+    var cls = m.sender === 'operator' ? 'operator'
+            : m.sender === 'bot'      ? 'bot'
+            :                           'customer';
     var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
     html += '<div class="hf-bubble ' + cls + '">' + esc(m.text || '')
       + (timeStr ? '<div class="hf-bubble-time">' + timeStr + '</div>' : '')
@@ -5266,7 +5270,7 @@ function _handoffPaintPane(opts){
     var emptyMsg = slot.querySelector('.hfc-pane-empty-inline');
     if (!newLog.length){
       if (!emptyMsg){
-        slot.innerHTML = '<div class="hfc-pane-empty-inline" style="font-size:13px;color:var(--muted);text-align:center;padding:24px 0;line-height:1.5;">El cliente pidió atención humana. Aún no hay mensajes adicionales en esta sesión.</div>';
+        slot.innerHTML = '<div class="hfc-pane-empty-inline" style="font-size:13px;color:var(--muted);text-align:center;padding:24px 0;line-height:1.5;">Aún no hay mensajes en esta sesión.</div>';
       }
     } else {
       if (!chatEl){
@@ -5285,7 +5289,9 @@ function _handoffPaintPane(opts){
         } else if (newLog.length > existingCount){
           for (var j = existingCount; j < newLog.length; j++){
             var m = newLog[j];
-            var cls = m.sender === 'operator' ? 'operator' : 'customer';
+            var cls = m.sender === 'operator' ? 'operator'
+                    : m.sender === 'bot'      ? 'bot'
+                    :                           'customer';
             var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
             var bubble = document.createElement('div');
             bubble.className = 'hf-bubble ' + cls;
@@ -5301,15 +5307,44 @@ function _handoffPaintPane(opts){
 
   // Composer — only restore draft when switching conversation (never on
   // a passive refresh, so the operator's in-flight typing is never touched).
+  // If no draft exists, prefill an editable operator-greeting suggestion so
+  // the operator can send their own first message (never auto-sent).
   if (opts.rebuildComposer){
     var ta2 = document.getElementById('hfcComposerInput');
     if (ta2){
       var draft = '';
       try { draft = localStorage.getItem('hf_draft_' + h.conversationId) || ''; } catch (e) {}
+      // Prefill the greeting only on the operator's very first turn in this
+      // conversation. If any operator reply already exists in the chat log we
+      // leave the composer empty so the suggestion never re-fires later.
+      if (!draft && !_handoffOperatorHasReplied(h)) draft = _handoffComposerPrefill();
       ta2.value = draft;
       _handoffComposerAutosize(ta2);
     }
   }
+}
+
+function _handoffOperatorHasReplied(h){
+  if (!h || !h.chatLog) return false;
+  for (var i = 0; i < h.chatLog.length; i++){
+    if (h.chatLog[i] && h.chatLog[i].sender === 'operator') return true;
+  }
+  return false;
+}
+
+// Returns an editable Spanish greeting suggestion for the composer when the
+// operator opens a fresh conversation. Uses the operator's first name from
+// the JWT user payload when available; otherwise falls back to a neutral
+// phrasing. The composer never auto-sends — the operator must press Enter
+// or click Enviar.
+function _handoffComposerPrefill(){
+  var name = '';
+  try {
+    var u = (typeof getJwtUser === 'function') ? getJwtUser() : null;
+    if (u && typeof u.name === 'string') name = u.name.trim().split(/\s+/)[0] || '';
+  } catch (e) {}
+  var who = name ? ('soy ' + name) : 'te atiendo yo';
+  return 'Hola, ' + who + '. Estoy revisando tu caso. Cuéntame qué ocurrió y qué querías pedir para ayudarte por aquí.';
 }
 
 // Persistent draft panel between header and transcript. Visible whenever

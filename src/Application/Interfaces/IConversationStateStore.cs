@@ -53,10 +53,6 @@ public sealed class ConversationFields
     public bool HumanHandoffRequested { get; set; }
     public DateTime? HumanHandoffAtUtc { get; set; }
     public int HumanHandoffNotifiedCount { get; set; }
-    // One-shot guard: ensures the operator-handoff greeting message is sent
-    // at most once per handoff cycle. Reset by ResetAfterConfirm so a future
-    // handoff cycle re-greets.
-    public bool HumanHandoffGreetingSent { get; set; }
 
     // Human override: admin has actively taken over the conversation from the dashboard
     public bool HumanOverride { get; set; }
@@ -153,7 +149,6 @@ public sealed class ConversationFields
         HumanHandoffRequested = false;
         HumanHandoffAtUtc = null;
         HumanHandoffNotifiedCount = 0;
-        HumanHandoffGreetingSent = false;
         UpsellSent = false;
         ComboSuggestionSent = false;
         SuggestionDeclined = false;

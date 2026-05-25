@@ -554,6 +554,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                 state.HumanHandoffAtUtc = DateTime.UtcNow;
                                 state.HumanHandoffNotifiedCount = 1;
 
+                                // Seed the operator pane with the customer's trigger message + the
+                                // bot's deterministic handoff reply, so the console transcript shows
+                                // real WhatsApp content from the moment the operator opens it.
+                                state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = rawText, At = DateTime.UtcNow });
+                                state.HumanChatLog.Add(new HumanChatEntry { Sender = "bot", Text = Msg.HandoffInitiated, At = DateTime.UtcNow });
+                                if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
+
                                 await SendAsync(new OutgoingMessage
                                 {
                                     To = message.From,
@@ -561,22 +568,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     PhoneNumberId = phoneNumberId,
                                     AccessToken = businessContext.AccessToken
                                 }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                                // One-shot operator-greeting context primer. Sent immediately after
-                                // HandoffInitiated so the customer answers the four structuring
-                                // questions while the operator is being paged. Gated by a state
-                                // flag so a reentrant handoff inside the same session doesn't spam.
-                                if (!state.HumanHandoffGreetingSent)
-                                {
-                                    await SendAsync(new OutgoingMessage
-                                    {
-                                        To = message.From,
-                                        Body = Msg.OperatorHandoffGreeting(businessContext.BusinessName),
-                                        PhoneNumberId = phoneNumberId,
-                                        AccessToken = businessContext.AccessToken
-                                    }, businessContext.BusinessId, conversationId, cancellationToken);
-                                    state.HumanHandoffGreetingSent = true;
-                                }
 
                                 if (_notificationService is not null)
                                     await _notificationService.NotifyHumanHandoffAsync(businessContext, message.From, cancellationToken);
@@ -606,9 +597,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.HumanHandoffNotifiedCount = 1;
                         // Start fresh transcript for this handoff session (preserves order state)
                         state.HumanChatLog.Clear();
-                        // New cycle → re-enable greeting (the Reset path also clears this,
-                        // but the chatLog-clear here is the actual "fresh session" signal).
-                        state.HumanHandoffGreetingSent = false;
+                        // Seed the operator pane with the customer's trigger + the bot's
+                        // handoff reply. Without this seed the pane is empty until the
+                        // first operator reply flips HumanOverride, leaving the operator
+                        // without the visible context that already exists on WhatsApp.
+                        state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = rawText, At = DateTime.UtcNow });
+                        state.HumanChatLog.Add(new HumanChatEntry { Sender = "bot", Text = Msg.HandoffInitiated, At = DateTime.UtcNow });
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -617,20 +611,6 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                        // One-shot operator-greeting context primer (see line 552 region for
-                        // the trapping-state path that mirrors this block).
-                        if (!state.HumanHandoffGreetingSent)
-                        {
-                            await SendAsync(new OutgoingMessage
-                            {
-                                To = message.From,
-                                Body = Msg.OperatorHandoffGreeting(businessContext.BusinessName),
-                                PhoneNumberId = phoneNumberId,
-                                AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
-                            state.HumanHandoffGreetingSent = true;
-                        }
 
                         // Notify staff
                         if (_notificationService is not null)
@@ -669,6 +649,16 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         }
                         else
                         {
+                            // Mirror the customer's follow-up into the operator transcript so the
+                            // console pane reflects the real WhatsApp dialogue while we're still in
+                            // the "requested but not yet overridden" window. Without this, customer
+                            // messages after the initial "humano" trigger are invisible to operators
+                            // until they send the first reply (which flips HumanOverride and starts
+                            // the existing logger at the top of this method).
+                            var msgText = message.Text?.Body ?? $"[{message.Type}]";
+                            state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = msgText, At = DateTime.UtcNow });
+                            if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
+
                             // Other messages: send waiting notification (max 3)
                             if (state.HumanHandoffNotifiedCount < 3)
                             {
