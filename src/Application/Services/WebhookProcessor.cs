@@ -562,6 +562,22 @@ public sealed class WebhookProcessor : IWebhookProcessor
                                     AccessToken = businessContext.AccessToken
                                 }, businessContext.BusinessId, conversationId, cancellationToken);
 
+                                // One-shot operator-greeting context primer. Sent immediately after
+                                // HandoffInitiated so the customer answers the four structuring
+                                // questions while the operator is being paged. Gated by a state
+                                // flag so a reentrant handoff inside the same session doesn't spam.
+                                if (!state.HumanHandoffGreetingSent)
+                                {
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = Msg.OperatorHandoffGreeting(businessContext.BusinessName),
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                    state.HumanHandoffGreetingSent = true;
+                                }
+
                                 if (_notificationService is not null)
                                     await _notificationService.NotifyHumanHandoffAsync(businessContext, message.From, cancellationToken);
 
@@ -590,6 +606,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.HumanHandoffNotifiedCount = 1;
                         // Start fresh transcript for this handoff session (preserves order state)
                         state.HumanChatLog.Clear();
+                        // New cycle → re-enable greeting (the Reset path also clears this,
+                        // but the chatLog-clear here is the actual "fresh session" signal).
+                        state.HumanHandoffGreetingSent = false;
 
                         await SendAsync(new OutgoingMessage
                         {
@@ -598,6 +617,20 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
+
+                        // One-shot operator-greeting context primer (see line 552 region for
+                        // the trapping-state path that mirrors this block).
+                        if (!state.HumanHandoffGreetingSent)
+                        {
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = Msg.OperatorHandoffGreeting(businessContext.BusinessName),
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.HumanHandoffGreetingSent = true;
+                        }
 
                         // Notify staff
                         if (_notificationService is not null)

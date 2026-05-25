@@ -2608,6 +2608,93 @@
       display: flex; gap: 8px; justify-content: flex-end;
     }
 
+    /* Status pill variants — distinct hue per state, neutral & flat */
+    #viewHandoff .hfc-pane-status.is-detectado {
+      background: rgba(245,158,11,.10); color: #b45309;
+    }
+    #viewHandoff .hfc-pane-status.is-finalizar {
+      background: rgba(8,145,178,.10); color: #0891b2;
+    }
+    #viewHandoff .hfc-pane-status.is-borrador {
+      background: rgba(34,197,94,.10); color: #15803d;
+    }
+
+    /* Persistent draft panel — between header and transcript */
+    #viewHandoff .hfc-draft-panel {
+      padding: 16px;
+      background: var(--surface-2, rgba(0,0,0,.02));
+      border-bottom: 1px solid var(--border-light, var(--border));
+    }
+    #viewHandoff .hfc-draft-head {
+      display: flex; justify-content: space-between; align-items: baseline;
+      gap: 16px; margin-bottom: 8px;
+    }
+    #viewHandoff .hfc-draft-title {
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .05em;
+      color: var(--text);
+    }
+    #viewHandoff .hfc-draft-meta {
+      font-size: 10px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    #viewHandoff .hfc-draft-items {
+      display: flex; flex-direction: column; gap: 8px;
+    }
+    #viewHandoff .hfc-draft-item {
+      font-size: 13px; color: var(--text); line-height: 1.4;
+      display: flex; align-items: baseline; gap: 8px;
+    }
+    #viewHandoff .hfc-draft-check {
+      color: var(--success, #15803d); font-weight: 700;
+    }
+    #viewHandoff .hfc-draft-empty {
+      color: var(--muted); font-style: italic;
+    }
+    #viewHandoff .hfc-draft-reason {
+      margin-top: 8px; padding-top: 8px;
+      border-top: 1px dashed var(--border-light, var(--border));
+      font-size: 12px; color: var(--text); line-height: 1.4;
+    }
+    #viewHandoff .hfc-draft-actions {
+      margin-top: 8px; display: flex; gap: 8px;
+    }
+
+    /* Finalizar atención modal */
+    #hfcFinalizeModal .hfc-finalize-card {
+      background: var(--card);
+      border: 1px solid var(--border-light, var(--border));
+      border-radius: var(--radius-sm, 8px);
+      padding: 24px;
+      max-width: 560px; width: 100%;
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    #hfcFinalizeModal .hfc-finalize-title {
+      font-size: 16px; font-weight: 700; margin: 0; color: var(--text);
+    }
+    #hfcFinalizeModal .hfc-finalize-hint {
+      font-size: 12px; line-height: 1.5; color: var(--muted); margin: 0;
+    }
+    #hfcFinalizeModal .hfc-finalize-text {
+      width: 100%; min-height: 240px; resize: vertical;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface-2, rgba(0,0,0,.03));
+      color: var(--text);
+      font: inherit; font-size: 13px; line-height: 1.5;
+      font-family: var(--font-mono, monospace);
+      outline: none;
+      box-sizing: border-box;
+    }
+    #hfcFinalizeModal .hfc-finalize-text:not([readonly]) {
+      background: var(--input-bg, var(--bg));
+      border-color: var(--accent, #3b82f6);
+    }
+    #hfcFinalizeModal .hfc-finalize-actions {
+      display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap;
+    }
+
     @media (max-width: 768px) {
       #viewHandoff .hfc-shell { grid-template-columns: 1fr; }
       #viewHandoff .hfc-queue { max-height: 280px; }
@@ -3317,10 +3404,11 @@ Tipo: burger"></textarea>
           <div class="hfc-pane-actions">
             <a class="hfc-action-btn is-primary" id="hfcActWhatsApp" href="#" target="_blank" rel="noopener" title="Abrir en WhatsApp Web">WhatsApp</a>
             <a class="hfc-action-btn" id="hfcActCall" href="#" title="Llamar">Llamar</a>
-            <button class="hfc-action-btn is-resolve" id="hfcActResolve" onclick="_handoffResolveConfirm()">Marcar resuelto</button>
+            <button class="hfc-action-btn is-resolve" id="hfcActResolve" onclick="_handoffOpenFinalize()">Finalizar atención</button>
             <button class="hfc-action-btn is-bot" id="hfcActReturn" onclick="_handoffReturnToBotConfirm()">Devolver al bot</button>
           </div>
         </div>
+        <div class="hfc-draft-panel" id="hfcDraftPanel" style="display:none;"></div>
         <div class="hfc-pane-transcript" id="hfcPaneTranscript" style="display:none;"></div>
         <div class="hfc-composer" id="hfcComposer" style="display:none;">
           <textarea id="hfcComposerInput" placeholder="Escribe tu respuesta…" rows="1"
@@ -3341,6 +3429,22 @@ Tipo: burger"></textarea>
       <div class="hfc-confirm-actions">
         <button class="hfc-action-btn" onclick="_handoffCloseConfirm()">Cancelar</button>
         <button class="hfc-action-btn is-primary" id="hfcConfirmOk" onclick="_handoffConfirmOk()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Finalizar atención modal (PART 4) — generates an order_draft only.
+       Does NOT create a real order, does NOT return to bot, does NOT archive.
+       Persisted draft lives in localStorage under hf_order_draft_<cid>. -->
+  <div class="modal-overlay" id="hfcFinalizeModal" onclick="if(event.target===this)_handoffCloseFinalize()">
+    <div class="hfc-finalize-card" onclick="event.stopPropagation()">
+      <h3 class="hfc-finalize-title">Finalizar atención</h3>
+      <p class="hfc-finalize-hint" id="hfcFinalizeHint">Resumen generado automáticamente. Pulsa "Editar borrador" para ajustar antes de generar.</p>
+      <textarea id="hfcFinalizeText" class="hfc-finalize-text" rows="14" readonly></textarea>
+      <div class="hfc-finalize-actions">
+        <button class="hfc-action-btn" onclick="_handoffCloseFinalize()">Cancelar</button>
+        <button class="hfc-action-btn" onclick="_handoffEnterEditDraft()">Editar borrador</button>
+        <button class="hfc-action-btn is-primary" onclick="_handoffSubmitDraft()">Generar borrador</button>
       </div>
     </div>
   </div>
@@ -5027,13 +5131,17 @@ function _handoffRenderQueue(){
     var name = h.customerName || h.phone || 'Cliente';
     var preview = _handoffLastPreview(h.chatLog);
     var since = h.humanHandoffAtUtc || h.humanOverrideAtUtc;
-    var status = isOverride ? 'humano' : 'esperando';
+    var code = _handoffDraftStatus(h);
+    var statusShort = code === 'borrador'  ? 'borrador'
+                    : code === 'finalizar' ? 'listo'
+                    : code === 'detectado' ? 'detectado'
+                    :                        'contexto';
     item.innerHTML = ''
       + '<div class="hfc-avatar">' + esc(_handoffInitial(name)) + '<span class="' + dotCls + '"></span></div>'
       + '<div class="hfc-queue-item-body">'
       +   '<div class="hfc-queue-name">' + esc(name) + '</div>'
       +   '<div class="hfc-queue-preview">' + esc(preview) + '</div>'
-      +   '<div class="hfc-queue-meta"><span>' + esc(status) + '</span><span>' + esc(_handoffRelativeTime(since)) + '</span></div>'
+      +   '<div class="hfc-queue-meta"><span class="hfc-queue-state hfc-queue-state-' + code + '">' + esc(statusShort) + '</span><span>' + esc(_handoffRelativeTime(since)) + '</span></div>'
       + '</div>';
     if (key === window._handoffSelectedCid) item.classList.add('is-selected');
     else item.classList.remove('is-selected');
@@ -5129,10 +5237,21 @@ function _handoffPaintPane(opts){
     }
   }
   if (statusEl) {
-    var statusText = isOverride ? 'HUMANO ACTIVO' : 'ESPERANDO RESPUESTA';
+    // 4-state pill — derives from chatLog content + persisted draft.
+    // Order of precedence: borrador > finalizar > detectado > contexto.
+    var code = _handoffDraftStatus(h);
+    var statusText = _handoffStatusLabel(code);
     if (statusEl.textContent !== statusText) statusEl.textContent = statusText;
-    statusEl.classList.toggle('is-active', isOverride);
+    statusEl.classList.remove('is-active', 'is-detectado', 'is-finalizar', 'is-borrador');
+    if (code === 'borrador')  statusEl.classList.add('is-borrador');
+    else if (code === 'finalizar') statusEl.classList.add('is-finalizar');
+    else if (code === 'detectado') statusEl.classList.add('is-detectado');
+    if (isOverride) statusEl.classList.add('is-active');
   }
+  // Persistent "Pedido detectado" panel — visible whenever there are items
+  // OR a saved draft. Lives between header and transcript; surgical update
+  // so the operator's scroll / focus stays intact.
+  _handoffPaintDraftPanel(h);
   var digits = String(h.phone || '').replace(/[^0-9]/g, '');
   var wa = document.getElementById('hfcActWhatsApp');
   var call = document.getElementById('hfcActCall');
@@ -5191,6 +5310,51 @@ function _handoffPaintPane(opts){
       _handoffComposerAutosize(ta2);
     }
   }
+}
+
+// Persistent draft panel between header and transcript. Visible whenever
+// detection finds items, delivery, or payment — or whenever a saved draft
+// exists. Re-rendered on every paint (cheap; ~10 DOM nodes).
+function _handoffPaintDraftPanel(h){
+  var slot = document.getElementById('hfcDraftPanel');
+  if (!slot) return;
+  var draft = _handoffDetectDraft(h);
+  var saved = _handoffLoadSavedDraft(h && h.conversationId);
+  var hasContent = (draft.items.length > 0) || draft.deliveryType || draft.paymentMethod || !!saved;
+  if (!hasContent){
+    if (slot.style.display !== 'none') slot.style.display = 'none';
+    slot.innerHTML = '';
+    return;
+  }
+  slot.style.display = '';
+  var itemsHtml = '';
+  if (draft.items.length){
+    for (var i = 0; i < draft.items.length; i++){
+      var it = draft.items[i];
+      itemsHtml += '<div class="hfc-draft-item">'
+        + '<span class="hfc-draft-check">✓</span> '
+        + esc(it.quantity + ' ' + it.name + (it.modifiers ? ' ' + it.modifiers : ''))
+        + '</div>';
+    }
+  } else {
+    itemsHtml = '<div class="hfc-draft-item hfc-draft-empty">Sin productos identificados — revisa la conversación.</div>';
+  }
+  var deliveryStr = draft.deliveryType === 'delivery' ? 'Delivery'
+                  : draft.deliveryType === 'pickup'   ? 'Pickup'
+                  : 'No especificada';
+  var paymentStr = draft.paymentMethod ? esc(draft.paymentMethod.replace('_',' ')) : 'No especificado';
+  var savedStr = saved ? (' · Borrador guardado ' + _handoffRelativeTime(saved.savedAtUtc)) : '';
+  var clearBtn = saved
+    ? '<button class="hfc-action-btn" onclick="_handoffDiscardDraft()" style="font-size:10px;padding:4px 10px;">Descartar borrador</button>'
+    : '';
+  slot.innerHTML = ''
+    + '<div class="hfc-draft-head">'
+    +   '<span class="hfc-draft-title">' + (saved ? 'Borrador guardado' : 'Pedido detectado') + '</span>'
+    +   '<span class="hfc-draft-meta">' + esc(deliveryStr) + ' · ' + paymentStr + savedStr + '</span>'
+    + '</div>'
+    + '<div class="hfc-draft-items">' + itemsHtml + '</div>'
+    + (draft.reason ? '<div class="hfc-draft-reason"><b>Motivo:</b> ' + esc(draft.reason) + '</div>' : '')
+    + (clearBtn ? '<div class="hfc-draft-actions">' + clearBtn + '</div>' : '');
 }
 
 function _handoffComposerAutosize(el){
@@ -5298,6 +5462,260 @@ function _handoffResolveConfirm(){
       } catch (e){ showToast(e.message, 'error'); }
     }
   );
+}
+
+// ═══ Order-draft detection (PART 3) ════════════════════════════════════════
+// Lightweight client-side heuristic. Inspects chatLog customer messages and
+// extracts a structured draft. Schema is designed to be promotable to a real
+// Order later: shape mirrors what /api/orders accepts so a future
+// "create-from-draft" feature can POST it directly.
+//
+//   {
+//     version: 1,
+//     conversationId, phone, customerName,
+//     items:        [{ quantity, name, modifiers, notes }],
+//     deliveryType: 'delivery' | 'pickup' | null,
+//     paymentMethod:'pago_movil' | 'efectivo' | 'zelle' | 'divisas' | null,
+//     reason:       string  (auto: complaint marker if detected)
+//     observations: string  (free-text of customer messages not classified)
+//     specialInstructions: string  (manual override slot, default '')
+//     savedAtUtc:   ISO date (only set when persisted)
+//     rawSummary:   string  (last text shown in the modal, used for re-edit)
+//   }
+//
+// Detection runs every refresh tick. The PERSISTED draft (after Generar
+// borrador) lives in localStorage['hf_order_draft_<cid>'] and takes
+// precedence over the live detection when present.
+
+// Curated list of common La Mina items. Heuristic only; operator-editable in
+// the modal so a missed item or rename does not break the flow.
+var _HF_PRODUCT_RX = /(shawarma|malta|coca\s*cola|coca|pepsi|fanta|refresco|jugo|papas?\s+fritas?|papitas?|sandwich|sand[uw]ich|hamburguesa|combo|salsa\s+(?:de\s+)?(?:garbanzos|ajo|picante)|t[eé]\s+helado|agua)/gi;
+var _HF_DELIVERY_RX = /\b(delivery|domicilio|env[ií]o|env[ií]ar|llev[ae]\w*|despach\w*)\b/i;
+var _HF_PICKUP_RX = /\b(pickup|recoger|retir\w*|busc\w*)\b/i;
+var _HF_PAYMENT_RX = /\b(pago\s*m[oó]vil|pagom[oó]vil|efectivo|cash|zelle|transferencia|divisas?|d[oó]lar(?:es)?)\b/i;
+var _HF_COMPLAINT_RX = /\b(no\s+he\s+pedido|no\s+ped[ií]|eso\s+no|esto?\s+est[áa]\s+mal|no\s+sirve|no\s+funciona|no\s+entiend[ae]s|desastre|se\s+volvi[oó]\s+loco|estoy\s+a\s+punto\s+de\s+no\s+comprar)\b/i;
+var _HF_SIZE_RX = /\b(200|350|450|500)\s*(?:grs?|gramos?|g)?\b/i;
+
+function _handoffDetectDraft(h){
+  // Persisted draft wins. If operator clicked Generar borrador, return that
+  // saved copy verbatim (so the BORRADOR GUARDADO indicator stays sticky).
+  var persisted = _handoffLoadSavedDraft(h && h.conversationId);
+  if (persisted) return persisted;
+
+  var draft = {
+    version: 1,
+    conversationId: h && h.conversationId,
+    phone: h && h.phone,
+    customerName: (h && h.customerName) || '',
+    items: [],
+    deliveryType: null,
+    paymentMethod: null,
+    reason: '',
+    observations: '',
+    specialInstructions: '',
+    savedAtUtc: null,
+    rawSummary: ''
+  };
+  if (!h || !h.chatLog || !h.chatLog.length) return draft;
+
+  var notes = [];
+  for (var i = 0; i < h.chatLog.length; i++){
+    var m = h.chatLog[i];
+    if (!m || m.sender !== 'customer' || !m.text) continue;
+    var text = String(m.text);
+
+    // Products + quantities — split on lines/commas to handle "2 shawarmas, 2 cocas"
+    var lines = text.split(/\n|,/);
+    for (var j = 0; j < lines.length; j++){
+      var line = lines[j].trim();
+      if (!line) continue;
+      var pm;
+      _HF_PRODUCT_RX.lastIndex = 0;
+      while ((pm = _HF_PRODUCT_RX.exec(line)) !== null){
+        var name = pm[1].replace(/\s+/g, ' ').trim();
+        // Look backwards for a leading quantity 1-9 (close to the match)
+        var pre = line.slice(0, pm.index);
+        var qm = pre.match(/(\d{1,2})\s*(?:de\s+)?$/);
+        var qty = qm ? parseInt(qm[1], 10) : 1;
+        if (!isFinite(qty) || qty < 1) qty = 1;
+        if (qty > 50) qty = 50;
+        // Size token (200, 350, etc.) anywhere on the line is a modifier
+        var sm = line.match(_HF_SIZE_RX);
+        var mod = sm ? (sm[1] + ' grs') : '';
+        // Merge with prior identical entry
+        var found = false;
+        for (var k = 0; k < draft.items.length; k++){
+          if (draft.items[k].name.toLowerCase() === name.toLowerCase()
+              && (draft.items[k].modifiers || '') === mod) {
+            draft.items[k].quantity += qty;
+            found = true;
+            break;
+          }
+        }
+        if (!found) draft.items.push({ quantity: qty, name: name, modifiers: mod, notes: '' });
+      }
+    }
+
+    if (!draft.deliveryType){
+      if (_HF_DELIVERY_RX.test(text)) draft.deliveryType = 'delivery';
+      else if (_HF_PICKUP_RX.test(text)) draft.deliveryType = 'pickup';
+    }
+    if (!draft.paymentMethod){
+      var pp = text.match(_HF_PAYMENT_RX);
+      if (pp){
+        var word = pp[1].toLowerCase();
+        if (/m[oó]vil/.test(word) || /pagom/.test(word)) draft.paymentMethod = 'pago_movil';
+        else if (/zelle/.test(word)) draft.paymentMethod = 'zelle';
+        else if (/efectivo|cash/.test(word)) draft.paymentMethod = 'efectivo';
+        else if (/divisa|d[oó]lar/.test(word)) draft.paymentMethod = 'divisas';
+        else if (/transferencia/.test(word)) draft.paymentMethod = 'transferencia';
+      }
+    }
+    if (!draft.reason && _HF_COMPLAINT_RX.test(text)){
+      draft.reason = 'El cliente reportó un problema.';
+    }
+    notes.push(text);
+  }
+  draft.observations = notes.join('\n');
+  return draft;
+}
+
+function _handoffDraftStatus(h){
+  // Returns one of the four UI states. Persisted draft overrides everything.
+  var saved = _handoffLoadSavedDraft(h && h.conversationId);
+  if (saved) return 'borrador';
+  var draft = _handoffDetectDraft(h);
+  var hasProducts = draft.items.length > 0;
+  var hasDelivery = !!draft.deliveryType;
+  if (hasProducts && hasDelivery) return 'finalizar';
+  if (hasProducts) return 'detectado';
+  // Customer hasn't given enough yet (or only the greeting + bot replies)
+  return 'contexto';
+}
+
+function _handoffStatusLabel(code){
+  if (code === 'borrador')   return 'BORRADOR GUARDADO';
+  if (code === 'finalizar')  return 'LISTO PARA FINALIZAR';
+  if (code === 'detectado')  return 'PEDIDO DETECTADO';
+  return 'ESPERANDO CONTEXTO';
+}
+
+function _handoffLoadSavedDraft(cid){
+  if (!cid) return null;
+  try {
+    var raw = localStorage.getItem('hf_order_draft_' + cid);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) { return null; }
+}
+function _handoffSaveSavedDraft(cid, draft){
+  if (!cid || !draft) return;
+  try { localStorage.setItem('hf_order_draft_' + cid, JSON.stringify(draft)); } catch (e) {}
+}
+function _handoffClearSavedDraft(cid){
+  if (!cid) return;
+  try { localStorage.removeItem('hf_order_draft_' + cid); } catch (e) {}
+}
+
+// ═══ Finalizar Atención modal (PART 4) ═════════════════════════════════════
+// Renders the auto-generated summary inside a custom modal. Three actions:
+//   Editar borrador — toggles the textarea into edit mode
+//   Generar borrador — persists the current text to localStorage as the
+//                      authoritative order_draft for this conversation. Does
+//                      NOT call /resolve, /return-to-bot, or any order
+//                      endpoint. Conversation stays active.
+//   Cancelar — closes without saving
+//
+// After save: a BORRADOR GUARDADO chip appears in the pane header and the
+// persistent draft panel in the transcript shows the structured summary
+// until the operator clears it explicitly.
+
+function _handoffSummarizeDraft(draft){
+  var lines = [];
+  if (draft.customerName) lines.push('Cliente: ' + draft.customerName);
+  else if (draft.phone)    lines.push('Cliente: ' + draft.phone);
+  if (draft.reason) lines.push('Motivo: ' + draft.reason);
+  else              lines.push('Motivo: Atención humana solicitada por el cliente.');
+  lines.push('');
+  if (draft.items.length){
+    lines.push('Pedido detectado:');
+    for (var i = 0; i < draft.items.length; i++){
+      var it = draft.items[i];
+      lines.push('• ' + it.quantity + ' ' + it.name + (it.modifiers ? ' ' + it.modifiers : ''));
+    }
+  } else {
+    lines.push('Pedido detectado: (sin productos identificados — revisar conversación)');
+  }
+  lines.push('');
+  lines.push('Entrega: ' + (draft.deliveryType === 'delivery' ? 'Delivery'
+                           : draft.deliveryType === 'pickup'  ? 'Pickup'
+                           : '(no especificada)'));
+  if (draft.paymentMethod){
+    lines.push('Pago: ' + draft.paymentMethod);
+  }
+  if (draft.observations){
+    lines.push('');
+    lines.push('Observaciones:');
+    lines.push(draft.observations);
+  }
+  if (draft.specialInstructions){
+    lines.push('');
+    lines.push('Notas operador:');
+    lines.push(draft.specialInstructions);
+  }
+  return lines.join('\n');
+}
+
+function _handoffOpenFinalize(){
+  var h = _handoffFindSelected();
+  if (!h) return;
+  var draft = _handoffDetectDraft(h);
+  draft.rawSummary = draft.rawSummary || _handoffSummarizeDraft(draft);
+  window._handoffPendingDraft = draft;
+  var overlay = document.getElementById('hfcFinalizeModal');
+  if (!overlay) return;
+  var ta = document.getElementById('hfcFinalizeText');
+  if (ta){
+    ta.value = draft.rawSummary;
+    ta.readOnly = true;
+    ta.style.background = 'var(--surface-2, rgba(0,0,0,.03))';
+  }
+  var hint = document.getElementById('hfcFinalizeHint');
+  if (hint) hint.textContent = 'Resumen generado automáticamente. Pulsa "Editar borrador" para ajustar antes de generar.';
+  overlay.classList.add('open');
+}
+function _handoffCloseFinalize(){
+  var overlay = document.getElementById('hfcFinalizeModal');
+  if (overlay) overlay.classList.remove('open');
+  window._handoffPendingDraft = null;
+}
+function _handoffEnterEditDraft(){
+  var ta = document.getElementById('hfcFinalizeText');
+  if (!ta) return;
+  ta.readOnly = false;
+  ta.style.background = 'var(--input-bg, var(--bg))';
+  ta.focus();
+  var hint = document.getElementById('hfcFinalizeHint');
+  if (hint) hint.textContent = 'Edita el resumen. Cuando estés listo, pulsa "Generar borrador" para guardarlo.';
+}
+function _handoffSubmitDraft(){
+  var draft = window._handoffPendingDraft;
+  if (!draft) return _handoffCloseFinalize();
+  var ta = document.getElementById('hfcFinalizeText');
+  if (ta) draft.rawSummary = ta.value;
+  draft.savedAtUtc = new Date().toISOString();
+  _handoffSaveSavedDraft(draft.conversationId, draft);
+  _handoffCloseFinalize();
+  // Repaint pane so the header chip + persistent draft panel show immediately.
+  _handoffPaintPane({ rebuildComposer: false });
+  if (typeof showToast === 'function') showToast('Borrador guardado · la conversación sigue activa', 'info');
+}
+function _handoffDiscardDraft(){
+  var h = _handoffFindSelected();
+  if (!h) return;
+  _handoffClearSavedDraft(h.conversationId);
+  _handoffPaintPane({ rebuildComposer: false });
+  if (typeof showToast === 'function') showToast('Borrador descartado', 'info');
 }
 
 // Called by navigateTo('handoff') — auto-select first if none, focus composer.
