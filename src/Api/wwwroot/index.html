@@ -4496,63 +4496,204 @@ async function loadHandoffs(){
   } catch(e) { console.warn('loadHandoffs error:', e); }
 }
 
+// ── Handoff inbox: surgical render ─────────────────────────────────────────
+// Auto-refresh (load() at 10 s) previously rebuilt the entire #handoffList
+// innerHTML on every tick, which wiped the operator's typed reply and reset
+// scroll/cursor. Now: on first render of each conversation we build a card;
+// on subsequent ticks we diff and patch in place (status, since, transcript)
+// while leaving the input element completely untouched. Drafts are also
+// mirrored to localStorage as a safety net for full-tree rebuilds (business
+// switch, logout/login, etc.) — restored when a card is freshly created.
+
+function _handoffBuildChat(log){
+  if (!log || !log.length) {
+    return '<div class="hf-empty">Sin mensajes en esta sesion aun</div>';
+  }
+  var html = '<div class="hf-chat">';
+  for (var i = 0; i < log.length; i++) {
+    var m = log[i];
+    var cls = m.sender === 'operator' ? 'operator' : 'customer';
+    var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
+    html += '<div class="hf-bubble ' + cls + '">' + esc(m.text || '')
+      + (timeStr ? '<div class="hf-bubble-time">' + timeStr + '</div>' : '')
+      + '</div>';
+  }
+  html += '</div>';
+  return html;
+}
+
+function _handoffBuildCard(h){
+  var cid = esc(h.conversationId);
+  var phone = esc(h.phone);
+  var name = esc(h.customerName || 'N/A');
+  var isOverride = !!h.humanOverride;
+  var since = h.humanHandoffAtUtc || h.humanOverrideAtUtc;
+  var sinceStr = since ? new Date(since).toLocaleString('es-VE') : '-';
+  var statusHtml = isOverride
+    ? '<span style="color:#1565c0;font-weight:600;">HUMANO ACTIVO</span>'
+    : '<span style="color:#c62828;font-weight:600;">ESPERANDO RESPUESTA</span>';
+  var borderLeft = isOverride ? '3px solid var(--info)' : '3px solid var(--danger)';
+
+  return ''
+    + '<div class="handoff-card" data-cid="' + cid + '" data-override="' + (isOverride ? '1' : '0') + '" '
+    +      'style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;border-left:' + borderLeft + ';">'
+    +   '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px;">'
+    +     '<div>'
+    +       '<b>' + name + '</b> &mdash; <span class="muted">' + phone + '</span><br/>'
+    +       '<span class="small muted">Desde: <span class="hf-since">' + sinceStr + '</span></span> &middot; <span class="hf-status">' + statusHtml + '</span>'
+    +     '</div>'
+    +     '<div style="display:flex;gap:6px;flex-wrap:wrap;">'
+    +       '<button onclick="event.stopPropagation();returnToBot(\'' + cid + '\')" style="background:var(--success);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">Devolver al Bot</button>'
+    +     '</div>'
+    +   '</div>'
+    +   '<div class="hf-chat-slot">' + _handoffBuildChat(h.chatLog || []) + '</div>'
+    +   '<div style="margin-top:8px;display:flex;gap:6px;align-items:center;">'
+    +     '<input type="text" id="reply-' + cid + '" placeholder="Escribe tu respuesta..." '
+    +            'oninput="_handoffSaveDraft(\'' + cid + '\', this.value)" '
+    +            'style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--input-bg);color:var(--text);" '
+    +            'onkeydown="if(event.key===\'Enter\'){event.preventDefault();sendHandoffReply(\'' + cid + '\')}" />'
+    +     '<button onclick="event.stopPropagation();sendHandoffReply(\'' + cid + '\')" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Enviar</button>'
+    +   '</div>'
+    + '</div>';
+}
+
+function _handoffPatchCard(card, h){
+  // Update status pill + since timestamp + border-left color WITHOUT touching
+  // the input or its current value/focus/cursor.
+  var isOverride = !!h.humanOverride;
+  var prevOverride = card.getAttribute('data-override') === '1';
+  if (isOverride !== prevOverride) {
+    card.setAttribute('data-override', isOverride ? '1' : '0');
+    card.style.borderLeft = isOverride ? '3px solid var(--info)' : '3px solid var(--danger)';
+    var statusEl = card.querySelector('.hf-status');
+    if (statusEl) {
+      statusEl.innerHTML = isOverride
+        ? '<span style="color:#1565c0;font-weight:600;">HUMANO ACTIVO</span>'
+        : '<span style="color:#c62828;font-weight:600;">ESPERANDO RESPUESTA</span>';
+    }
+  }
+  var since = h.humanHandoffAtUtc || h.humanOverrideAtUtc;
+  var sinceStr = since ? new Date(since).toLocaleString('es-VE') : '-';
+  var sinceEl = card.querySelector('.hf-since');
+  if (sinceEl && sinceEl.textContent !== sinceStr) sinceEl.textContent = sinceStr;
+
+  // Transcript: append-only when possible so scroll position is preserved.
+  // If the log shrunk (cap rollover) or is empty, fall back to full rebuild
+  // but keep the user's scroll if they were not at the bottom.
+  var slot = card.querySelector('.hf-chat-slot');
+  if (!slot) return;
+  var newLog = h.chatLog || [];
+  var chatEl = slot.querySelector('.hf-chat');
+
+  if (newLog.length === 0) {
+    if (!slot.querySelector('.hf-empty')) {
+      slot.innerHTML = '<div class="hf-empty">Sin mensajes en esta sesion aun</div>';
+    }
+    return;
+  }
+  if (!chatEl) {
+    slot.innerHTML = _handoffBuildChat(newLog);
+    var fresh = slot.querySelector('.hf-chat');
+    if (fresh) fresh.scrollTop = fresh.scrollHeight;
+    return;
+  }
+
+  var existingCount = chatEl.querySelectorAll('.hf-bubble').length;
+  var wasAtBottom = (chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight) < 50;
+
+  if (newLog.length < existingCount) {
+    // Log cap rolled — rebuild, but only auto-scroll if user was at bottom.
+    slot.innerHTML = _handoffBuildChat(newLog);
+    if (wasAtBottom) {
+      var c = slot.querySelector('.hf-chat');
+      if (c) c.scrollTop = c.scrollHeight;
+    }
+    return;
+  }
+  if (newLog.length === existingCount) return; // no new messages
+
+  // Append the new entries; never re-render existing bubbles.
+  for (var j = existingCount; j < newLog.length; j++) {
+    var m = newLog[j];
+    var cls = m.sender === 'operator' ? 'operator' : 'customer';
+    var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
+    var bubble = document.createElement('div');
+    bubble.className = 'hf-bubble ' + cls;
+    bubble.innerHTML = esc(m.text || '')
+      + (timeStr ? '<div class="hf-bubble-time">' + timeStr + '</div>' : '');
+    chatEl.appendChild(bubble);
+  }
+  if (wasAtBottom) chatEl.scrollTop = chatEl.scrollHeight;
+}
+
+function _handoffSaveDraft(cid, value){
+  try {
+    if (value && value.trim()) localStorage.setItem('hf_draft_' + cid, value);
+    else localStorage.removeItem('hf_draft_' + cid);
+  } catch (e) {}
+}
+function _handoffClearDraft(cid){
+  try { localStorage.removeItem('hf_draft_' + cid); } catch (e) {}
+}
+
 function renderHandoffInbox(list){
-  const container = document.getElementById('handoffList');
+  var container = document.getElementById('handoffList');
   if (!container) return;
-  if (!list.length) {
+  if (!list || !list.length) {
     container.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px;">No hay conversaciones que necesiten atencion humana.</div>';
     return;
   }
-  container.innerHTML = list.map(h => {
-    const cid = esc(h.conversationId);
-    const phone = esc(h.phone);
-    const name = esc(h.customerName || 'N/A');
-    const isOverride = h.humanOverride;
-    const since = h.humanHandoffAtUtc || h.humanOverrideAtUtc;
-    const sinceStr = since ? new Date(since).toLocaleString('es-VE') : '-';
-    const statusLabel = isOverride
-      ? '<span style="color:#1565c0;font-weight:600;">HUMANO ACTIVO</span>'
-      : '<span style="color:#c62828;font-weight:600;">ESPERANDO RESPUESTA</span>';
 
-    // Build chat transcript
-    var chatHtml = '';
-    var log = h.chatLog || [];
-    if (log.length > 0) {
-      chatHtml = '<div class="hf-chat">';
-      for (var i = 0; i < log.length; i++) {
-        var m = log[i];
-        var cls = m.sender === 'operator' ? 'operator' : 'customer';
-        var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
-        chatHtml += '<div class="hf-bubble ' + cls + '">' + esc(m.text || '')
-          + (timeStr ? '<div class="hf-bubble-time">' + timeStr + '</div>' : '')
-          + '</div>';
-      }
-      chatHtml += '</div>';
+  // Strip any pre-existing empty-state placeholder.
+  var empty = container.querySelector(':scope > div:not(.handoff-card)');
+  if (empty) empty.remove();
+
+  // Index current cards by conversation id.
+  var existing = {};
+  container.querySelectorAll('.handoff-card[data-cid]').forEach(function(el){
+    existing[el.getAttribute('data-cid')] = el;
+  });
+
+  // Pass 1 — remove cards that are no longer in the list.
+  var incoming = {};
+  for (var i = 0; i < list.length; i++) incoming[list[i].conversationId] = true;
+  for (var cid in existing) {
+    if (!incoming[cid]) { existing[cid].remove(); delete existing[cid]; }
+  }
+
+  // Pass 2 — update or insert each conversation in the order provided.
+  var prev = null;
+  for (var k = 0; k < list.length; k++) {
+    var h = list[k];
+    var key = h.conversationId;
+    var card = existing[key];
+    if (!card) {
+      var tmp = document.createElement('div');
+      tmp.innerHTML = _handoffBuildCard(h);
+      card = tmp.firstElementChild;
+      if (prev && prev.nextSibling) container.insertBefore(card, prev.nextSibling);
+      else if (prev) container.appendChild(card);
+      else if (container.firstChild) container.insertBefore(card, container.firstChild);
+      else container.appendChild(card);
+
+      // Restore draft from localStorage if present — survives logout, business
+      // switch, and any full rebuild path.
+      try {
+        var draft = localStorage.getItem('hf_draft_' + key);
+        if (draft) {
+          var inp = card.querySelector('input[type=text]');
+          if (inp) inp.value = draft;
+        }
+      } catch (e) {}
+
+      // First render — scroll the chat panel to bottom.
+      var firstChat = card.querySelector('.hf-chat');
+      if (firstChat) firstChat.scrollTop = firstChat.scrollHeight;
     } else {
-      chatHtml = '<div class="hf-empty">Sin mensajes en esta sesion aun</div>';
+      _handoffPatchCard(card, h);
     }
-
-    return `
-      <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:12px;${isOverride ? 'border-left:3px solid var(--info);' : 'border-left:3px solid var(--danger);'}">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:8px;">
-          <div>
-            <b>${name}</b> &mdash; <span class="muted">${phone}</span><br/>
-            <span class="small muted">Desde: ${sinceStr}</span> &middot; ${statusLabel}
-          </div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <button onclick="event.stopPropagation();returnToBot('${cid}')" style="background:var(--success);color:#fff;border:none;border-radius:4px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">Devolver al Bot</button>
-          </div>
-        </div>
-        ${chatHtml}
-        <div style="margin-top:8px;display:flex;gap:6px;align-items:center;">
-          <input type="text" id="reply-${cid}" placeholder="Escribe tu respuesta..." style="flex:1;padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:13px;background:var(--input-bg);color:var(--text);" onkeydown="if(event.key==='Enter'){event.preventDefault();sendHandoffReply('${cid}')}" />
-          <button onclick="event.stopPropagation();sendHandoffReply('${cid}')" style="background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 16px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Enviar</button>
-        </div>
-      </div>`;
-  }).join('');
-
-  // Auto-scroll chat areas to bottom
-  document.querySelectorAll('.hf-chat').forEach(function(el) { el.scrollTop = el.scrollHeight; });
+    prev = card;
+  }
 }
 
 async function sendHandoffReply(conversationId){
@@ -4573,6 +4714,7 @@ async function sendHandoffReply(conversationId){
       return;
     }
     input.value = '';
+    _handoffClearDraft(conversationId);
     acknowledgeHandoff('reply_sent');
     await loadHandoffs();
   } catch(e) { showToast('Network error: ' + e.message, 'error'); }
