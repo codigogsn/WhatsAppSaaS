@@ -739,9 +739,191 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         continue;
                     }
 
-                    // A-edit) EDITAR — re-show order for modifications
+                    // A-edit-gate) EDIT MODE — controlled sub-flow. Runs after
+                    // handoff/complaint checks above so "humano" / cancel / etc.
+                    // still escape. Free text here is NOT parsed as a new order.
+                    if (state.EditModeStep != null && !IsCancelCommand(t))
+                    {
+                        if (state.Items.Count == 0)
+                        {
+                            // Defensive: nothing to edit. Drop the flag silently
+                            // and let the normal greeting / order flow take over.
+                            state.EditModeStep = null;
+                        }
+                        else if (state.EditModeStep == "menu")
+                        {
+                            var choice = TryParseEditMenuChoice(t);
+                            if (choice == "remove")
+                            {
+                                state.EditModeStep = "remove";
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = "¿Qué producto quieres quitar? Escribe el número:\n\n"
+                                           + BuildNumberedItemList(state.Items),
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+                                state.LastActivityUtc = DateTime.UtcNow;
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+                            if (choice == "quantity")
+                            {
+                                state.EditModeStep = "quantity";
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = "Escribe el número del producto y la nueva cantidad. Ejemplo: 1 x 3\n\n"
+                                           + BuildNumberedItemList(state.Items),
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+                                state.LastActivityUtc = DateTime.UtcNow;
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+                            if (choice == "redo")
+                            {
+                                state.Items.Clear();
+                                state.EditModeStep = null;
+                                state.ExtrasOffered = false;
+                                state.ObservationPromptSent = false;
+                                state.ObservationAnswered = false;
+                                state.OrderConfirmed = false;
+                                state.CheckoutFormSent = false;
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = "Escribe tu pedido nuevamente, 1 producto por línea.\nEjemplo:\n2 shawarma pollo 350 gramos\n2 coca cola",
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+                                state.LastActivityUtc = DateTime.UtcNow;
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+                            // Free text inside the menu step — re-show the menu, don't parse.
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = BuildEditModeMenuBody(state.Items),
+                                Buttons = EditModeMenuButtons,
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                        else if (state.EditModeStep == "remove")
+                        {
+                            if (TryParseRemoveSelection(t, state.Items.Count, out var oneBasedIdx))
+                            {
+                                state.Items.RemoveAt(oneBasedIdx - 1);
+                                state.EditModeStep = null;
+
+                                if (state.Items.Count == 0)
+                                {
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = "Tu pedido quedó vacío. Escribe los productos que quieres pedir cuando estés listo. 🙂",
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
+                                else
+                                {
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = Msg.OrderSummaryWithTotal(state.Items, _bcvRate, state.DeliveryType)
+                                               + "\n\n" + Msg.ConfirmOrderPrompt,
+                                        Buttons = Msg.ConfirmButtons,
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
+                                state.LastActivityUtc = DateTime.UtcNow;
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+                            // Unparseable input — restate the prompt, don't fall through.
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "No entendí. Escribe solo el número del producto a quitar (por ejemplo: 1).\n\n"
+                                       + BuildNumberedItemList(state.Items),
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                        else if (state.EditModeStep == "quantity")
+                        {
+                            if (TryParseQuantityChange(t, state.Items.Count, out var oneBasedIdx, out var newQty))
+                            {
+                                if (newQty == 0)
+                                {
+                                    state.Items.RemoveAt(oneBasedIdx - 1);
+                                }
+                                else
+                                {
+                                    state.Items[oneBasedIdx - 1].Quantity = newQty;
+                                }
+                                state.EditModeStep = null;
+
+                                if (state.Items.Count == 0)
+                                {
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = "Tu pedido quedó vacío. Escribe los productos que quieres pedir cuando estés listo. 🙂",
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
+                                else
+                                {
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = Msg.OrderSummaryWithTotal(state.Items, _bcvRate, state.DeliveryType)
+                                               + "\n\n" + Msg.ConfirmOrderPrompt,
+                                        Buttons = Msg.ConfirmButtons,
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
+                                state.LastActivityUtc = DateTime.UtcNow;
+                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                continue;
+                            }
+                            await SendAsync(new OutgoingMessage
+                            {
+                                To = message.From,
+                                Body = "No entendí. Escribe \"número x cantidad\" (por ejemplo: 1 x 3).\n\n"
+                                       + BuildNumberedItemList(state.Items),
+                                PhoneNumberId = phoneNumberId,
+                                AccessToken = businessContext.AccessToken
+                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                            state.LastActivityUtc = DateTime.UtcNow;
+                            await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                            continue;
+                        }
+                    }
+
+                    // A-edit) EDITAR — enters the controlled edit sub-flow.
+                    // The cart is preserved; the full ordering instructions are
+                    // NOT re-sent (that used to give customers room to add a
+                    // duplicate order). EditModeStep="menu" is then handled by
+                    // the gate above on the next inbound message.
                     if (IsEditCommand(t) && state.Items.Count > 0)
                     {
+                        state.EditModeStep = "menu";
                         state.ExtrasOffered = false;
                         state.ObservationPromptSent = false;
                         state.ObservationAnswered = false;
@@ -751,7 +933,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         await SendAsync(new OutgoingMessage
                         {
                             To = message.From,
-                            Body = Msg.OrderSummaryWithTotal(state.Items, _bcvRate, state.DeliveryType) + "\n\n" + EffectiveWhatToOrder(),
+                            Body = BuildEditModeMenuBody(state.Items),
+                            Buttons = EditModeMenuButtons,
                             PhoneNumberId = phoneNumberId,
                             AccessToken = businessContext.AccessToken
                         }, businessContext.BusinessId, conversationId, cancellationToken);
@@ -3165,6 +3348,88 @@ public sealed class WebhookProcessor : IWebhookProcessor
     internal static bool IsEditCommand(string t)
         => t is "editar" or "modificar" or "cambiar pedido" or "cambiar mi pedido";
 
+    // ── Edit-mode helpers ────────────────────────────────────────────────────
+    // The edit sub-flow keeps the customer inside a tight loop with three
+    // concrete actions; we never re-send the full ordering instructions while
+    // EditModeStep is set. Handoff and Cancel still work as global escapes —
+    // both are checked higher up in the dispatcher before the edit-mode gate.
+
+    internal static string BuildNumberedItemList(IReadOnlyList<ConversationItemEntry> items)
+    {
+        var sb = new StringBuilder();
+        for (var i = 0; i < items.Count; i++)
+        {
+            var it = items[i];
+            sb.Append(i + 1).Append(") ").Append(it.Quantity).Append("x ").Append(it.Name);
+            if (!string.IsNullOrWhiteSpace(it.Modifiers))
+                sb.Append(" (").Append(it.Modifiers).Append(')');
+            if (i < items.Count - 1) sb.Append('\n');
+        }
+        return sb.ToString();
+    }
+
+    internal static string BuildEditModeMenuBody(IReadOnlyList<ConversationItemEntry> items)
+        => "Claro. Vamos a corregir tu pedido.\n\nTu pedido actual es:\n"
+           + BuildNumberedItemList(items)
+           + "\n\n¿Qué deseas hacer?\n(Si necesitas ayuda, escribe \"humano\".)";
+
+    internal static List<ReplyButton> EditModeMenuButtons => new()
+    {
+        new("btn_edit_remove", "Quitar producto"),
+        new("btn_edit_qty",    "Cambiar cantidades"),
+        new("btn_edit_redo",   "Rehacer todo"),
+    };
+
+    // Returns "remove" | "quantity" | "redo" for any recognised choice in the
+    // 4-option edit menu (the bound text after MapButtonIdToText). Null means
+    // the input did not match — the gate must ask again rather than parse.
+    internal static string? TryParseEditMenuChoice(string t)
+    {
+        if (string.IsNullOrWhiteSpace(t)) return null;
+        var s = StripAccents(t);
+        if (s == "quitar" || s.StartsWith("quitar ") || s == "remover" || s == "eliminar")
+            return "remove";
+        if (s == "cambiar cantidades" || s == "cambiar cantidad" || s == "cantidades" || s == "cantidad")
+            return "quantity";
+        if (s == "rehacer" || s.StartsWith("rehacer ") || s == "empezar de nuevo" || s == "reiniciar")
+            return "redo";
+        return null;
+    }
+
+    // Parses "1", "2" etc. The number is 1-based to match the display.
+    internal static bool TryParseRemoveSelection(string t, int max, out int oneBasedIndex)
+    {
+        oneBasedIndex = 0;
+        var s = t.Trim();
+        // Tolerate leading "remover ", "quitar ", "el ", etc.
+        var m = System.Text.RegularExpressions.Regex.Match(s, @"^(?:quitar\s+|remover\s+|eliminar\s+|el\s+|n[uú]mero\s+|#)?\s*(\d{1,2})\s*$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return false;
+        if (!int.TryParse(m.Groups[1].Value, out var n)) return false;
+        if (n < 1 || n > max) return false;
+        oneBasedIndex = n;
+        return true;
+    }
+
+    // Parses "1 x 3", "1x3", "2 = 5", "cambiar 1 a 3". Accepts loose punctuation.
+    internal static bool TryParseQuantityChange(string t, int max, out int oneBasedIndex, out int newQty)
+    {
+        oneBasedIndex = 0;
+        newQty = 0;
+        var s = t.Trim();
+        var m = System.Text.RegularExpressions.Regex.Match(s,
+            @"^(?:cambiar\s+)?(\d{1,2})\s*(?:x|×|=|a|:|\-)\s*(\d{1,2})$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return false;
+        if (!int.TryParse(m.Groups[1].Value, out var idx)) return false;
+        if (!int.TryParse(m.Groups[2].Value, out var qty)) return false;
+        if (idx < 1 || idx > max) return false;
+        if (qty < 0 || qty > 99) return false;
+        oneBasedIndex = idx;
+        newQty = qty;
+        return true;
+    }
+
     internal static bool IsCancelCommand(string t)
     {
         // Exact matches
@@ -3275,6 +3540,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
             "btn_extras_no"  => "no",   // legacy fallback
             "btn_confirmar"  => "confirmar",
             "btn_editar"     => "editar",
+            "btn_edit_remove" => "quitar",
+            "btn_edit_qty"    => "cambiar cantidades",
+            "btn_edit_redo"   => "rehacer",
             "btn_cancelar"   => "cancelar",
             "btn_delivery"   => "delivery",
             "btn_pickup"     => "pickup",

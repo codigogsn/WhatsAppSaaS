@@ -111,6 +111,17 @@ public sealed class ConversationFields
     /// </summary>
     public List<AmbiguousItemEntry>? PendingAmbiguousItems { get; set; }
 
+    /// <summary>
+    /// Active step in the controlled "Editar pedido" sub-flow. Null when the
+    /// customer is NOT in edit mode. Values:
+    ///   "menu"     — showed the 4-option menu, awaiting button/text choice
+    ///   "remove"   — asked which numbered item to remove, awaiting digit
+    ///   "quantity" — asked for "N x Q" pattern, awaiting that input
+    /// While this is set, free text is NOT parsed as a new order — the user
+    /// must pick one of the offered actions or escape via cancel/handoff.
+    /// </summary>
+    public string? EditModeStep { get; set; }
+
     public void ResetAfterConfirm()
     {
         MenuSent = false;
@@ -155,6 +166,7 @@ public sealed class ConversationFields
         ComboAcceptedCount = 0;
         ComboDeclinedCount = 0;
         PendingAmbiguousItems = null;
+        EditModeStep = null;
         LastGreetingRedirectAtUtc = null;
         CheckoutPendingSinceUtc = null;
         Reminder1SentAtUtc = null;
