@@ -2393,6 +2393,225 @@
       #viewOverview .hero-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       #viewOverview #cumulativeMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
+
+    /* ═══ Human Attention console ═════════════════════════════════════════
+       Dedicated operator screen. Two-column layout: queue (left) +
+       conversation pane (right). Sticky composer at the bottom of the right
+       pane. Reuses existing .hf-chat / .hf-bubble styles for the transcript.
+       Strict 8 / 16 / 24 spacing; no new dependencies, no animations beyond
+       a 120 ms background transition for the queue-item hover/active state.
+    */
+    #viewHandoff {
+      padding: 16px 0 0 0;
+    }
+    #viewHandoff .hfc-shell {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 16px;
+      min-height: calc(100vh - 200px);
+    }
+    #viewHandoff .hfc-queue {
+      background: var(--card);
+      border: 1px solid var(--border-light, var(--border));
+      border-radius: var(--radius-sm, 8px);
+      display: flex; flex-direction: column;
+      max-height: calc(100vh - 200px);
+      overflow: hidden;
+    }
+    #viewHandoff .hfc-queue-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-light, var(--border));
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px;
+    }
+    #viewHandoff .hfc-queue-title {
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .05em;
+      color: var(--muted); margin: 0;
+    }
+    #viewHandoff .hfc-queue-count {
+      font-size: 11px; font-weight: 700;
+      padding: 2px 8px; border-radius: 8px;
+      background: var(--surface-2, rgba(0,0,0,.04));
+      color: var(--text);
+    }
+    #viewHandoff .hfc-queue-list {
+      flex: 1; overflow-y: auto;
+      scrollbar-width: thin;
+    }
+    #viewHandoff .hfc-queue-item {
+      display: flex; gap: 8px;
+      padding: 16px;
+      border-bottom: 1px solid var(--border-light, var(--border));
+      cursor: pointer;
+      transition: background .12s ease;
+      align-items: flex-start;
+    }
+    #viewHandoff .hfc-queue-item:hover { background: var(--surface-2, rgba(0,0,0,.03)); }
+    #viewHandoff .hfc-queue-item.is-selected {
+      background: var(--surface-2, rgba(0,0,0,.04));
+      border-left: 3px solid var(--accent, #3b82f6);
+      padding-left: 13px;
+    }
+    #viewHandoff .hfc-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--surface-2, rgba(0,0,0,.06));
+      color: var(--text);
+      font-size: 12px; font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0;
+      position: relative;
+    }
+    #viewHandoff .hfc-avatar .hfc-dot {
+      position: absolute; top: -2px; right: -2px;
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--danger, #ef4444);
+      box-shadow: 0 0 0 2px var(--card);
+    }
+    #viewHandoff .hfc-avatar .hfc-dot.is-active { background: var(--info, #3b82f6); }
+    #viewHandoff .hfc-queue-item-body { flex: 1; min-width: 0; }
+    #viewHandoff .hfc-queue-name {
+      font-size: 13px; font-weight: 600; color: var(--text);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 8px;
+    }
+    #viewHandoff .hfc-queue-preview {
+      font-size: 12px; color: var(--muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      margin-bottom: 8px;
+    }
+    #viewHandoff .hfc-queue-meta {
+      display: flex; justify-content: space-between; gap: 8px;
+      font-size: 10px; color: var(--muted);
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    #viewHandoff .hfc-queue-empty {
+      padding: 24px 16px; text-align: center;
+      font-size: 12px; color: var(--muted);
+    }
+
+    #viewHandoff .hfc-pane {
+      background: var(--card);
+      border: 1px solid var(--border-light, var(--border));
+      border-radius: var(--radius-sm, 8px);
+      display: flex; flex-direction: column;
+      max-height: calc(100vh - 200px);
+      overflow: hidden;
+    }
+    #viewHandoff .hfc-pane-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-light, var(--border));
+      display: flex; align-items: center; gap: 16px;
+      flex-wrap: wrap;
+    }
+    #viewHandoff .hfc-pane-identity { display: flex; align-items: center; gap: 8px; min-width: 0; }
+    #viewHandoff .hfc-pane-identity .hfc-avatar { width: 40px; height: 40px; font-size: 14px; }
+    #viewHandoff .hfc-pane-name {
+      font-size: 16px; font-weight: 700; color: var(--text);
+      margin: 0; line-height: 1.25;
+    }
+    #viewHandoff .hfc-pane-phone {
+      font-size: 12px; color: var(--muted);
+      font-family: monospace;
+    }
+    #viewHandoff .hfc-pane-status {
+      font-size: 10px; font-weight: 700;
+      padding: 2px 8px; border-radius: 8px;
+      text-transform: uppercase; letter-spacing: .04em;
+      background: rgba(239,68,68,.10); color: var(--danger, #ef4444);
+    }
+    #viewHandoff .hfc-pane-status.is-active {
+      background: rgba(59,130,246,.10); color: var(--info, #3b82f6);
+    }
+    #viewHandoff .hfc-pane-actions { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+    #viewHandoff .hfc-action-btn {
+      font-size: 11px; font-weight: 600;
+      padding: 8px 16px; border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--card); color: var(--text);
+      cursor: pointer; text-decoration: none;
+      display: inline-flex; align-items: center; gap: 8px;
+      transition: background .12s ease;
+    }
+    #viewHandoff .hfc-action-btn:hover { background: var(--surface-2, rgba(0,0,0,.04)); }
+    #viewHandoff .hfc-action-btn.is-primary {
+      background: #25D366; border-color: #25D366; color: #fff;
+    }
+    #viewHandoff .hfc-action-btn.is-primary:hover { background: #1da851; }
+    #viewHandoff .hfc-action-btn.is-resolve { color: var(--success, #15803d); }
+    #viewHandoff .hfc-action-btn.is-bot { color: var(--muted); }
+
+    #viewHandoff .hfc-pane-transcript {
+      flex: 1; overflow-y: auto;
+      padding: 16px;
+      scrollbar-width: thin;
+    }
+    #viewHandoff .hfc-pane-transcript .hf-chat {
+      max-height: none; padding: 0; gap: 8px;
+    }
+    #viewHandoff .hfc-pane-empty {
+      padding: 24px 16px; text-align: center;
+      font-size: 13px; color: var(--muted);
+      line-height: 1.5;
+    }
+    #viewHandoff .hfc-composer {
+      border-top: 1px solid var(--border-light, var(--border));
+      padding: 16px;
+      background: var(--card);
+      position: sticky; bottom: 0;
+      display: flex; gap: 8px; align-items: flex-end;
+    }
+    #viewHandoff .hfc-composer textarea {
+      flex: 1; resize: none;
+      min-height: 40px; max-height: 120px;
+      padding: 8px 16px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--input-bg, var(--bg));
+      color: var(--text);
+      font: inherit; font-size: 13px; line-height: 1.4;
+      font-family: var(--font);
+      outline: none;
+    }
+    #viewHandoff .hfc-composer textarea:focus { border-color: var(--accent, #3b82f6); }
+    #viewHandoff .hfc-composer-hint {
+      font-size: 10px; color: var(--muted);
+      padding: 8px 0; white-space: nowrap;
+    }
+    #viewHandoff .hfc-composer-send {
+      background: var(--accent, #3b82f6); color: #fff;
+      border: none; border-radius: 8px;
+      padding: 8px 24px;
+      font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: background .12s ease;
+      flex-shrink: 0;
+    }
+    #viewHandoff .hfc-composer-send:hover { background: var(--accent-strong, #2563eb); }
+    #viewHandoff .hfc-composer-send:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* Confirm modal (return-to-bot / resolve) — reuses .modal-overlay pattern */
+    #hfcConfirmModal .hfc-confirm-card {
+      background: var(--card);
+      border: 1px solid var(--border-light, var(--border));
+      border-radius: var(--radius-sm, 8px);
+      padding: 24px;
+      max-width: 420px; width: 100%;
+    }
+    #hfcConfirmModal .hfc-confirm-title {
+      font-size: 16px; font-weight: 700; margin: 0 0 8px 0; color: var(--text);
+    }
+    #hfcConfirmModal .hfc-confirm-body {
+      font-size: 13px; line-height: 1.5; color: var(--muted);
+      margin: 0 0 24px 0;
+    }
+    #hfcConfirmModal .hfc-confirm-actions {
+      display: flex; gap: 8px; justify-content: flex-end;
+    }
+
+    @media (max-width: 768px) {
+      #viewHandoff .hfc-shell { grid-template-columns: 1fr; }
+      #viewHandoff .hfc-queue { max-height: 280px; }
+    }
   </style>
 </head>
 <body>
@@ -2439,6 +2658,10 @@
       </button>
       <button class="sb-btn" id="sbCustomers" onclick="navigateTo('customers')" title="Customers">
         <span>&#128101;</span><span class="sb-tooltip">Customers</span>
+      </button>
+      <button class="sb-btn" id="sbHandoff" onclick="navigateTo('handoff')" title="Atención humana">
+        <span>&#128483;</span><span class="sb-tooltip">Atención humana</span>
+        <span class="sb-badge" id="sbHandoffBadge" aria-label="Conversaciones pendientes"></span>
       </button>
     </div>
     <div class="sb-sep"></div>
@@ -2933,14 +3156,14 @@ Tipo: burger"></textarea>
       <div class="label">Pagos Pendientes</div>
       <div class="value" id="kpiPaymentsPending">0</div>
     </div>
-    <div class="alerts-strip-item hero-alert-danger" id="alertHandoffs" style="display:none;cursor:pointer;" onclick="acknowledgeHandoff('hero_stat');document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
+    <div class="alerts-strip-item hero-alert-danger" id="alertHandoffs" style="display:none;cursor:pointer;" onclick="acknowledgeHandoff('hero_stat');navigateTo('handoff')">
       <div class="label">Necesitan Humano</div>
       <div class="value" id="kpiHandoffs">0</div>
     </div>
   </div>
 
   <!-- Human Handoff Alert Banner (expanded detail — shown when handoffs > 0) -->
-  <div id="handoffAlertBanner" class="handoff-alert-banner" onclick="acknowledgeHandoff('banner');document.getElementById('handoffInbox').open=true;document.getElementById('handoffInbox').scrollIntoView({behavior:'smooth'})">
+  <div id="handoffAlertBanner" class="handoff-alert-banner" onclick="acknowledgeHandoff('banner');navigateTo('handoff')">
     <div class="handoff-alert-icon">&#x1f6a8;</div>
     <div class="handoff-alert-body">
       <div class="handoff-alert-title">Atenci&#243;n humana requerida</div>
@@ -3063,13 +3286,73 @@ Tipo: burger"></textarea>
     <div id="crmBody" style="font-size:13px;color:var(--muted);text-align:center;padding:24px 0;">Sin datos de clientes. Presiona <b>Load</b> para cargar.</div>
   </div>
 
+  <!-- ═══ View: Human Attention console ═══ -->
+  <section id="viewHandoff" style="display:none;">
+    <div class="hfc-shell">
+      <!-- Left: queue -->
+      <aside class="hfc-queue">
+        <div class="hfc-queue-header">
+          <h3 class="hfc-queue-title">Cola</h3>
+          <span class="hfc-queue-count" id="hfcQueueCount">0</span>
+        </div>
+        <div class="hfc-queue-list" id="hfcQueueList">
+          <div class="hfc-queue-empty">Sin conversaciones pendientes</div>
+        </div>
+      </aside>
+
+      <!-- Right: conversation pane -->
+      <main class="hfc-pane" id="hfcPane">
+        <div class="hfc-pane-empty" id="hfcPaneEmpty">
+          Selecciona una conversación de la cola para responder.
+        </div>
+        <div class="hfc-pane-header" id="hfcPaneHeader" style="display:none;">
+          <div class="hfc-pane-identity">
+            <div class="hfc-avatar" id="hfcPaneAvatar">·</div>
+            <div>
+              <h4 class="hfc-pane-name" id="hfcPaneName">—</h4>
+              <span class="hfc-pane-phone" id="hfcPanePhone">—</span>
+            </div>
+            <span class="hfc-pane-status" id="hfcPaneStatus">—</span>
+          </div>
+          <div class="hfc-pane-actions">
+            <a class="hfc-action-btn is-primary" id="hfcActWhatsApp" href="#" target="_blank" rel="noopener" title="Abrir en WhatsApp Web">WhatsApp</a>
+            <a class="hfc-action-btn" id="hfcActCall" href="#" title="Llamar">Llamar</a>
+            <button class="hfc-action-btn is-resolve" id="hfcActResolve" onclick="_handoffResolveConfirm()">Marcar resuelto</button>
+            <button class="hfc-action-btn is-bot" id="hfcActReturn" onclick="_handoffReturnToBotConfirm()">Devolver al bot</button>
+          </div>
+        </div>
+        <div class="hfc-pane-transcript" id="hfcPaneTranscript" style="display:none;"></div>
+        <div class="hfc-composer" id="hfcComposer" style="display:none;">
+          <textarea id="hfcComposerInput" placeholder="Escribe tu respuesta…" rows="1"
+                    oninput="_handoffComposerChanged(this)"
+                    onkeydown="_handoffComposerKeydown(event)"></textarea>
+          <span class="hfc-composer-hint">Enter envía · Shift+Enter salto</span>
+          <button class="hfc-composer-send" id="hfcComposerSend" onclick="_handoffComposerSend()">Enviar</button>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- Reusable confirm modal for return-to-bot / mark-resolved -->
+  <div class="modal-overlay" id="hfcConfirmModal" onclick="if(event.target===this)_handoffCloseConfirm()">
+    <div class="hfc-confirm-card" onclick="event.stopPropagation()">
+      <h3 class="hfc-confirm-title" id="hfcConfirmTitle">—</h3>
+      <p class="hfc-confirm-body" id="hfcConfirmBody">—</p>
+      <div class="hfc-confirm-actions">
+        <button class="hfc-action-btn" onclick="_handoffCloseConfirm()">Cancelar</button>
+        <button class="hfc-action-btn is-primary" id="hfcConfirmOk" onclick="_handoffConfirmOk()">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ═══ View: Orders ═══ -->
   <div id="viewOrders">
 
   <!-- Human Handoff Inbox -->
   <details id="handoffInbox" class="section-panel handoff-panel" ontoggle="if(this.open)acknowledgeHandoff('inbox_open')">
-    <summary>
-      Atencion Humana <span id="handoffBadge" class="section-badge section-badge-danger">0</span>
+    <summary onclick="event.preventDefault();acknowledgeHandoff('inbox_summary');navigateTo('handoff');" style="cursor:pointer;">
+      Atención humana <span id="handoffBadge" class="section-badge section-badge-danger">0</span>
+      <span style="float:right;font-size:11px;font-weight:500;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;">Abrir consola →</span>
     </summary>
     <div id="handoffList" style="margin-top:14px;display:flex;flex-direction:column;gap:10px;">
       <div class="hf-empty" id="handoffEmpty">No hay conversaciones activas</div>
@@ -3316,6 +3599,7 @@ var _screenRegistry = {
   overview:  { container: 'viewOverview',    sidebar: 'sbOverview',    tab: 'tabOverview' },
   orders:    { container: 'viewOrders',      sidebar: 'sbOrders',      tab: 'tabOrders' },
   customers: { container: 'customersPanel',  sidebar: 'sbCustomers' },
+  handoff:   { container: 'viewHandoff',     sidebar: 'sbHandoff' },
   bizadmin:  { container: 'bizPanel',        sidebar: 'sbBizAdmin' },
   users:     { container: 'usersPanel',      sidebar: 'sbUsersAdmin' }
 };
@@ -3359,6 +3643,11 @@ function navigateTo(screen) {
   if (screen === 'customers') { if (typeof loadCrm === 'function') loadCrm(); }
   if (screen === 'bizadmin')  { var bid = getBusinessId(); if (bid && typeof loadBizProfile === 'function') loadBizProfile(bid); }
   if (screen === 'users')     { if (typeof loadUsers === 'function') loadUsers(); }
+  if (screen === 'handoff')   {
+    if (typeof loadHandoffs === 'function') loadHandoffs();
+    if (typeof acknowledgeHandoff === 'function') acknowledgeHandoff('panel_open');
+    if (typeof _handoffOnNavigate === 'function') setTimeout(_handoffOnNavigate, 0);
+  }
 }
 
 // Legacy compatibility: setDashboardView delegates to navigateTo
@@ -4486,10 +4775,11 @@ async function loadHandoffs(){
       };
     }
 
-    // Render handoff inbox
+    // Render handoff inbox (Overview glance accordion + dedicated panel)
     renderHandoffInbox(list);
+    if (typeof _handoffRenderPanel === 'function') _handoffRenderPanel(list);
 
-    // Auto-open inbox if there are pending handoffs
+    // Auto-open the Overview glance accordion if there are pending handoffs.
     if (list.length > 0) {
       document.getElementById('handoffInbox').open = true;
     }
@@ -4636,6 +4926,391 @@ function _handoffClearDraft(cid){
   try { localStorage.removeItem('hf_draft_' + cid); } catch (e) {}
 }
 
+// ═══ Human Attention console — dedicated #viewHandoff screen ═══════════════
+// Reuses the surgical render discipline shipped in 3d8f132. The composer
+// textarea is mounted ONCE; subsequent refresh ticks only diff/patch the
+// header and transcript so the operator's typed text, cursor, focus, and
+// scroll position survive automatically. Drafts are mirrored to localStorage
+// via the same hf_draft_<cid> key already used by the Overview accordion.
+
+window._handoffLatest = [];        // last list received from the server
+window._handoffSelectedCid = null; // currently focused conversation id
+window._handoffConfirmAction = null; // pending confirm-modal callback
+
+function _handoffRelativeTime(when){
+  if (!when) return '—';
+  var t = new Date(when).getTime();
+  if (isNaN(t)) return '—';
+  var diffSec = Math.floor((Date.now() - t) / 1000);
+  if (diffSec < 60) return 'hace ' + diffSec + 's';
+  var diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return 'hace ' + diffMin + ' min';
+  var diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return 'hace ' + diffH + ' h';
+  var diffD = Math.floor(diffH / 24);
+  return 'hace ' + diffD + ' d';
+}
+function _handoffInitial(name){
+  if (!name) return '·';
+  var s = String(name).trim();
+  if (!s) return '·';
+  return s.charAt(0).toUpperCase();
+}
+function _handoffLastPreview(log){
+  if (!log || !log.length) return 'Sin mensajes';
+  var m = log[log.length - 1];
+  return (m && m.text) ? String(m.text) : '—';
+}
+
+function _handoffRenderPanel(list){
+  window._handoffLatest = Array.isArray(list) ? list : [];
+  _handoffRenderQueue();
+  _handoffRefreshPane();
+  // Sidebar badge — mirrors the pagos-pendientes pattern.
+  var badge = document.getElementById('sbHandoffBadge');
+  if (badge) {
+    var n = window._handoffLatest.length;
+    if (n > 0) {
+      badge.textContent = n > 99 ? '99+' : String(n);
+      badge.classList.add('has-count');
+    } else {
+      badge.textContent = '';
+      badge.classList.remove('has-count');
+    }
+  }
+}
+
+function _handoffRenderQueue(){
+  var list = window._handoffLatest;
+  var container = document.getElementById('hfcQueueList');
+  var counter = document.getElementById('hfcQueueCount');
+  if (!container) return;
+  if (counter) counter.textContent = list.length;
+
+  if (!list.length){
+    container.innerHTML = '<div class="hfc-queue-empty">Sin conversaciones pendientes</div>';
+    return;
+  }
+
+  var existing = {};
+  container.querySelectorAll('.hfc-queue-item[data-cid]').forEach(function(el){
+    existing[el.getAttribute('data-cid')] = el;
+  });
+
+  // Strip placeholder when there are real items.
+  var placeholder = container.querySelector('.hfc-queue-empty');
+  if (placeholder) placeholder.remove();
+
+  // Remove cards no longer in the list.
+  var incoming = {};
+  list.forEach(function(h){ incoming[h.conversationId] = true; });
+  for (var cid in existing){
+    if (!incoming[cid]) { existing[cid].remove(); delete existing[cid]; }
+  }
+
+  // Insert/update in incoming order.
+  var prev = null;
+  list.forEach(function(h){
+    var key = h.conversationId;
+    var item = existing[key];
+    if (!item){
+      item = document.createElement('div');
+      item.className = 'hfc-queue-item';
+      item.setAttribute('data-cid', key);
+      item.onclick = function(){ _handoffSelectConv(key); };
+      if (prev && prev.nextSibling) container.insertBefore(item, prev.nextSibling);
+      else if (prev) container.appendChild(item);
+      else container.insertBefore(item, container.firstChild);
+    }
+    var isOverride = !!h.humanOverride;
+    var dotCls = isOverride ? 'hfc-dot is-active' : 'hfc-dot';
+    var name = h.customerName || h.phone || 'Cliente';
+    var preview = _handoffLastPreview(h.chatLog);
+    var since = h.humanHandoffAtUtc || h.humanOverrideAtUtc;
+    var status = isOverride ? 'humano' : 'esperando';
+    item.innerHTML = ''
+      + '<div class="hfc-avatar">' + esc(_handoffInitial(name)) + '<span class="' + dotCls + '"></span></div>'
+      + '<div class="hfc-queue-item-body">'
+      +   '<div class="hfc-queue-name">' + esc(name) + '</div>'
+      +   '<div class="hfc-queue-preview">' + esc(preview) + '</div>'
+      +   '<div class="hfc-queue-meta"><span>' + esc(status) + '</span><span>' + esc(_handoffRelativeTime(since)) + '</span></div>'
+      + '</div>';
+    if (key === window._handoffSelectedCid) item.classList.add('is-selected');
+    else item.classList.remove('is-selected');
+    prev = item;
+  });
+}
+
+function _handoffFindSelected(){
+  var cid = window._handoffSelectedCid;
+  if (!cid) return null;
+  for (var i = 0; i < window._handoffLatest.length; i++){
+    if (window._handoffLatest[i].conversationId === cid) return window._handoffLatest[i];
+  }
+  return null;
+}
+
+function _handoffSelectConv(cid){
+  // Save draft of the currently-focused composer before switching.
+  var ta = document.getElementById('hfcComposerInput');
+  if (ta && window._handoffSelectedCid){
+    _handoffSaveDraft(window._handoffSelectedCid, ta.value);
+  }
+  window._handoffSelectedCid = cid;
+  _handoffRenderQueue();
+  _handoffPaintPane({ rebuildComposer: true });
+}
+
+function _handoffRefreshPane(){
+  // Called on every refresh tick. If selected conversation still exists,
+  // surgically update header + transcript; do NOT recreate the composer.
+  // If selected disappeared, auto-fall back to first or empty.
+  var h = _handoffFindSelected();
+  if (!h){
+    if (window._handoffLatest.length > 0){
+      window._handoffSelectedCid = window._handoffLatest[0].conversationId;
+      _handoffRenderQueue();
+      _handoffPaintPane({ rebuildComposer: true });
+    } else {
+      window._handoffSelectedCid = null;
+      _handoffPaintPaneEmpty();
+    }
+    return;
+  }
+  _handoffPaintPane({ rebuildComposer: false });
+}
+
+function _handoffPaintPaneEmpty(){
+  var header = document.getElementById('hfcPaneHeader');
+  var transcript = document.getElementById('hfcPaneTranscript');
+  var composer = document.getElementById('hfcComposer');
+  var empty = document.getElementById('hfcPaneEmpty');
+  if (header) header.style.display = 'none';
+  if (transcript) transcript.style.display = 'none';
+  if (composer) composer.style.display = 'none';
+  if (empty) {
+    empty.style.display = '';
+    empty.textContent = window._handoffLatest.length > 0
+      ? 'Selecciona una conversación de la cola para responder.'
+      : 'Sin conversaciones pendientes';
+  }
+}
+
+function _handoffPaintPane(opts){
+  opts = opts || {};
+  var h = _handoffFindSelected();
+  if (!h){ _handoffPaintPaneEmpty(); return; }
+
+  var header = document.getElementById('hfcPaneHeader');
+  var transcript = document.getElementById('hfcPaneTranscript');
+  var composer = document.getElementById('hfcComposer');
+  var empty = document.getElementById('hfcPaneEmpty');
+  if (empty) empty.style.display = 'none';
+  if (header) header.style.display = '';
+  if (transcript) transcript.style.display = '';
+  if (composer) composer.style.display = '';
+
+  // Header — identity + status + actions
+  var name = h.customerName || h.phone || 'Cliente';
+  var phoneFmt = (typeof fmtPhone === 'function') ? fmtPhone(h.phone) : h.phone;
+  var isOverride = !!h.humanOverride;
+  var nameEl = document.getElementById('hfcPaneName');
+  var phoneEl = document.getElementById('hfcPanePhone');
+  var avatarEl = document.getElementById('hfcPaneAvatar');
+  var statusEl = document.getElementById('hfcPaneStatus');
+  if (nameEl && nameEl.textContent !== name) nameEl.textContent = name;
+  if (phoneEl && phoneEl.textContent !== phoneFmt) phoneEl.textContent = phoneFmt;
+  if (avatarEl) {
+    var init = _handoffInitial(name);
+    if (avatarEl.firstChild && avatarEl.firstChild.nodeType === 3) {
+      if (avatarEl.firstChild.nodeValue !== init) avatarEl.firstChild.nodeValue = init;
+    } else {
+      avatarEl.innerHTML = esc(init);
+    }
+  }
+  if (statusEl) {
+    var statusText = isOverride ? 'HUMANO ACTIVO' : 'ESPERANDO RESPUESTA';
+    if (statusEl.textContent !== statusText) statusEl.textContent = statusText;
+    statusEl.classList.toggle('is-active', isOverride);
+  }
+  var digits = String(h.phone || '').replace(/[^0-9]/g, '');
+  var wa = document.getElementById('hfcActWhatsApp');
+  var call = document.getElementById('hfcActCall');
+  if (wa) wa.href = 'https://wa.me/' + digits;
+  if (call) call.href = 'tel:+' + digits;
+
+  // Transcript — append-only diff, preserves scroll if user is scrolled up
+  var slot = document.getElementById('hfcPaneTranscript');
+  if (slot){
+    var newLog = h.chatLog || [];
+    var chatEl = slot.querySelector('.hf-chat');
+    var emptyMsg = slot.querySelector('.hfc-pane-empty-inline');
+    if (!newLog.length){
+      if (!emptyMsg){
+        slot.innerHTML = '<div class="hfc-pane-empty-inline" style="font-size:13px;color:var(--muted);text-align:center;padding:24px 0;line-height:1.5;">El cliente pidió atención humana. Aún no hay mensajes adicionales en esta sesión.</div>';
+      }
+    } else {
+      if (!chatEl){
+        slot.innerHTML = _handoffBuildChat(newLog);
+        var fresh = slot.querySelector('.hf-chat');
+        if (fresh) fresh.scrollTop = fresh.scrollHeight;
+      } else {
+        var existingCount = chatEl.querySelectorAll('.hf-bubble').length;
+        var wasAtBottom = (chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight) < 50;
+        if (newLog.length < existingCount){
+          slot.innerHTML = _handoffBuildChat(newLog);
+          if (wasAtBottom){
+            var c = slot.querySelector('.hf-chat');
+            if (c) c.scrollTop = c.scrollHeight;
+          }
+        } else if (newLog.length > existingCount){
+          for (var j = existingCount; j < newLog.length; j++){
+            var m = newLog[j];
+            var cls = m.sender === 'operator' ? 'operator' : 'customer';
+            var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
+            var bubble = document.createElement('div');
+            bubble.className = 'hf-bubble ' + cls;
+            bubble.innerHTML = esc(m.text || '')
+              + (timeStr ? '<div class="hf-bubble-time">' + timeStr + '</div>' : '');
+            chatEl.appendChild(bubble);
+          }
+          if (wasAtBottom) chatEl.scrollTop = chatEl.scrollHeight;
+        }
+      }
+    }
+  }
+
+  // Composer — only restore draft when switching conversation (never on
+  // a passive refresh, so the operator's in-flight typing is never touched).
+  if (opts.rebuildComposer){
+    var ta2 = document.getElementById('hfcComposerInput');
+    if (ta2){
+      var draft = '';
+      try { draft = localStorage.getItem('hf_draft_' + h.conversationId) || ''; } catch (e) {}
+      ta2.value = draft;
+      _handoffComposerAutosize(ta2);
+    }
+  }
+}
+
+function _handoffComposerAutosize(el){
+  if (!el) return;
+  el.style.height = 'auto';
+  var h = Math.min(el.scrollHeight, 120);
+  el.style.height = h + 'px';
+}
+function _handoffComposerChanged(el){
+  _handoffComposerAutosize(el);
+  if (window._handoffSelectedCid) _handoffSaveDraft(window._handoffSelectedCid, el.value);
+}
+function _handoffComposerKeydown(ev){
+  if (ev.key === 'Enter' && !ev.shiftKey){
+    ev.preventDefault();
+    _handoffComposerSend();
+  }
+}
+async function _handoffComposerSend(){
+  var cid = window._handoffSelectedCid;
+  if (!cid) return;
+  var ta = document.getElementById('hfcComposerInput');
+  var btn = document.getElementById('hfcComposerSend');
+  if (!ta) return;
+  var msg = ta.value.trim();
+  if (!msg){ ta.focus(); return; }
+  if (btn) btn.disabled = true;
+  ta.disabled = true;
+  try {
+    var res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(cid) + '/reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg })
+    });
+    if (!res.ok){
+      var err = await res.json().catch(function(){ return {}; });
+      showToast('No se pudo enviar: ' + (err.error || res.status), 'error');
+      return;
+    }
+    ta.value = '';
+    _handoffComposerAutosize(ta);
+    _handoffClearDraft(cid);
+    acknowledgeHandoff('panel_reply_sent');
+    if (typeof loadHandoffs === 'function') await loadHandoffs();
+  } catch (e){ showToast('Error de red: ' + e.message, 'error'); }
+  finally {
+    if (btn) btn.disabled = false;
+    ta.disabled = false;
+    ta.focus();
+  }
+}
+
+// Custom confirm modal (replaces native confirm() for return-to-bot / resolve)
+function _handoffOpenConfirm(title, body, okLabel, action){
+  var overlay = document.getElementById('hfcConfirmModal');
+  if (!overlay) return;
+  document.getElementById('hfcConfirmTitle').textContent = title;
+  document.getElementById('hfcConfirmBody').textContent = body;
+  document.getElementById('hfcConfirmOk').textContent = okLabel;
+  window._handoffConfirmAction = action;
+  overlay.classList.add('open');
+}
+function _handoffCloseConfirm(){
+  var overlay = document.getElementById('hfcConfirmModal');
+  if (overlay) overlay.classList.remove('open');
+  window._handoffConfirmAction = null;
+}
+function _handoffConfirmOk(){
+  var action = window._handoffConfirmAction;
+  _handoffCloseConfirm();
+  if (typeof action === 'function') action();
+}
+function _handoffReturnToBotConfirm(){
+  var cid = window._handoffSelectedCid;
+  if (!cid) return;
+  _handoffOpenConfirm(
+    'Devolver conversación al bot',
+    'El bot volverá a atender esta conversación automáticamente.',
+    'Devolver al bot',
+    async function(){
+      try {
+        var res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(cid) + '/return-to-bot', { method: 'POST' });
+        if (!res.ok){ showToast('No se pudo devolver al bot', 'error'); return; }
+        _handoffClearDraft(cid);
+        window._handoffSelectedCid = null;
+        if (typeof load === 'function') await load();
+      } catch (e){ showToast(e.message, 'error'); }
+    }
+  );
+}
+function _handoffResolveConfirm(){
+  var cid = window._handoffSelectedCid;
+  if (!cid) return;
+  _handoffOpenConfirm(
+    'Marcar resuelto',
+    'Se cerrará la atención humana de esta conversación y se archivará la sesión.',
+    'Marcar resuelto',
+    async function(){
+      try {
+        var res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(cid) + '/resolve', { method: 'POST' });
+        if (!res.ok){ showToast('No se pudo marcar como resuelto', 'error'); return; }
+        _handoffClearDraft(cid);
+        window._handoffSelectedCid = null;
+        if (typeof load === 'function') await load();
+      } catch (e){ showToast(e.message, 'error'); }
+    }
+  );
+}
+
+// Called by navigateTo('handoff') — auto-select first if none, focus composer.
+function _handoffOnNavigate(){
+  if (!window._handoffSelectedCid && window._handoffLatest.length > 0){
+    window._handoffSelectedCid = window._handoffLatest[0].conversationId;
+    _handoffRenderQueue();
+    _handoffPaintPane({ rebuildComposer: true });
+  }
+  var ta = document.getElementById('hfcComposerInput');
+  if (ta) ta.focus();
+}
+
 function renderHandoffInbox(list){
   var container = document.getElementById('handoffList');
   if (!container) return;
@@ -4721,24 +5396,40 @@ async function sendHandoffReply(conversationId){
   finally { input.disabled = false; input.focus(); }
 }
 
-async function returnToBot(conversationId){
-  if (!confirm('Devolver esta conversacion al bot?')) return;
-  try {
-    const res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/return-to-bot', {
-      method: 'POST'
-    });
-    if (!res.ok) { showToast('Failed to return to bot', 'error'); return; }
-    await load();
-  } catch(e) { showToast(e.message, 'error'); }
+function returnToBot(conversationId){
+  // All callers (Overview accordion + dedicated panel) now route through the
+  // shared custom modal so the experience and copy are consistent.
+  _handoffOpenConfirm(
+    'Devolver conversación al bot',
+    'El bot volverá a atender esta conversación automáticamente.',
+    'Devolver al bot',
+    async function(){
+      try {
+        var res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/return-to-bot', { method: 'POST' });
+        if (!res.ok) { showToast('No se pudo devolver al bot', 'error'); return; }
+        _handoffClearDraft(conversationId);
+        if (window._handoffSelectedCid === conversationId) window._handoffSelectedCid = null;
+        await load();
+      } catch (e) { showToast(e.message, 'error'); }
+    }
+  );
 }
 
-async function resolveHandoff(conversationId){
-  if (!confirm('Resolver handoff y reactivar el bot para esta conversacion?')) return;
-  const res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/resolve', {
-    method: 'POST'
-  });
-  if (!res.ok) { showToast('Failed to resolve handoff', 'error'); return; }
-  await load();
+function resolveHandoff(conversationId){
+  _handoffOpenConfirm(
+    'Marcar resuelto',
+    'Se cerrará la atención humana de esta conversación y se archivará la sesión.',
+    'Marcar resuelto',
+    async function(){
+      try {
+        var res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(conversationId) + '/resolve', { method: 'POST' });
+        if (!res.ok) { showToast('No se pudo marcar como resuelto', 'error'); return; }
+        _handoffClearDraft(conversationId);
+        if (window._handoffSelectedCid === conversationId) window._handoffSelectedCid = null;
+        await load();
+      } catch (e) { showToast(e.message, 'error'); }
+    }
+  );
 }
 
 // ── Auto-refresh ──
