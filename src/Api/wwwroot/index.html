@@ -2309,56 +2309,85 @@
     #viewOrders .section-panel:first-child { margin-top: 0; }
     #viewOrders .filters { margin-top: 0; }
 
-    /* ═══ Overview compact density pass ═══════════════════════════════════
-       Targets 1366×768 old-office screens. Scoped to #viewOverview so the
-       rest of the dashboard keeps its existing spacing. Reduces padding,
-       margins, and typography by ~30–40 % without changing data or queries.
+    /* ═══ Overview density polish (final) ═══════════════════════════════════
+       Scoped to #viewOverview. Strict spacing system: 8 / 16 / 24 only.
+       Restores breathing room without changing structure, data, or palette.
     */
-    #viewOverview { padding-top: 10px; }
-    #viewOverview .alerts-strip { gap: 8px; margin-bottom: 10px; }
+    #viewOverview { padding-top: 8px; }
+    #viewOverview .alerts-strip { gap: 8px; margin-bottom: 8px; }
+    /* Pagos Pendientes / Necesitan Humano — neutralized as summary bar.
+       Same height as before; no alert-banner colours; value carries weight. */
     #viewOverview .alerts-strip-item {
-      display: flex; flex-direction: row; align-items: center; gap: 10px;
-      padding: 8px 14px; min-height: 0;
+      display: flex; flex-direction: row; align-items: center; gap: 8px;
+      padding: 8px 16px; min-height: 0;
+      background: var(--card);
+      border: 1px solid var(--border-light, var(--border));
+      color: var(--text);
     }
-    #viewOverview .alerts-strip-item .label,
+    #viewOverview .alerts-strip-item.hero-alert-warning,
+    #viewOverview .alerts-strip-item.hero-alert-danger {
+      background: var(--card);
+      border-color: var(--border-light, var(--border));
+      color: var(--text);
+    }
+    #viewOverview .alerts-strip-item .label {
+      font-size: 11px; font-weight: 500; margin: 0; line-height: 1.25;
+      text-transform: uppercase; letter-spacing: .04em;
+      color: var(--muted);
+    }
     #viewOverview .alerts-strip-item .value {
-      font-size: 12.5px; margin: 0; line-height: 1.25;
+      font-size: 16px; font-weight: 700; margin: 0; line-height: 1.25;
+      color: var(--text);
     }
-    #viewOverview .alerts-strip-item .value { font-weight: 700; }
+    /* Hero KPIs — breathing restored: padding 8 16 → 16, gap 8 → 16. */
     #viewOverview .hero-kpi {
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 10px; margin-bottom: 10px;
+      gap: 16px; margin-bottom: 8px;
     }
-    #viewOverview .hero-panel { padding: 10px 14px; gap: 6px; }
+    #viewOverview .hero-panel { padding: 16px; gap: 8px; }
     #viewOverview .hero-panel-title {
-      font-size: 11px; padding-bottom: 6px;
+      font-size: 10px; padding-bottom: 8px;
       text-transform: uppercase; letter-spacing: .04em;
     }
-    #viewOverview .hero-stat .value { font-size: 20px; line-height: 1.2; }
-    #viewOverview .kpi .card { min-height: 0; min-width: 0; padding: 8px 12px; }
-    #viewOverview .kpi .card .label { font-size: 11px; }
-    #viewOverview .kpi .card .value { font-size: 18px; line-height: 1.2; }
+    #viewOverview .hero-stat .value { font-size: 22px; line-height: 1.2; }
+    /* Cumulative KPIs — breathing restored: padding 8 16 → 16, gap 8 → 16. */
+    #viewOverview .kpi .card { min-height: 0; min-width: 0; padding: 16px; }
+    #viewOverview .kpi .card .label {
+      font-size: 10px; text-transform: uppercase; letter-spacing: .04em;
+    }
+    #viewOverview .kpi .card .value { font-size: 20px; line-height: 1.2; }
     #viewOverview #cumulativeMetrics {
       display: grid;
       grid-template-columns: repeat(5, minmax(0, 1fr));
-      gap: 10px; margin-bottom: 10px;
+      gap: 16px; margin-bottom: 8px;
     }
-    /* Analytics — visible by default, slim header, no accordion chrome. */
+    /* Analytics block — visible by default, slim header. Adds 24 px gap
+       from cumulative (cumulative-mb 8 + analytics-mt 16 = 24) and 24 px
+       internal top padding so the first row no longer collides with the
+       header. */
     #viewOverview .analytics-block {
       background: var(--card);
       border: 1px solid var(--border-light, var(--border));
       border-radius: var(--radius-sm, 8px);
-      padding: 8px 14px 12px;
-      margin-bottom: 10px;
+      padding: 24px 16px 16px;
+      margin-top: 16px;
+      margin-bottom: 8px;
     }
     #viewOverview .analytics-block-title {
-      font-size: 11.5px; font-weight: 600;
+      font-size: 11px; font-weight: 600;
       text-transform: uppercase; letter-spacing: .05em;
-      margin: 0 0 8px 0; color: var(--muted);
+      margin: 0 0 16px 0; color: var(--muted);
     }
-    #viewOverview .analytics-block .kpi { margin-bottom: 8px; gap: 8px; }
-    #viewOverview .analytics-block .kpi .card .value { font-size: 15px; }
-    #viewOverview .analytics-block .kpi .card .label { font-size: 10.5px; }
+    #viewOverview .analytics-block .kpi { margin-bottom: 16px; gap: 16px; }
+    #viewOverview .analytics-block .card { padding: 16px; }
+    #viewOverview .analytics-block .kpi .card .value { font-size: 16px; }
+    #viewOverview .analytics-block .kpi .card .label {
+      font-size: 10px; margin-bottom: 8px;
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    /* Row 3 (bottom cards) — extra +16 top breathing between charts row
+       and the producto/categoría/top-customers row. */
+    #viewOverview .analytics-block .kpi:last-of-type { margin-top: 16px; }
     /* Mobile fallback — prevent horizontal scroll on phones / narrow splits. */
     @media (max-width: 768px) {
       #viewOverview .hero-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -2972,43 +3001,44 @@ Tipo: burger"></textarea>
   <section id="extAnalytics" class="analytics-block">
     <h3 class="analytics-block-title">Analíticas Avanzadas</h3>
 
-    <!-- Row A: Operations -->
-    <div class="kpi" style="margin-top:10px;">
-      <div class="card"><div class="label">Hora Pico (7d)</div><div class="value" id="exPeakHour" style="font-size:14px;">—</div><div class="muted small" id="exPeakHourCount"></div></div>
-      <div class="card"><div class="label">Mejor Día (30d)</div><div class="value" id="exBestDay" style="font-size:14px;">—</div><div class="muted small" id="exBestDayRev"></div></div>
-      <div class="card"><div class="label">Peor Día (30d)</div><div class="value" id="exWorstDay" style="font-size:14px;">—</div><div class="muted small" id="exWorstDayRev"></div></div>
-      <div class="card"><div class="label">Prom. Items/Pedido</div><div class="value" id="exAvgItems">—</div></div>
-    </div>
-
-    <!-- Row B: Funnel -->
+    <!-- Row 1: 4 operational hierarchy cards -->
     <div class="kpi">
-      <div class="card"><div class="label">Pedidos Iniciados (30d)</div><div class="value" id="exConversations">—</div></div>
-      <div class="card"><div class="label">Tasa de Completado (30d)</div><div class="value" id="exConversion">—</div><div class="muted small">pedidos completados / iniciados</div></div>
-      <div class="card"><div class="label">Bot vs Humano (30d)</div><div class="value" id="exBotHuman" style="font-size:13px;">—</div><div class="muted small">% conversaciones resueltas por bot</div></div>
-      <div class="card"><div class="label">Clientes Nuevos / Recurrentes (30d)</div><div class="value" id="exNewRet" style="font-size:13px;">—</div><div class="muted small">basado en historial de pedidos</div></div>
+      <div class="card"><div class="label">Hora Pico (7d)</div><div class="value" id="exPeakHour">—</div><div class="muted small" id="exPeakHourCount"></div></div>
+      <div class="card"><div class="label">Mejor Día (30d)</div><div class="value" id="exBestDay">—</div><div class="muted small" id="exBestDayRev"></div></div>
+      <div class="card"><div class="label">Tasa Completado (30d)</div><div class="value" id="exConversion">—</div><div class="muted small">pedidos completados / iniciados</div></div>
+      <div class="card"><div class="label">Nuevos / Recurrentes (30d)</div><div class="value" id="exNewRet">—</div><div class="muted small">basado en historial de pedidos</div></div>
     </div>
 
-    <!-- Row C: Hourly charts (simple bar) -->
-    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
+    <!-- Hidden shim: keeps these ids in the DOM so loadExtended() setters
+         do not throw. Same data still fetched, just not surfaced. -->
+    <div style="display:none;" aria-hidden="true">
+      <span id="exWorstDay">—</span><span id="exWorstDayRev"></span>
+      <span id="exAvgItems">—</span>
+      <span id="exConversations">—</span>
+      <span id="exBotHuman">—</span>
+    </div>
+
+    <!-- Row 2: hourly charts (heights -25%) -->
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;">
       <div class="card" style="flex:1;min-width:300px;">
-        <div class="label" style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Pedidos por Hora (7d)</div>
-        <div id="chartOrdersHour" style="display:flex;align-items:flex-end;gap:2px;height:80px;"></div>
-        <div style="display:flex;justify-content:space-between;margin-top:4px;"><span class="muted small">0h</span><span class="muted small">12h</span><span class="muted small">23h</span></div>
+        <div class="label" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;">Pedidos por Hora (7d)</div>
+        <div id="chartOrdersHour" style="display:flex;align-items:flex-end;gap:2px;height:72px;"></div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px;"><span class="muted small">0h</span><span class="muted small">12h</span><span class="muted small">23h</span></div>
       </div>
       <div class="card" style="flex:1;min-width:300px;">
-        <div class="label" style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px;">Ventas por Hora (7d)</div>
-        <div id="chartSalesHour" style="display:flex;align-items:flex-end;gap:2px;height:80px;"></div>
-        <div style="display:flex;justify-content:space-between;margin-top:4px;"><span class="muted small">0h</span><span class="muted small">12h</span><span class="muted small">23h</span></div>
+        <div class="label" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;">Ventas por Hora (7d)</div>
+        <div id="chartSalesHour" style="display:flex;align-items:flex-end;gap:2px;height:72px;"></div>
+        <div style="display:flex;justify-content:space-between;margin-top:8px;"><span class="muted small">0h</span><span class="muted small">12h</span><span class="muted small">23h</span></div>
       </div>
     </div>
 
-    <!-- Row D: Top revenue / category / customers -->
+    <!-- Row 3: top revenue / category / customers -->
     <div class="kpi">
       <div class="card"><div class="label">Producto Más Rentable</div><div class="value" id="exTopRevProduct" style="font-size:13px;">-</div><div class="muted small" id="exTopRevProductAmt"></div></div>
       <div class="card"><div class="label">Mejor Categoría</div><div class="value" id="exTopCat" style="font-size:13px;">-</div><div class="muted small" id="exTopCatRev"></div></div>
       <div class="card" style="flex:2;min-width:280px;">
         <div class="label">Mejores Clientes (Top 5)</div>
-        <div id="exTopCustomers" style="font-size:12px;margin-top:4px;">-</div>
+        <div id="exTopCustomers" style="font-size:12px;line-height:1.4;margin-top:4px;">-</div>
       </div>
     </div>
   </section>
