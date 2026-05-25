@@ -129,10 +129,15 @@ public class AdminAnalyticsController : ControllerBase
     [HttpGet("/api/admin/analytics/summary")]
     public async Task<IActionResult> GetSummary([FromQuery] Guid? businessId, CancellationToken ct)
     {
-        // Founder can view any business; other JWT users are scoped to their own
+        // Multi-sede owners must be able to switch sedes via the ?businessId=
+        // query parameter — the front-end dropdown sends it. IsAuthorizedAsync
+        // validates the candidate against the user's `businessId` AND
+        // `businessIds` claims, so tenant isolation is preserved without a
+        // forced override. When the caller does not specify a sede, fall back
+        // to the JWT primary (preserves prior single-sede default).
         var role = User.FindFirstValue(ClaimTypes.Role);
         var jwtBizId = GetJwtBusinessId();
-        if (jwtBizId.HasValue && role != "Founder")
+        if (!businessId.HasValue && jwtBizId.HasValue && role != "Founder")
             businessId = jwtBizId.Value;
 
         if (!await IsAuthorizedAsync(businessId, ct))
@@ -256,10 +261,12 @@ public class AdminAnalyticsController : ControllerBase
     [HttpGet("/api/admin/analytics/extended")]
     public async Task<IActionResult> GetExtended([FromQuery] Guid? businessId, CancellationToken ct)
     {
-        // Founder can view any business; other JWT users are scoped to their own
+        // Multi-sede owners must be able to switch sedes via ?businessId=.
+        // IsAuthorizedAsync validates the candidate against the user's
+        // `businessId` AND `businessIds` claims — tenant isolation preserved.
         var role = User.FindFirstValue(ClaimTypes.Role);
         var jwtBizId = GetJwtBusinessId();
-        if (jwtBizId.HasValue && role != "Founder")
+        if (!businessId.HasValue && jwtBizId.HasValue && role != "Founder")
             businessId = jwtBizId.Value;
 
         if (!await IsAuthorizedAsync(businessId, ct))

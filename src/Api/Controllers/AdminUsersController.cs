@@ -52,17 +52,31 @@ public sealed class AdminUsersController : ControllerBase
     }
 
     // GET /api/admin/users
+    //
+    // Multi-sede aware: Owners/Managers see every user assigned to ANY of the
+    // sedes in their JWT `businessIds` claim (not just the primary one). For
+    // each user, the response shape mirrors the Founder-only /all endpoint —
+    // grouped by email with a `businesses[]` array — so the existing front-end
+    // table (index.html: usersTbody, reads `u.businesses`) renders the Sedes
+    // column without any client changes.
+    //
+    // Tenant isolation is preserved: a user's `businesses[]` only includes the
+    // sedes that intersect the caller's allowed set; sedes outside the caller's
+    // scope are never revealed.
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
-        var bizId = GetBusinessIdFromToken();
-        if (bizId is null) return Unauthorized();
         if (!IsOwnerOrManager()) return Forbid();
 
-        var users = await _db.BusinessUsers
+        var allowed = GetAllowedBusinessIds();
+        if (allowed.Count == 0) return Unauthorized();
+
+        var rows = await _db.BusinessUsers
             .AsNoTracking()
-            .Where(u => u.BusinessId == bizId.Value)
-            .OrderByDescending(u => u.CreatedAtUtc)
+            .Include(u => u.Business)
+            .Where(u => allowed.Contains(u.BusinessId))
+            .OrderBy(u => u.Email)
+            .ThenByDescending(u => u.CreatedAtUtc)
             .Select(u => new
             {
                 u.Id,
@@ -70,11 +84,52 @@ public sealed class AdminUsersController : ControllerBase
                 u.Email,
                 u.Role,
                 u.IsActive,
-                u.CreatedAtUtc
+                u.CreatedAtUtc,
+                u.BusinessId,
+                BusinessName = u.Business != null ? u.Business.Name : ""
             })
             .ToListAsync(ct);
 
-        return Ok(users);
+        // Group by email; the representative row prefers active over inactive,
+        // then newer over older. The `businesses[]` array is filtered to the
+        // caller's allowed set (already enforced by the WHERE above).
+        var grouped = rows
+            .GroupBy(r => (r.Email ?? "").ToLowerInvariant())
+            .Select(g =>
+            {
+                var primary = g.OrderByDescending(x => x.IsActive)
+                               .ThenByDescending(x => x.CreatedAtUtc)
+                               .First();
+                return new
+                {
+                    id = primary.Id,
+                    name = primary.Name,
+                    email = primary.Email,
+                    role = primary.Role,
+                    isActive = primary.IsActive,
+                    createdAtUtc = primary.CreatedAtUtc,
+                    businesses = g.Select(x => new { id = x.BusinessId, name = x.BusinessName }).ToList()
+                };
+            })
+            .ToList();
+
+        return Ok(grouped);
+    }
+
+    // Returns the union of the JWT primary `businessId` claim and the multi
+    // `businessIds` claim — i.e. every sede the caller may legitimately see.
+    private HashSet<Guid> GetAllowedBusinessIds()
+    {
+        var allowed = new HashSet<Guid>();
+        var primary = GetBusinessIdFromToken();
+        if (primary.HasValue) allowed.Add(primary.Value);
+        var multi = User.FindFirstValue("businessIds");
+        if (!string.IsNullOrWhiteSpace(multi))
+        {
+            foreach (var id in multi.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                if (Guid.TryParse(id.Trim(), out var g)) allowed.Add(g);
+        }
+        return allowed;
     }
 
     public sealed class CreateUserRequest

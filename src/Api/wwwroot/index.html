@@ -914,6 +914,10 @@
       border-color: rgba(255,180,0,.3); color: #f59e0b;
       background: rgba(255,159,10,.06);
     }
+    .role-badge.manager {
+      border-color: rgba(56,189,248,.3); color: #38bdf8;
+      background: rgba(56,189,248,.06);
+    }
 
     /* Theme toggle */
     .theme-toggle {
@@ -3526,19 +3530,19 @@ function applyRoleBadge() {
   var badge = document.getElementById('roleBadge');
   var badge2 = document.getElementById('roleBadge_topbar');
   var role = getAuthRole();
-  var cls, txt;
-  if (isStaffMode()) {
-    cls = 'role-badge operator';
-    txt = 'Operador \u00b7 Acceso restringido';
-  } else if (role === 'Founder') {
-    cls = 'role-badge founder';
-    txt = 'Founder \u00b7 Acceso total';
-  } else {
-    cls = 'role-badge owner';
-    txt = 'Propietario \u00b7 Acceso completo';
-  }
-  if (badge) { badge.className = cls; badge.textContent = txt; }
-  if (badge2) { badge2.className = cls; badge2.textContent = txt; }
+  // Badge MUST reflect the real authenticated JWT role. Do not infer from
+  // LOGIN_MODE or any UI state \u2014 an Operator who logged in via the regular
+  // admin form is still an Operator, and the chrome should say so. Other
+  // authorization gates (isStaffMode / isAdminUser) are unchanged.
+  var entries = {
+    'Founder':  { cls: 'role-badge founder',  txt: 'Founder \u00b7 Full Access' },
+    'Owner':    { cls: 'role-badge owner',    txt: 'Propietario \u00b7 Acceso Completo' },
+    'Manager':  { cls: 'role-badge manager',  txt: 'Gerente \u00b7 Gesti\u00f3n' },
+    'Operator': { cls: 'role-badge operator', txt: 'Operador \u00b7 Operaci\u00f3n' }
+  };
+  var entry = entries[role] || { cls: 'role-badge', txt: '' };
+  if (badge)  { badge.className  = entry.cls; badge.textContent  = entry.txt; }
+  if (badge2) { badge2.className = entry.cls; badge2.textContent = entry.txt; }
 }
 
 function logout(){
