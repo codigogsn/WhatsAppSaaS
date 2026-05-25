@@ -39,10 +39,28 @@ public class AdminCustomersController : ControllerBase
         [FromQuery] int take = 100,
         CancellationToken ct = default)
     {
-        // JWT users are scoped to their own business
-        businessId = AdminAuth.ScopeBusinessId(User, businessId);
-
         if (!AdminAuth.IsAuthorized(User, Request, _config)) return Unauthorized();
+
+        // Multi-sede aware scoping (mirrors AdminAnalyticsController fix from
+        // commit 4014472). Respect the dropdown selection when provided; fall
+        // back to the JWT primary only when the caller did not specify one.
+        // Tenant isolation: when the caller IS not Founder, the requested sede
+        // MUST belong to the user's `businessIds` claim — otherwise reject so
+        // the empty-result symptom never masks a cross-tenant probe.
+        var role = AdminAuth.GetRole(User);
+        if (role != "Founder")
+        {
+            var allowed = AdminAuth.GetBusinessIds(User);
+            if (businessId.HasValue)
+            {
+                if (allowed.Count > 0 && !allowed.Contains(businessId.Value))
+                    return Unauthorized();
+            }
+            else
+            {
+                businessId = AdminAuth.GetBusinessId(User);
+            }
+        }
         if (take < 1) take = 1;
         if (take > 500) take = 500;
 
