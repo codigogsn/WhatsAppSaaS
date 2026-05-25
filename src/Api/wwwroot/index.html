@@ -322,7 +322,11 @@
       border-color: rgba(255,160,30,.18);
       box-shadow: inset 0 0 0 1px rgba(255,160,30,.05), inset 0 1px 2px rgba(0,0,0,.10), 0 1px 4px rgba(255,149,0,.10);
     }
-    [data-theme="dark"] .pill-ReadyForPickup,
+    [data-theme="dark"] .pill-ReadyForPickup {
+      background: rgba(8,180,220,.16);
+      border-color: rgba(8,200,235,.22);
+      box-shadow: inset 0 0 0 1px rgba(8,200,235,.06), inset 0 1px 2px rgba(0,0,0,.10), 0 1px 4px rgba(8,180,220,.10);
+    }
     [data-theme="dark"] .pill-Completed {
       background: rgba(48,199,85,.14);
       border-color: rgba(80,215,115,.18);
@@ -799,7 +803,31 @@
       align-items: center;
       padding: 10px 0;
       z-index: 15;
-      transition: background var(--transition), border var(--transition);
+      transition: width .15s ease, background var(--transition), border var(--transition);
+      overflow: hidden;
+    }
+    /* Expand on hover — labels slide in next to icons. Body padding stays at
+       52 px so the expanded panel overlays content instead of shifting it. */
+    .shell-sidebar:hover { width: 180px; }
+    .shell-sidebar:hover .sb-btn {
+      width: calc(100% - 16px);
+      justify-content: flex-start;
+      padding-left: 10px;
+      gap: 12px;
+    }
+    .shell-sidebar:hover .sb-btn .sb-tooltip {
+      position: static;
+      transform: none;
+      background: transparent;
+      border: none;
+      box-shadow: none;
+      padding: 0;
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text);
+      opacity: 1;
+      letter-spacing: 0;
+      z-index: auto;
     }
     body.sidebar-active { padding-left: 52px; }
     .shell-sidebar .sb-group {
@@ -1204,9 +1232,11 @@
 
     /* ═══ Status pills — subtle, no borders ═══ */
     .pill { display:inline-block; padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; letter-spacing: .2px; }
+    /* Status pills — each state has a distinct hue. ReadyForPickup is teal
+       so it no longer collides with Completed (both used to be green). */
     .pill-Pending { background: rgba(255,159,10,.12); color: #CC7A00; }
     .pill-Preparing { background: rgba(255,149,0,.1); color: #C2410C; }
-    .pill-ReadyForPickup { background: rgba(52,199,89,.1); color: #15803D; }
+    .pill-ReadyForPickup { background: rgba(8,145,178,.10); color: #0891B2; }
     .pill-OutForDelivery { background: rgba(0,122,255,.1); color: #007AFF; }
     .pill-Completed { background: rgba(52,199,89,.1); color: #059669; }
     .pill-Cancelled { background: rgba(255,59,48,.08); color: #DC2626; }
@@ -2931,7 +2961,7 @@ Tipo: burger"></textarea>
       <button onclick="toggleCustomersPanel()" style="background:none;border:none;font-size:20px;cursor:pointer;color:#888;">&times;</button>
     </div>
     <div class="row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap;">
-      <input id="crmSearch" placeholder="Search name or phone..." style="flex:1;min-width:160px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;" onkeyup="if(event.key==='Enter')loadCrm()">
+      <input id="crmSearch" placeholder="Search name or phone..." style="flex:1;min-width:160px;padding:6px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;" oninput="crmSearchDebounce()">
       <select id="crmSort" style="padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;">
         <option value="recent">Most recent</option>
         <option value="orders">Most orders</option>
@@ -5734,6 +5764,82 @@ function toggleCustomersPanel(){
   }
 }
 
+// ── Phase 2 — Customer CRM helpers ────────────────────────────────────────
+// Debounced search (250 ms) — fires loadCrm without requiring Enter.
+var _crmSearchTimer = null;
+function crmSearchDebounce() {
+  clearTimeout(_crmSearchTimer);
+  _crmSearchTimer = setTimeout(loadCrm, 250);
+}
+// Phone formatter — Venezuela E.164 (12 digits starting with 58) shows as
+// "+58 414-221-1734". Falls back to "+<digits>" / raw input otherwise.
+function fmtPhone(p) {
+  if (!p) return '—';
+  var d = String(p).replace(/[^0-9]/g, '');
+  if (d.length === 12 && d.indexOf('58') === 0) {
+    return '+58 ' + d.slice(2,5) + '-' + d.slice(5,8) + '-' + d.slice(8,12);
+  }
+  if (d.length >= 8) return '+' + d;
+  return String(p);
+}
+// Lazy cache of recent orders so each row expansion doesn't re-fetch.
+// One fetch per business; refreshed if the dropdown changes.
+window._crmOrdersCache = null;
+window._crmOrdersCacheBid = null;
+async function loadCrmOrdersCache() {
+  var bid = getBusinessId();
+  if (window._crmOrdersCache && window._crmOrdersCacheBid === bid) return window._crmOrdersCache;
+  try {
+    var qs = new URLSearchParams({take: '200'});
+    if (bid) qs.set('businessId', bid);
+    var res = await authFetch('/api/orders?' + qs.toString());
+    if (!res.ok) return [];
+    var orders = await res.json();
+    window._crmOrdersCache = Array.isArray(orders) ? orders : [];
+    window._crmOrdersCacheBid = bid;
+    return window._crmOrdersCache;
+  } catch (e) {
+    console.warn('CRM orders cache load failed:', e);
+    return [];
+  }
+}
+async function loadCustomerLastOrders(idx, phone) {
+  var slot = document.getElementById('cust-orders-' + idx);
+  if (!slot) return;
+  var orders = await loadCrmOrdersCache();
+  var digits = String(phone || '').replace(/[^0-9]/g, '');
+  var matches = orders.filter(function(o){
+    var p = String(o.customerPhone || '').replace(/[^0-9]/g, '');
+    if (!p || !digits) return false;
+    return p === digits || p.endsWith(digits) || digits.endsWith(p);
+  }).slice(0, 3);
+  if (matches.length === 0) {
+    slot.textContent = 'Sin pedidos en los últimos 200 registros.';
+    return;
+  }
+  slot.innerHTML = '<b>Últimos pedidos:</b><br>' + matches.map(function(o){
+    var d = o.createdAtUtc ? new Date(o.createdAtUtc).toLocaleDateString() : '';
+    var items = (o.items || []).map(function(i){ return i.quantity + 'x ' + i.name; }).join(', ');
+    var preview = items.length > 60 ? items.slice(0,60) + '…' : items;
+    return '• ' + d + ' — ' + esc(preview) + ' — $' + fmtMoney(o.totalAmount || 0);
+  }).join('<br>');
+}
+function toggleCustRow(idx) {
+  var det = document.getElementById('cust-detail-' + idx);
+  if (!det) return;
+  var isOpen = det.style.display !== 'none';
+  det.style.display = isOpen ? 'none' : '';
+  if (!isOpen && !det.dataset.loaded) {
+    det.dataset.loaded = '1';
+    loadCustomerLastOrders(idx, det.dataset.phone || '');
+  }
+}
+function sendPromoToCustomer(phone) {
+  if (typeof openPromoModal === 'function') openPromoModal();
+  if (typeof showToast === 'function')
+    showToast('Cliente en contexto: ' + fmtPhone(phone), 'info');
+}
+
 async function loadCrm(){
   const body = document.getElementById('crmBody');
   body.innerHTML = '<span style="color:var(--muted);">Loading...</span>';
@@ -5763,18 +5869,37 @@ async function loadCrm(){
       + '<th style="padding:6px;">Payment</th>'
       + '<th style="padding:6px;">Last Purchase</th>'
       + '</tr></thead><tbody>'
-      + data.customers.map(function(c){
+      + data.customers.map(function(c, idx){
         var lastDate = c.lastPurchase ? new Date(c.lastPurchase).toLocaleDateString() : 'N/A';
-        return '<tr style="border-bottom:1px solid var(--border);">'
+        var avg = c.ordersCount > 0 ? c.totalSpent / c.ordersCount : 0;
+        var digits = String(c.phone || '').replace(/[^0-9]/g, '');
+        var wa = 'https://wa.me/' + digits;
+        var tel = 'tel:+' + digits;
+        return '<tr class="cust-row" onclick="toggleCustRow(' + idx + ')" style="border-bottom:1px solid var(--border);cursor:pointer;">'
           + '<td style="padding:6px;font-weight:600;">' + esc(c.name) + '</td>'
-          + '<td style="padding:6px;font-family:monospace;font-size:11px;">' + esc(c.phone) + '</td>'
+          + '<td style="padding:6px;font-family:monospace;font-size:11px;">' + esc(fmtPhone(c.phone)) + '</td>'
           + '<td style="padding:6px;text-align:center;">' + c.ordersCount + '</td>'
           + '<td style="padding:6px;">$' + fmtMoney(c.totalSpent) + '</td>'
           + '<td style="padding:6px;">' + esc(c.favoriteItem) + '</td>'
           + '<td style="padding:6px;"><span class="pill" style="font-size:10px;">' + esc(c.preferredDelivery) + '</span></td>'
           + '<td style="padding:6px;"><span class="pill" style="font-size:10px;">' + esc(c.preferredPayment) + '</span></td>'
           + '<td style="padding:6px;">' + lastDate + '</td>'
-          + '</tr>';
+          + '</tr>'
+          + '<tr class="cust-detail" id="cust-detail-' + idx + '" data-phone="' + esc(c.phone || '') + '" style="display:none;background:var(--surface-2,rgba(0,0,0,.03));">'
+          + '<td colspan="8" style="padding:12px 14px;">'
+          +   '<div style="display:flex;flex-wrap:wrap;gap:18px;font-size:12px;margin-bottom:10px;">'
+          +     '<div><span class="muted">Teléfono</span><br><b>' + esc(fmtPhone(c.phone)) + '</b></div>'
+          +     '<div><span class="muted">Total gastado</span><br><b>$' + fmtMoney(c.totalSpent) + '</b></div>'
+          +     '<div><span class="muted">Ticket promedio</span><br><b>$' + fmtMoney(avg) + '</b></div>'
+          +     '<div><span class="muted">Producto favorito</span><br><b>' + esc(c.favoriteItem || '—') + '</b></div>'
+          +   '</div>'
+          +   '<div id="cust-orders-' + idx + '" style="font-size:12px;color:var(--muted);margin-bottom:10px;">Cargando últimos pedidos…</div>'
+          +   '<div style="display:flex;gap:8px;flex-wrap:wrap;">'
+          +     '<a class="small primary" href="' + wa + '" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="padding:5px 10px;text-decoration:none;border-radius:4px;background:#25D366;color:#fff;font-weight:600;">WhatsApp</a>'
+          +     '<a class="small" href="' + tel + '" onclick="event.stopPropagation()" style="padding:5px 10px;text-decoration:none;border-radius:4px;border:1px solid var(--border);">Llamar</a>'
+          +     '<button class="small" onclick="event.stopPropagation();sendPromoToCustomer(\'' + esc(c.phone || '') + '\')" style="padding:5px 10px;border-radius:4px;border:1px solid var(--border);background:var(--card);cursor:pointer;">Enviar promo</button>'
+          +   '</div>'
+          + '</td></tr>';
       }).join('')
       + '</tbody></table>'
       + '<div style="margin-top:8px;color:var(--muted);font-size:11px;">' + data.total + ' customer(s)</div>';
