@@ -2308,6 +2308,62 @@
     }
     #viewOrders .section-panel:first-child { margin-top: 0; }
     #viewOrders .filters { margin-top: 0; }
+
+    /* ═══ Overview compact density pass ═══════════════════════════════════
+       Targets 1366×768 old-office screens. Scoped to #viewOverview so the
+       rest of the dashboard keeps its existing spacing. Reduces padding,
+       margins, and typography by ~30–40 % without changing data or queries.
+    */
+    #viewOverview { padding-top: 10px; }
+    #viewOverview .alerts-strip { gap: 8px; margin-bottom: 10px; }
+    #viewOverview .alerts-strip-item {
+      display: flex; flex-direction: row; align-items: center; gap: 10px;
+      padding: 8px 14px; min-height: 0;
+    }
+    #viewOverview .alerts-strip-item .label,
+    #viewOverview .alerts-strip-item .value {
+      font-size: 12.5px; margin: 0; line-height: 1.25;
+    }
+    #viewOverview .alerts-strip-item .value { font-weight: 700; }
+    #viewOverview .hero-kpi {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px; margin-bottom: 10px;
+    }
+    #viewOverview .hero-panel { padding: 10px 14px; gap: 6px; }
+    #viewOverview .hero-panel-title {
+      font-size: 11px; padding-bottom: 6px;
+      text-transform: uppercase; letter-spacing: .04em;
+    }
+    #viewOverview .hero-stat .value { font-size: 20px; line-height: 1.2; }
+    #viewOverview .kpi .card { min-height: 0; min-width: 0; padding: 8px 12px; }
+    #viewOverview .kpi .card .label { font-size: 11px; }
+    #viewOverview .kpi .card .value { font-size: 18px; line-height: 1.2; }
+    #viewOverview #cumulativeMetrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 10px; margin-bottom: 10px;
+    }
+    /* Analytics — visible by default, slim header, no accordion chrome. */
+    #viewOverview .analytics-block {
+      background: var(--card);
+      border: 1px solid var(--border-light, var(--border));
+      border-radius: var(--radius-sm, 8px);
+      padding: 8px 14px 12px;
+      margin-bottom: 10px;
+    }
+    #viewOverview .analytics-block-title {
+      font-size: 11.5px; font-weight: 600;
+      text-transform: uppercase; letter-spacing: .05em;
+      margin: 0 0 8px 0; color: var(--muted);
+    }
+    #viewOverview .analytics-block .kpi { margin-bottom: 8px; gap: 8px; }
+    #viewOverview .analytics-block .kpi .card .value { font-size: 15px; }
+    #viewOverview .analytics-block .kpi .card .label { font-size: 10.5px; }
+    /* Mobile fallback — prevent horizontal scroll on phones / narrow splits. */
+    @media (max-width: 768px) {
+      #viewOverview .hero-kpi { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      #viewOverview #cumulativeMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
   </style>
 </head>
 <body>
@@ -2864,8 +2920,8 @@ Tipo: burger"></textarea>
     <div class="handoff-alert-arrow">&#x276f;</div>
   </div>
 
-  <!-- ═══ BLOCK 2: Today's Pulse — 3 focused hero KPIs ═══ -->
-  <div id="heroKpi" class="hero-kpi" style="grid-template-columns: 1fr 1fr 1fr;">
+  <!-- ═══ BLOCK 2: Today's Pulse — 4 compact hero KPIs ═══ -->
+  <div id="heroKpi" class="hero-kpi">
     <div class="hero-panel">
       <div class="hero-panel-title">Ventas Hoy</div>
       <div class="hero-stat hero-stat-primary">
@@ -2884,6 +2940,12 @@ Tipo: burger"></textarea>
         <div class="value" id="kpiAvgTicket">-</div>
       </div>
     </div>
+    <div class="hero-panel">
+      <div class="hero-panel-title">Clientes</div>
+      <div class="hero-stat hero-stat-primary">
+        <div class="value" id="kpiUniqueCustomers">-</div>
+      </div>
+    </div>
   </div>
 
   <!-- Inline Intelligence Strip -->
@@ -2897,19 +2959,18 @@ Tipo: burger"></textarea>
     <button class="intel-strip-btn" onclick="toggleAssistDock()">Explorar</button>
   </div>
 
-  <!-- ═══ BLOCK 5: Business Health — cumulative/period metrics ═══ -->
+  <!-- ═══ BLOCK 5: Business Health — 5 compact cumulative cards ═══ -->
   <div class="kpi" id="cumulativeMetrics">
     <div class="card"><div class="label">Ventas Totales</div><div class="value" id="kpiTotalRevenue">-</div></div>
     <div class="card"><div class="label">Pedidos Totales</div><div class="value" id="kpiOrdersTotal">-</div></div>
-    <div class="card"><div class="label">Clientes</div><div class="value" id="kpiUniqueCustomers">-</div></div>
     <div class="card"><div class="label">Semana</div><div class="value" id="kpiOrdersWeek">-</div></div>
     <div class="card"><div class="label">% Recurrentes</div><div class="value" id="kpiReturning">-</div></div>
     <div class="card"><div class="label">Top Producto</div><div class="value" id="kpiTopItem">-</div></div>
   </div>
 
-  <!-- Extended Analytics -->
-  <details id="extAnalytics" class="section-panel">
-    <summary>Analíticas Avanzadas</summary>
+  <!-- Extended Analytics — visible by default, slim header, no accordion -->
+  <section id="extAnalytics" class="analytics-block">
+    <h3 class="analytics-block-title">Analíticas Avanzadas</h3>
 
     <!-- Row A: Operations -->
     <div class="kpi" style="margin-top:10px;">
@@ -2950,7 +3011,7 @@ Tipo: burger"></textarea>
         <div id="exTopCustomers" style="font-size:12px;margin-top:4px;">-</div>
       </div>
     </div>
-  </details>
+  </section>
 
   </div><!-- /#viewOverview -->
 
