@@ -834,6 +834,15 @@
       z-index: 100; letter-spacing: .01em;
     }
     .shell-sidebar .sb-btn:hover .sb-tooltip { opacity: 1; }
+    .shell-sidebar .sb-btn .sb-badge {
+      position: absolute; top: 2px; right: 2px;
+      min-width: 16px; height: 16px; padding: 0 4px;
+      border-radius: 8px; background: #DC2626; color: #fff;
+      font-size: 10px; font-weight: 700; line-height: 16px;
+      display: none; align-items: center; justify-content: center;
+      box-shadow: 0 0 0 2px var(--bg, #fff);
+    }
+    .shell-sidebar .sb-btn .sb-badge.has-count { display: flex; }
     .shell-sidebar .sb-btn.sb-disabled {
       opacity: .25; pointer-events: none; cursor: not-allowed;
     }
@@ -2311,6 +2320,7 @@
       </button>
       <button class="sb-btn" id="sbOrders" onclick="navigateTo('orders')" title="Pedidos">
         <span>&#128230;</span><span class="sb-tooltip">Pedidos</span>
+        <span class="sb-badge" id="sbOrdersBadge" aria-label="Pagos pendientes"></span>
       </button>
       <button class="sb-btn" id="sbCustomers" onclick="navigateTo('customers')" title="Customers">
         <span>&#128101;</span><span class="sb-tooltip">Customers</span>
@@ -4202,6 +4212,19 @@ function syncAlertsStrip() {
   if (alertP) alertP.style.display = payments > 0 ? '' : 'none';
   if (alertH) alertH.style.display = handoffs > 0 ? '' : 'none';
   if (strip) strip.style.display = (payments > 0 || handoffs > 0) ? 'flex' : 'none';
+  // Phase 1 — persistent pending-payments badge on the sidebar Pedidos
+  // button so operators see the count while scrolling the orders list
+  // (the alerts strip lives above the fold and is lost on scroll).
+  var sbBadge = document.getElementById('sbOrdersBadge');
+  if (sbBadge) {
+    if (payments > 0) {
+      sbBadge.textContent = payments > 99 ? '99+' : String(payments);
+      sbBadge.classList.add('has-count');
+    } else {
+      sbBadge.textContent = '';
+      sbBadge.classList.remove('has-count');
+    }
+  }
 }
 function showHeroError(){
   var hero = document.getElementById('heroKpi');
@@ -5221,20 +5244,19 @@ async function load() {
         <span class="muted small">${esc(o.customerPhone)}</span>
       </td>
       <td style="max-width:250px;">
-        <span class="small">${esc(itemsSummary).slice(0,80)}${itemsSummary.length > 80 ? '...' : ''}</span>
+        <span class="small" title="${esc(itemsSummary)}">${esc(itemsSummary).slice(0,80)}${itemsSummary.length > 80 ? '...' : ''}</span>
       </td>
       <td style="white-space:nowrap;">$${o.totalAmount != null ? fmtMoney(o.totalAmount) : '-'}${_bcvRate && _bcvRate.available && o.totalAmount ? '<br/><span style="font-size:11px;color:#1b5e20;">Bs.' + fmtMoney(o.totalAmount * _bcvRate.usdRate) + '</span>' : ''}</td>
-      <td>${hasObs ? '<span class="obs-tag">OBS</span>' : ''}</td>
+      <td>${hasObs ? `<span class="obs-tag" title="${esc(o.specialInstructions || '')}">OBS</span>` : ''}</td>
       <td>
         <div class="status-actions">
-          <select data-id="${esc(o.id)}" onclick="event.stopPropagation()">
+          <select data-id="${esc(o.id)}" onclick="event.stopPropagation()" onchange="event.stopPropagation();updateStatus(this)">
             <option value="Pending" ${o.status==='Pending'?'selected':''}>Pendiente</option>
             <option value="Preparing" ${o.status==='Preparing'?'selected':''}>En preparaci\u00f3n</option>
             ${o.deliveryType==='pickup' ? `<option value="ReadyForPickup" ${o.status==='ReadyForPickup'?'selected':''}>Listo para retirar</option>` : `<option value="OutForDelivery" ${o.status==='OutForDelivery'?'selected':''}>En camino</option>`}
             <option value="Completed" ${o.status==='Completed'?'selected':''}>Completado</option>
             <option value="Cancelled" ${o.status==='Cancelled'?'selected':''}>Cancelado</option>
           </select>
-          <button onclick="event.stopPropagation();updateStatus(this)">Actualizar</button>
         </div>
       </td>
     `;
