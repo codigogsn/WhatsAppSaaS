@@ -5215,7 +5215,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
         public string? CustomerPhone;
         public string? Address;
         public string? PaymentMethod;
-        public string? ReceiverNote;
+        public string? DeliveryType;     // "pickup" | "delivery"
+        public string? ReceiverNote;     // legacy "Recibe usted mismo/a?" — backwards-compat only
+        public string? Notes;            // "Notas / Observaciones del pedido"
         public List<OperatorDraftItem> Items = new();
 
         public bool HasAnySignal =>
@@ -5224,7 +5226,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
             || !string.IsNullOrWhiteSpace(CustomerPhone)
             || !string.IsNullOrWhiteSpace(Address)
             || !string.IsNullOrWhiteSpace(PaymentMethod)
+            || !string.IsNullOrWhiteSpace(DeliveryType)
             || !string.IsNullOrWhiteSpace(ReceiverNote)
+            || !string.IsNullOrWhiteSpace(Notes)
             || Items.Count > 0;
     }
 
@@ -5263,6 +5267,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
         intake.Address = CleanFieldValue(GetLabeled("direccion"));
         intake.ReceiverNote = CleanFieldValue(GetLabeled("recibe"));
 
+        // New labels for the updated La Mina intake template:
+        //   • "tipo de entrega" → DeliveryType  ("pickup" | "delivery")
+        //   • "notas" / "observaciones" → Notes (multi-line, captured below)
+        // "recibe" stays handled above for customers who paste the old template.
+        var deliveryRaw = CleanFieldValue(GetLabeled("tipo de entrega"));
+        if (!string.IsNullOrWhiteSpace(deliveryRaw))
+            intake.DeliveryType = NormalizeDeliveryType(deliveryRaw);
+
         var payLabeled = CleanFieldValue(GetLabeled("forma de pago")) ?? CleanFieldValue(GetLabeled("pago"));
         if (!string.IsNullOrWhiteSpace(payLabeled))
             intake.PaymentMethod = NormalizePaymentMethod(payLabeled);
@@ -5270,7 +5282,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Pedido label: gather the value on the label line plus any subsequent
         // lines that don't start with another known key. Lets the operator's
         // customers list items across multiple lines under one Pedido header.
-        var knownKeys = new[] { "nombre", "cedula", "telefono", "direccion", "pedido", "recibe", "forma de pago", "pago", "ubicacion" };
+        // Notas/Observaciones gets the same multi-line capture below.
+        var knownKeys = new[] {
+            "nombre", "cedula", "telefono", "direccion",
+            "pedido", "tipo de entrega", "recibe",
+            "forma de pago", "pago",
+            "notas", "observaciones",
+            "ubicacion"
+        };
         string? pedidoText = null;
         for (int i = 0; i < lines.Length; i++)
         {
@@ -5297,6 +5316,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         if (!string.IsNullOrWhiteSpace(pedidoText))
             intake.Items = ParseItemsFreeform(pedidoText, menu);
+
+        // Notas / Observaciones: same multi-line capture as Pedido. The label
+        // may carry a colon ("NOTAS:" / "Observaciones:") or stand alone with
+        // free text on the next line. Either form is supported.
+        intake.Notes = ExtractMultiLineLabeled(lines, new[] { "notas", "observaciones" }, knownKeys);
 
         // Phase 2 — freeform fallback. Only runs when nothing was extracted
         // by labels (otherwise we trust the labels). Resists destroying a
@@ -5465,30 +5489,19 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var combined = string.Join(" ", nameTokens).Trim();
         if (string.IsNullOrWhiteSpace(combined)) return;
 
-        var matched = MatchHumanIntakeMenuEntry(combined, menu);
-        if (matched is not null)
+        var match = MatchHumanIntakeMenuEntry(combined, menu);
+        if (match is not null)
         {
-            // Modifiers = the portion of the customer phrase outside the
-            // canonical name. Best-effort substring carve; alias matches
-            // (where canonical isn't in the text) leave modifiers empty.
-            string mods = "";
-            var canonNorm = StripAccents(matched.Canonical.ToLowerInvariant());
-            var combinedNorm = StripAccents(combined.ToLowerInvariant());
-            var pos = combinedNorm.IndexOf(canonNorm, StringComparison.Ordinal);
-            if (pos >= 0)
-            {
-                var before = combined[..pos].Trim();
-                var after = pos + matched.Canonical.Length <= combined.Length
-                    ? combined[(pos + matched.Canonical.Length)..].Trim()
-                    : "";
-                var parts = new[] { before, after }.Where(s => !string.IsNullOrWhiteSpace(s));
-                mods = string.Join(" ", parts);
-            }
+            // Carve modifiers via token-set difference against the SINGULARIZED
+            // candidate. This preserves the customer's original wording for the
+            // surviving tokens — "shawarmas 350 gramos pollo" matched to alias
+            // "shawarma 350 gramos" yields modifiers "pollo" (not "s pollo").
+            var mods = CarveModifiersFromCustomerPhrase(combined, match.Value.MatchedTokens);
             result.Add(new OperatorDraftItem
             {
-                Name = matched.Canonical,
+                Name = match.Value.Entry.Canonical,
                 Quantity = qty,
-                UnitPrice = matched.Price > 0 ? matched.Price : null,
+                UnitPrice = match.Value.Entry.Price > 0 ? match.Value.Entry.Price : null,
                 Modifiers = string.IsNullOrWhiteSpace(mods) ? null : mods
             });
         }
@@ -5507,33 +5520,155 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
     }
 
-    private static MenuEntry? MatchHumanIntakeMenuEntry(string candidate, MenuEntry[]? menu)
+    // Returns the customer's tokens NOT consumed by the matched menu token run,
+    // joined in original order. Operates on singularized tokens to locate the
+    // match span (so plural / singular variants align), but emits the originals.
+    private static string CarveModifiersFromCustomerPhrase(string customerPhrase, string[] matchedSingularizedTokens)
+    {
+        if (string.IsNullOrWhiteSpace(customerPhrase) || matchedSingularizedTokens.Length == 0)
+            return string.Empty;
+
+        var origTokens = customerPhrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (origTokens.Length == 0) return string.Empty;
+
+        var singTokens = origTokens
+            .Select(t => SingularizeWord(StripAccents(t.ToLowerInvariant())))
+            .ToArray();
+        var matchedSing = matchedSingularizedTokens
+            .Select(t => SingularizeWord(StripAccents(t.ToLowerInvariant())))
+            .ToArray();
+
+        // Find the matched run inside singTokens.
+        int matchStart = -1;
+        for (var i = 0; i + matchedSing.Length <= singTokens.Length; i++)
+        {
+            var hit = true;
+            for (var j = 0; j < matchedSing.Length; j++)
+            {
+                if (singTokens[i + j] != matchedSing[j]) { hit = false; break; }
+            }
+            if (hit) { matchStart = i; break; }
+        }
+
+        if (matchStart < 0)
+        {
+            // The matcher hit something that isn't a contiguous run (e.g. an
+            // alias that's a subset of the candidate's token set). Conservatively
+            // return the candidate's tokens minus any token whose singularized
+            // form appears in the matched set.
+            var matchedSet = new HashSet<string>(matchedSing);
+            var leftover = new List<string>();
+            for (var i = 0; i < origTokens.Length; i++)
+            {
+                if (matchedSet.Contains(singTokens[i])) continue;
+                leftover.Add(origTokens[i]);
+            }
+            return string.Join(" ", leftover).Trim();
+        }
+
+        // Contiguous match: take everything before + everything after the run.
+        var before = origTokens.Take(matchStart);
+        var after = origTokens.Skip(matchStart + matchedSing.Length);
+        return string.Join(" ", before.Concat(after)).Trim();
+    }
+
+    private readonly record struct HumanIntakeMatch(MenuEntry Entry, string[] MatchedTokens);
+
+    // Singularize-aware matcher. Both the customer's candidate and each
+    // canonical/alias are run through SingularizeWords before comparison so
+    // "shawarmas 350 gramos" resolves to alias "shawarma 350 gramos" (whose
+    // canonical is "Shawarma 350 grs" @ $8.00).
+    //
+    // Aliases are scanned in descending order of token count so the most
+    // specific SKU wins when both a short and long alias match — e.g. the
+    // alias "shawarma 350 gramos" (3 tokens) beats "shawarma 350" (2 tokens).
+    private static HumanIntakeMatch? MatchHumanIntakeMenuEntry(string candidate, MenuEntry[]? menu)
     {
         if (menu is null || menu.Length == 0 || string.IsNullOrWhiteSpace(candidate))
             return null;
-        var candNorm = StripAccents(candidate.ToLowerInvariant());
 
-        // Pass 1: exact canonical match.
+        var candNorm = StripAccents(candidate.ToLowerInvariant());
+        var candSing = SingularizeWords(candNorm);
+
+        // Pass 1: exact canonical match (singularized).
         foreach (var m in menu)
         {
-            var cNorm = StripAccents(m.Canonical.ToLowerInvariant());
-            if (candNorm == cNorm) return m;
+            var cSing = SingularizeWords(StripAccents(m.Canonical.ToLowerInvariant()));
+            if (candSing == cSing)
+                return new HumanIntakeMatch(m, cSing.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         }
-        // Pass 2: canonical substring (prefer longest first for specificity).
+
+        // Pass 2: canonical substring (singularized; longest canonical wins).
         foreach (var m in menu.OrderByDescending(x => x.Canonical.Length))
         {
-            var cNorm = StripAccents(m.Canonical.ToLowerInvariant());
-            if (cNorm.Length >= 3 && candNorm.Contains(cNorm)) return m;
+            var cSing = SingularizeWords(StripAccents(m.Canonical.ToLowerInvariant()));
+            if (cSing.Length >= 3 && (" " + candSing + " ").Contains(" " + cSing + " "))
+                return new HumanIntakeMatch(m, cSing.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         }
-        // Pass 3: alias substring.
+
+        // Pass 3: alias substring (singularized). Token-count descending tie-
+        // breaker so the most-specific alias wins (e.g. "shawarma 350 gramos"
+        // over "shawarma 350" when both substring-match the candidate).
+        var aliasCandidates = new List<(MenuEntry Entry, string AliasSing, int TokenCount)>();
         foreach (var m in menu)
         {
             if (m.Aliases is null) continue;
             foreach (var a in m.Aliases)
             {
-                var aNorm = StripAccents(a.ToLowerInvariant());
-                if (aNorm.Length >= 3 && candNorm.Contains(aNorm)) return m;
+                var aSing = SingularizeWords(StripAccents(a.ToLowerInvariant()));
+                if (aSing.Length < 3) continue;
+                if (!(" " + candSing + " ").Contains(" " + aSing + " ")) continue;
+                aliasCandidates.Add((m, aSing, aSing.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length));
             }
+        }
+        if (aliasCandidates.Count > 0)
+        {
+            var best = aliasCandidates
+                .OrderByDescending(x => x.TokenCount)
+                .ThenByDescending(x => x.AliasSing.Length)
+                .First();
+            return new HumanIntakeMatch(best.Entry, best.AliasSing.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        }
+
+        return null;
+    }
+
+    // Captures the value of a labeled section that may span multiple lines.
+    // Used for Pedido (already inlined above) and Notas/Observaciones. Stops
+    // at the next known label (so a malformed paste doesn't bleed Notas into
+    // the rest of the template). Returns null when the label isn't present.
+    private static string? ExtractMultiLineLabeled(string[] lines, string[] labelKeys, string[] stopKeys)
+    {
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var stripped = Regex.Replace(lines[i], @"^[\p{So}\p{Cs}️‍]+\s*", "").TrimStart('*');
+            var ln = StripAccents(stripped.ToLowerInvariant());
+            var matched = false;
+            foreach (var k in labelKeys)
+            {
+                if (ln.StartsWith(k)) { matched = true; break; }
+            }
+            if (!matched) continue;
+
+            var idx = stripped.IndexOf(':');
+            if (idx < 0) idx = stripped.IndexOf('-');
+            if (idx < 0) idx = stripped.IndexOf('=');
+
+            var sb = new StringBuilder();
+            if (idx >= 0 && idx + 1 < stripped.Length)
+                sb.Append(stripped[(idx + 1)..].Trim().TrimEnd('*'));
+
+            for (var j = i + 1; j < lines.Length; j++)
+            {
+                var nextStripped = Regex.Replace(lines[j], @"^[\p{So}\p{Cs}️‍]+\s*", "").TrimStart('*');
+                var nextLn = StripAccents(nextStripped.ToLowerInvariant());
+                if (stopKeys.Any(k => nextLn.StartsWith(k))) break;
+                if (sb.Length > 0) sb.Append('\n');
+                sb.Append(nextStripped.Trim());
+            }
+
+            var result = sb.ToString().Trim();
+            return string.IsNullOrWhiteSpace(result) ? null : result;
         }
         return null;
     }
@@ -5570,7 +5705,27 @@ public sealed class WebhookProcessor : IWebhookProcessor
             draft.Address = intake.Address;
         if (!string.IsNullOrWhiteSpace(intake.PaymentMethod) && CanWriteScalar(draft.PaymentMethod))
             draft.PaymentMethod = intake.PaymentMethod;
+        if (!string.IsNullOrWhiteSpace(intake.DeliveryType) && CanWriteScalar(draft.DeliveryType))
+            draft.DeliveryType = intake.DeliveryType;
 
+        // Notas / Observaciones: append as a standalone line in SpecialInstructions
+        // unless an identical text is already present. Operator edits remain
+        // authoritative — parser only appends when its content is new.
+        if (!string.IsNullOrWhiteSpace(intake.Notes))
+        {
+            var current = draft.SpecialInstructions ?? "";
+            var noteText = intake.Notes!.Trim();
+            if (current.IndexOf(noteText, StringComparison.OrdinalIgnoreCase) < 0)
+            {
+                draft.SpecialInstructions = string.IsNullOrWhiteSpace(current)
+                    ? noteText
+                    : current + "\n" + noteText;
+            }
+        }
+
+        // Legacy "Recibe usted mismo/a?" line — kept for backwards-compat with
+        // customers who paste the older template. Appended as "Recibe: …" when
+        // no such line exists yet.
         if (!string.IsNullOrWhiteSpace(intake.ReceiverNote))
         {
             var current = draft.SpecialInstructions ?? "";
