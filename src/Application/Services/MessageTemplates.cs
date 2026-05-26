@@ -476,6 +476,18 @@ internal static class Msg
         string? paymentMethod = null,
         bool paymentProofReceived = false)
     {
+        // Receipt assertion (Commit 7A-i). The "\u2705 PEDIDO CONFIRMADO" copy
+        // claims a real Order to the customer; an empty orderNumber means
+        // we'd be sending that copy without ever calling AddOrderAsync. The
+        // 6A hotfix gates the proof-success path; this assertion is the
+        // last-line-of-defense that no future code path can re-introduce
+        // the same false-success failure mode by accident.
+        if (string.IsNullOrWhiteSpace(orderNumber))
+            throw new InvalidOperationException(
+                "BuildReceipt called without an orderNumber. The receipt template " +
+                "shows '\u2705 PEDIDO CONFIRMADO #\u2026' and must never be sent before " +
+                "IOrderRepository.AddOrderAsync has returned a persisted Order.");
+
         var sb = new StringBuilder();
         sb.AppendLine("\u2705 *PEDIDO CONFIRMADO*");
         sb.AppendLine($"\ud83e\uddfe Pedido: #{orderNumber}");

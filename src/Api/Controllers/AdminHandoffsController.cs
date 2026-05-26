@@ -1087,6 +1087,16 @@ public class AdminHandoffsController : ControllerBase
             return StatusCode(500, new { error = "No se pudo persistir el pedido. Intenta de nuevo." });
         }
 
+        // Lifecycle events — operator-driven order creation joins the same
+        // structured log stream as the bot path so ops can grep CHECKOUT_EVENT
+        // for the full conversation timeline. Same template + properties.
+        _logger.LogInformation(
+            "CHECKOUT_EVENT event={Event} conversationId={ConversationId} businessId={BusinessId} customerPhone={CustomerPhone} orderId={OrderId}",
+            "ORDER_CREATED", conversationId, entity.BusinessId, customerFrom, persisted.Id);
+        _logger.LogInformation(
+            "CHECKOUT_EVENT event={Event} conversationId={ConversationId} businessId={BusinessId} customerPhone={CustomerPhone} orderId={OrderId}",
+            "ORDER_VISIBLE", conversationId, entity.BusinessId, customerFrom, persisted.Id);
+
         var orderNumber = FormatOrderNumber(persisted.Id);
 
         // ── Mutate state ────────────────────────────────────────────────────

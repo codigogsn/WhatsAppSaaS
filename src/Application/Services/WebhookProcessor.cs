@@ -152,6 +152,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         "Processing message: id={MessageId} from={From} type={Type} conversationId={ConversationId}",
                         message.Id, message.From, message.Type, conversationId);
 
+                    // Make the conversation context available to static helpers
+                    // (e.g. BuildOrderReplyFromState) so they can attach correct
+                    // identifiers to lifecycle logs without signature changes.
+                    _checkoutLogContext.Value = new CheckoutLogContext(
+                        conversationId, businessContext.BusinessId, message.From);
+
                     _sideEffectsCommitted = false; // Reset for each message in the batch
                     try
                     {
@@ -370,6 +376,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             if (!string.IsNullOrWhiteSpace(mediaId))
                             {
                                 state.PaymentProofMediaId = mediaId;
+                                // Lifecycle log — fires once per conversation when the
+                                // customer's payment screenshot is first accepted.
+                                LogCheckoutEvent("PROOF_RECEIVED", conversationId, businessContext.BusinessId, message.From);
 
                                 // Post-confirm: update the already-persisted order
                                 if (state.AwaitingPostConfirmProof && state.LastOrderId.HasValue)
@@ -1713,6 +1722,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         if (payMethod is not null && state.PaymentMethod is null)
                         {
                             state.PaymentMethod = payMethod;
+                            LogCheckoutEvent("PAYMENT_SELECTED", conversationId, businessContext.BusinessId, message.From);
 
                             // Trigger evidence request for pago_movil / divisas / zelle
                             if (payMethod is "pago_movil" or "divisas" or "zelle")
@@ -1766,7 +1776,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         state.CustomerIdNumber ??= form.CustomerIdNumber;
                         state.CustomerPhone ??= form.CustomerPhone;
                         state.Address ??= form.Address;
+                        var wasPaymentMethodNull = string.IsNullOrWhiteSpace(state.PaymentMethod);
                         state.PaymentMethod ??= form.PaymentMethod;
+                        if (wasPaymentMethodNull && !string.IsNullOrWhiteSpace(state.PaymentMethod))
+                            LogCheckoutEvent("PAYMENT_SELECTED", conversationId, businessContext.BusinessId, message.From);
 
                         if (!string.IsNullOrWhiteSpace(form.LocationText))
                         {
@@ -2502,6 +2515,49 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return null;
     }
 
+    // ─── Checkout lifecycle observability (Commit 7A-i) ────────────────────
+    //
+    // Five named events emitted as a single log template `CHECKOUT_EVENT` so
+    // ops can grep one prefix:
+    //     CHECKOUT_STARTED   — bot just sent the CheckoutForm template
+    //     PAYMENT_SELECTED   — state.PaymentMethod transitioned null → set
+    //     PROOF_RECEIVED     — state.PaymentProofMediaId transitioned null → set
+    //     ORDER_CREATED      — AddOrderAsync returned a persisted Order
+    //     ORDER_VISIBLE      — same persist + atomic Customer-aggregate update
+    //                          completed (queryable from /api/orders dashboard)
+    //
+    // All five carry { conversationId, businessId, customerPhone, orderId? }.
+    // CheckoutLogContext flows through async/await via AsyncLocal so the
+    // static BuildOrderReplyFromState can attach the context to its
+    // CHECKOUT_STARTED log without a signature change rippling across its
+    // 8+ call sites.
+    private sealed record CheckoutLogContext(string ConversationId, Guid? BusinessId, string CustomerPhone);
+    private static readonly AsyncLocal<CheckoutLogContext?> _checkoutLogContext = new();
+
+    private void LogCheckoutEvent(
+        string eventName,
+        string conversationId,
+        Guid? businessId,
+        string customerPhone,
+        Guid? orderId = null)
+    {
+        _logger.LogInformation(
+            "CHECKOUT_EVENT event={Event} conversationId={ConversationId} businessId={BusinessId} customerPhone={CustomerPhone} orderId={OrderId}",
+            eventName, conversationId, businessId, customerPhone, orderId);
+    }
+
+    // Static variant for callers that don't carry an instance _logger (the
+    // BuildOrderReplyFromState static path). Reads conversation context from
+    // the AsyncLocal slot — null-safe so unit tests that bypass ProcessAsync
+    // never NPE.
+    private static void LogCheckoutEventStatic(string eventName, Guid? orderId = null)
+    {
+        var ctx = _checkoutLogContext.Value;
+        _staticLogger.Value?.LogInformation(
+            "CHECKOUT_EVENT event={Event} conversationId={ConversationId} businessId={BusinessId} customerPhone={CustomerPhone} orderId={OrderId}",
+            eventName, ctx?.ConversationId, ctx?.BusinessId, ctx?.CustomerPhone, orderId);
+    }
+
     // Mirrors the missing-field predicate inside FinalizeOrderIfPossibleAsync
     // so the proof-capture branch can produce a customer-visible list of
     // pending slots WITHOUT re-running finalize for the sole purpose of
@@ -2702,6 +2758,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
         {
             state.CheckoutFormSent = true;
             state.CheckoutPendingSinceUtc ??= DateTime.UtcNow;
+            // Canonical site for the CHECKOUT_STARTED lifecycle event — the
+            // moment the bot hands the customer the data-collection form.
+            LogCheckoutEventStatic("CHECKOUT_STARTED");
             var form = state.DeliveryType == "pickup" ? Msg.CheckoutFormPickup : Msg.CheckoutForm;
             return form + "\n\n" + Msg.CheckoutReservation;
         }
@@ -2861,6 +2920,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
         _sideEffectsCommitted = true; // Order persisted — irreversible
 
         _logger.LogInformation("FinalizeOrder: order {OrderId} saved successfully", order.Id);
+        // Lifecycle events — fired the moment the Order row exists AND the
+        // atomic Customer aggregate update (OrdersCount / TotalSpent) inside
+        // AddOrderAsync has committed, so the dashboard is guaranteed to see it.
+        LogCheckoutEvent("ORDER_CREATED", $"{from}:{phoneNumberId}", businessId, from, order.Id);
+        LogCheckoutEvent("ORDER_VISIBLE", $"{from}:{phoneNumberId}", businessId, from, order.Id);
 
         // Staff notification: order confirmed
         if (_notificationService is not null)
@@ -3047,6 +3111,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
             // existing Pending order when one already exists for this customer.
             order = await _orderRepository.AddOrderAsync(order, ct);
             _sideEffectsCommitted = true; // Order persisted — irreversible
+            LogCheckoutEvent("ORDER_CREATED", $"{from}:{phoneNumberId}", businessContext.BusinessId, from, order.Id);
+            LogCheckoutEvent("ORDER_VISIBLE", $"{from}:{phoneNumberId}", businessContext.BusinessId, from, order.Id);
 
             var orderNumber = order.Id.ToString("N")[..8].ToUpperInvariant();
             var receipt = Msg.FashionReceipt(
@@ -3105,6 +3171,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
             if (pm is not null)
             {
                 state.PaymentMethod = pm;
+                LogCheckoutEvent("PAYMENT_SELECTED", $"{from}:{phoneNumberId}", businessContext.BusinessId, from);
 
                 // Send pago movil details if applicable
                 if (pm == "pago_movil")
