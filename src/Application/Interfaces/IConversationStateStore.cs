@@ -290,6 +290,14 @@ public sealed class OperatorDraft
     public string? LocationText { get; set; }
     public string? ProofMediaId { get; set; }   // resolves a HumanChatLog image bubble
     public DateTime? UpdatedAtUtc { get; set; } // optimistic-concurrency token
+
+    // Set true by the server-side human-intake parser when it populated this
+    // draft from a customer message. Cleared by any PUT/PATCH from the
+    // dashboard, transferring ownership to the operator. While parser-owned
+    // the parser may replace its own fields on a subsequent customer message;
+    // once operator-owned the parser only fills empty fields.
+    public bool AutoFilledFromCustomer { get; set; }
+    public DateTime? AutoFilledAtUtc { get; set; }
 }
 
 public sealed class OperatorDraftItem

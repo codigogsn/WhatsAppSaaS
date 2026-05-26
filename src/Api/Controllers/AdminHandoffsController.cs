@@ -702,6 +702,9 @@ public class AdminHandoffsController : ControllerBase
                 new { error = concurrencyError, current = currentDraft });
 
         draft.UpdatedAtUtc = DateTime.UtcNow;
+        // Operator-initiated write transfers ownership away from the parser.
+        // The intake parser will only fill empty fields after this point.
+        draft.AutoFilledFromCustomer = false;
         await WriteDraftAsync(entity, draft, ct);
         return Ok(new { draft });
     }
@@ -731,6 +734,10 @@ public class AdminHandoffsController : ControllerBase
 
         var merged = MergeDraftPatch(currentDraft ?? new OperatorDraft(), patch);
         merged.UpdatedAtUtc = DateTime.UtcNow;
+        // Operator-initiated PATCH transfers ownership away from the parser
+        // even when the patch body itself doesn't touch a previously
+        // parser-filled field — the act of editing implies operator intent.
+        merged.AutoFilledFromCustomer = false;
         await WriteDraftAsync(entity, merged, ct);
         return Ok(new { draft = merged });
     }

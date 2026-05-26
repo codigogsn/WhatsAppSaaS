@@ -183,6 +183,27 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         // endpoint; text messages keep the original {Sender,Text,At} shape.
                         state.HumanChatLog.Add(BuildInboundChatEntry(message));
                         if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
+
+                        // Human-intake parser (Commit 3b). Best-effort population of
+                        // ConversationFields.OperatorDraft from the customer's text reply.
+                        // Failures are swallowed with a warning so the chat log save below
+                        // always runs — parsing must never break ownership tracking.
+                        var intakeBody = message.Text?.Body;
+                        if (!string.IsNullOrWhiteSpace(intakeBody))
+                        {
+                            try
+                            {
+                                if (TryParseHumanIntake(intakeBody, _activeMenu ?? MenuCatalog, out var intakeOverride))
+                                    ApplyHumanIntakeToDraft(state, intakeOverride, DateTime.UtcNow);
+                            }
+                            catch (Exception parseEx)
+                            {
+                                _logger.LogWarning(parseEx,
+                                    "Human-intake parser failed (HumanOverride branch) for {ConversationId}",
+                                    conversationId);
+                            }
+                        }
+
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
                     }
@@ -635,6 +656,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             var msgText = message.Text?.Body ?? $"[{message.Type}]";
                             state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = msgText, At = DateTime.UtcNow });
                             if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
+
+                            // Human-intake parser (Commit 3b). Same best-effort population
+                            // as the HumanOverride branch; never throws.
+                            if (!string.IsNullOrWhiteSpace(message.Text?.Body))
+                            {
+                                try
+                                {
+                                    if (TryParseHumanIntake(message.Text.Body, _activeMenu ?? MenuCatalog, out var parsedIntake))
+                                        ApplyHumanIntakeToDraft(state, parsedIntake, DateTime.UtcNow);
+                                }
+                                catch (Exception parseEx)
+                                {
+                                    _logger.LogWarning(parseEx,
+                                        "Human-intake parser failed (HandoffRequested branch) for {ConversationId}",
+                                        conversationId);
+                                }
+                            }
 
                             // Other messages: send waiting notification (max 3)
                             if (state.HumanHandoffNotifiedCount < 3)
@@ -5154,6 +5192,413 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
 
         return dp[a.Length, b.Length];
+    }
+
+    // ═══ Human-intake parser (Commit 3b) ═════════════════════════════════════
+    //
+    // Parses customer messages received during a human-attention handoff into
+    // an OperatorDraft. Handles two input shapes:
+    //   • Labeled paste of the intake template (Nombre / Cédula / Teléfono /
+    //     Dirección / Pedido / Recibe / Forma de Pago) — same emoji+asterisk
+    //     normalisation as TryParseCheckoutForm.
+    //   • Freeform paragraph with the same fields concatenated in any order
+    //     (e.g. "gonzalo scannone 26063230 04141627985 ... 2 shawarmas ...
+    //      si pago movil"). Fields are inferred positionally.
+    //
+    // Never throws. Caller wraps in try/catch and logs warnings only — failing
+    // here must never break HumanChatLog persistence.
+
+    internal sealed class HumanIntake
+    {
+        public string? CustomerName;
+        public string? CustomerIdNumber;
+        public string? CustomerPhone;
+        public string? Address;
+        public string? PaymentMethod;
+        public string? ReceiverNote;
+        public List<OperatorDraftItem> Items = new();
+
+        public bool HasAnySignal =>
+            !string.IsNullOrWhiteSpace(CustomerName)
+            || !string.IsNullOrWhiteSpace(CustomerIdNumber)
+            || !string.IsNullOrWhiteSpace(CustomerPhone)
+            || !string.IsNullOrWhiteSpace(Address)
+            || !string.IsNullOrWhiteSpace(PaymentMethod)
+            || !string.IsNullOrWhiteSpace(ReceiverNote)
+            || Items.Count > 0;
+    }
+
+    internal static bool TryParseHumanIntake(string? rawText, MenuEntry[]? menu, out HumanIntake intake)
+    {
+        intake = new HumanIntake();
+        if (string.IsNullOrWhiteSpace(rawText)) return false;
+
+        // Phase 1 — labeled extraction. Emoji prefix + leading "*" markdown
+        // are stripped; the labels themselves are matched on accent-stripped
+        // lowercase so "📱 *Número de teléfono celular:*" still hits "telefono".
+        var lines = rawText
+            .Replace("\r\n", "\n").Replace("\r", "\n")
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        string? GetLabeled(string key)
+        {
+            foreach (var line in lines)
+            {
+                var stripped = Regex.Replace(line, @"^[\p{So}\p{Cs}️‍]+\s*", "").TrimStart('*');
+                var ln = StripAccents(stripped.ToLowerInvariant());
+                if (!ln.StartsWith(key)) continue;
+                var idx = stripped.IndexOf(':');
+                if (idx < 0) idx = stripped.IndexOf('-');
+                if (idx < 0) idx = stripped.IndexOf('=');
+                if (idx >= 0 && idx + 1 < stripped.Length)
+                    return stripped[(idx + 1)..].Trim().TrimEnd('*');
+            }
+            return null;
+        }
+
+        var labeledName = CleanFieldValue(GetLabeled("nombre"));
+        intake.CustomerName = !string.IsNullOrWhiteSpace(labeledName) ? NormalizeDisplayName(labeledName) : null;
+        intake.CustomerIdNumber = CleanFieldValue(GetLabeled("cedula"));
+        intake.CustomerPhone = CleanFieldValue(GetLabeled("telefono"));
+        intake.Address = CleanFieldValue(GetLabeled("direccion"));
+        intake.ReceiverNote = CleanFieldValue(GetLabeled("recibe"));
+
+        var payLabeled = CleanFieldValue(GetLabeled("forma de pago")) ?? CleanFieldValue(GetLabeled("pago"));
+        if (!string.IsNullOrWhiteSpace(payLabeled))
+            intake.PaymentMethod = NormalizePaymentMethod(payLabeled);
+
+        // Pedido label: gather the value on the label line plus any subsequent
+        // lines that don't start with another known key. Lets the operator's
+        // customers list items across multiple lines under one Pedido header.
+        var knownKeys = new[] { "nombre", "cedula", "telefono", "direccion", "pedido", "recibe", "forma de pago", "pago", "ubicacion" };
+        string? pedidoText = null;
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var stripped = Regex.Replace(lines[i], @"^[\p{So}\p{Cs}️‍]+\s*", "").TrimStart('*');
+            var ln = StripAccents(stripped.ToLowerInvariant());
+            if (!ln.StartsWith("pedido")) continue;
+            var idx = stripped.IndexOf(':');
+            if (idx < 0) idx = stripped.IndexOf('-');
+            if (idx < 0) idx = stripped.IndexOf('=');
+            var sb = new StringBuilder();
+            if (idx >= 0 && idx + 1 < stripped.Length)
+                sb.Append(stripped[(idx + 1)..].Trim().TrimEnd('*'));
+            for (int j = i + 1; j < lines.Length; j++)
+            {
+                var nextStripped = Regex.Replace(lines[j], @"^[\p{So}\p{Cs}️‍]+\s*", "").TrimStart('*');
+                var nextLn = StripAccents(nextStripped.ToLowerInvariant());
+                if (knownKeys.Any(k => nextLn.StartsWith(k))) break;
+                if (sb.Length > 0) sb.Append('\n');
+                sb.Append(nextStripped.Trim());
+            }
+            pedidoText = sb.Length > 0 ? sb.ToString().Trim() : null;
+            break;
+        }
+
+        if (!string.IsNullOrWhiteSpace(pedidoText))
+            intake.Items = ParseItemsFreeform(pedidoText, menu);
+
+        // Phase 2 — freeform fallback. Only runs when nothing was extracted
+        // by labels (otherwise we trust the labels). Resists destroying a
+        // labeled draft when a customer pastes the template with most fields
+        // blank.
+        if (!intake.HasAnySignal)
+            ParseFreeformIntake(rawText, menu, intake);
+
+        return intake.HasAnySignal;
+    }
+
+    // Freeform parser: tokenize by whitespace and infer fields by position.
+    // Order of detection (from the input the user provided):
+    //   [name tokens] [cedula] [phone] [address tokens] [items...] [recibe?] [payment]
+    private static void ParseFreeformIntake(string rawText, MenuEntry[]? menu, HumanIntake intake)
+    {
+        var tokens = rawText
+            .Split(new[] { ' ', '\t', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length < 2) return;
+
+        // Find cedula (6-9 digits, all-digit token) and phone (10-12 digits).
+        int? cedulaIdx = null;
+        int? phoneIdx = null;
+        for (int i = 0; i < tokens.Length; i++)
+        {
+            var t = tokens[i];
+            if (t.Length == 0 || !t.All(char.IsDigit)) continue;
+            if (cedulaIdx is null && t.Length >= 6 && t.Length <= 9) { cedulaIdx = i; continue; }
+            if (phoneIdx is null && t.Length >= 10 && t.Length <= 12) { phoneIdx = i; continue; }
+        }
+        if (cedulaIdx.HasValue) intake.CustomerIdNumber = tokens[cedulaIdx.Value];
+        if (phoneIdx.HasValue) intake.CustomerPhone = tokens[phoneIdx.Value];
+
+        // Name = up to 4 leading alphabetic tokens before the cedula.
+        if (cedulaIdx is int ci && ci > 0)
+        {
+            var nameToks = tokens.Take(ci)
+                .Where(t => t.All(c => char.IsLetter(c) || c is 'ñ' or 'Ñ'))
+                .Take(4)
+                .ToArray();
+            if (nameToks.Length > 0)
+                intake.CustomerName = NormalizeDisplayName(string.Join(" ", nameToks));
+        }
+
+        // Walk backwards from the end collecting payment vocabulary.
+        // "pago movil", "pago móvil", "zelle", "divisas", "efectivo", etc.
+        int tailEnd = tokens.Length;
+        int? paymentStart = null;
+        for (int i = tokens.Length - 1; i >= 0; i--)
+        {
+            var t = StripAccents(tokens[i].ToLowerInvariant());
+            bool isPaymentToken =
+                   t.StartsWith("pago")
+                || t is "movil" or "moc" or "mobil" or "mocil"
+                or "zelle" or "efectivo" or "divisas" or "divisa"
+                or "transferencia" or "tarjeta" or "cash"
+                or "usd" or "dolar" or "dolares";
+            if (isPaymentToken) paymentStart = i;
+            else break;
+        }
+        if (paymentStart is int ps)
+        {
+            var payText = string.Join(" ", tokens.Skip(ps));
+            var normalized = NormalizePaymentMethod(payText);
+            if (!string.IsNullOrWhiteSpace(normalized))
+            {
+                intake.PaymentMethod = normalized;
+                tailEnd = ps;
+            }
+        }
+
+        // Receive-self: single token "si"/"sí"/"yo"/"mismo"/"misma" within
+        // the last 3 positions before the payment block.
+        for (int i = tailEnd - 1; i >= 0 && (tailEnd - i) <= 3; i--)
+        {
+            var t = StripAccents(tokens[i].ToLowerInvariant());
+            if (t is "si" or "yo" or "mismo" or "misma")
+            {
+                intake.ReceiverNote = "Sí, recibe el cliente";
+                tailEnd = i;
+                break;
+            }
+        }
+
+        // Locate the start of the item region — first 1-2 digit qty token
+        // (value 1-50) after the phone (or after the cedula if no phone).
+        int searchFrom = (phoneIdx ?? cedulaIdx ?? -1) + 1;
+        int? firstQtyIdx = null;
+        for (int i = searchFrom; i < tailEnd; i++)
+        {
+            var t = tokens[i];
+            if (t.Length <= 2 && t.All(char.IsDigit) && int.TryParse(t, out var n) && n >= 1 && n <= 50)
+            { firstQtyIdx = i; break; }
+        }
+
+        // Address = tokens between phone/cedula and the first qty (or tailEnd
+        // when there are no items).
+        int addrStart = (phoneIdx ?? cedulaIdx ?? -1) + 1;
+        int addrEnd = firstQtyIdx ?? tailEnd;
+        if (addrStart >= 0 && addrEnd > addrStart)
+        {
+            var addrToks = tokens.Skip(addrStart).Take(addrEnd - addrStart)
+                .Where(t => !string.IsNullOrWhiteSpace(t)).ToArray();
+            if (addrToks.Length > 0)
+                intake.Address = string.Join(" ", addrToks).Trim();
+        }
+
+        // Items.
+        if (firstQtyIdx is int fq && fq < tailEnd)
+        {
+            var itemText = string.Join(" ", tokens.Skip(fq).Take(tailEnd - fq));
+            intake.Items = ParseItemsFreeform(itemText, menu);
+        }
+    }
+
+    // Splits a free-text item region into quantified items. Honors comma /
+    // newline separators when present (labeled-pedido case); otherwise relies
+    // on internal quantity boundaries. Each item is matched against the menu;
+    // confident matches attach UnitPrice, unknown items get Modifiers="revisar"
+    // per the user spec so the operator surfaces them in the panel.
+    private static List<OperatorDraftItem> ParseItemsFreeform(string text, MenuEntry[]? menu)
+    {
+        var result = new List<OperatorDraftItem>();
+        if (string.IsNullOrWhiteSpace(text)) return result;
+
+        var phrases = text.Split(new[] { ',', '\n' }, StringSplitOptions.RemoveEmptyEntries);
+        foreach (var phraseRaw in phrases)
+        {
+            var phrase = phraseRaw.Trim();
+            if (string.IsNullOrWhiteSpace(phrase)) continue;
+            var toks = phrase.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            var boundaries = new List<int>();
+            for (int i = 0; i < toks.Length; i++)
+            {
+                var t = toks[i];
+                if (t.Length <= 2 && t.All(char.IsDigit)
+                    && int.TryParse(t, out var n) && n >= 1 && n <= 50)
+                {
+                    boundaries.Add(i);
+                }
+            }
+
+            if (boundaries.Count == 0)
+            {
+                AppendIntakeItem(result, 1, toks, menu);
+                continue;
+            }
+
+            for (int b = 0; b < boundaries.Count; b++)
+            {
+                var start = boundaries[b];
+                var end = (b + 1 < boundaries.Count) ? boundaries[b + 1] : toks.Length;
+                if (!int.TryParse(toks[start], out var qty)) qty = 1;
+                var nameAndMods = toks.Skip(start + 1).Take(end - start - 1).ToArray();
+                AppendIntakeItem(result, qty, nameAndMods, menu);
+            }
+        }
+        return result;
+    }
+
+    private static void AppendIntakeItem(
+        List<OperatorDraftItem> result, int qty, string[] nameTokens, MenuEntry[]? menu)
+    {
+        if (nameTokens.Length == 0) return;
+        var combined = string.Join(" ", nameTokens).Trim();
+        if (string.IsNullOrWhiteSpace(combined)) return;
+
+        var matched = MatchHumanIntakeMenuEntry(combined, menu);
+        if (matched is not null)
+        {
+            // Modifiers = the portion of the customer phrase outside the
+            // canonical name. Best-effort substring carve; alias matches
+            // (where canonical isn't in the text) leave modifiers empty.
+            string mods = "";
+            var canonNorm = StripAccents(matched.Canonical.ToLowerInvariant());
+            var combinedNorm = StripAccents(combined.ToLowerInvariant());
+            var pos = combinedNorm.IndexOf(canonNorm, StringComparison.Ordinal);
+            if (pos >= 0)
+            {
+                var before = combined[..pos].Trim();
+                var after = pos + matched.Canonical.Length <= combined.Length
+                    ? combined[(pos + matched.Canonical.Length)..].Trim()
+                    : "";
+                var parts = new[] { before, after }.Where(s => !string.IsNullOrWhiteSpace(s));
+                mods = string.Join(" ", parts);
+            }
+            result.Add(new OperatorDraftItem
+            {
+                Name = matched.Canonical,
+                Quantity = qty,
+                UnitPrice = matched.Price > 0 ? matched.Price : null,
+                Modifiers = string.IsNullOrWhiteSpace(mods) ? null : mods
+            });
+        }
+        else
+        {
+            // Unmatched — keep customer's wording, flag "revisar" so the
+            // panel preview shows "—" for price and the operator promotes
+            // it manually before any future create-order flow.
+            result.Add(new OperatorDraftItem
+            {
+                Name = combined,
+                Quantity = qty,
+                UnitPrice = null,
+                Modifiers = "revisar"
+            });
+        }
+    }
+
+    private static MenuEntry? MatchHumanIntakeMenuEntry(string candidate, MenuEntry[]? menu)
+    {
+        if (menu is null || menu.Length == 0 || string.IsNullOrWhiteSpace(candidate))
+            return null;
+        var candNorm = StripAccents(candidate.ToLowerInvariant());
+
+        // Pass 1: exact canonical match.
+        foreach (var m in menu)
+        {
+            var cNorm = StripAccents(m.Canonical.ToLowerInvariant());
+            if (candNorm == cNorm) return m;
+        }
+        // Pass 2: canonical substring (prefer longest first for specificity).
+        foreach (var m in menu.OrderByDescending(x => x.Canonical.Length))
+        {
+            var cNorm = StripAccents(m.Canonical.ToLowerInvariant());
+            if (cNorm.Length >= 3 && candNorm.Contains(cNorm)) return m;
+        }
+        // Pass 3: alias substring.
+        foreach (var m in menu)
+        {
+            if (m.Aliases is null) continue;
+            foreach (var a in m.Aliases)
+            {
+                var aNorm = StripAccents(a.ToLowerInvariant());
+                if (aNorm.Length >= 3 && candNorm.Contains(aNorm)) return m;
+            }
+        }
+        return null;
+    }
+
+    // Merges a parsed HumanIntake into state.OperatorDraft per the rules:
+    //   • Parser-owned draft (AutoFilledFromCustomer=true) → parser may
+    //     overwrite scalar fields and replace the items list.
+    //   • Operator-owned draft → parser only fills empty scalars; items
+    //     are only replaced when the existing list is empty.
+    //   • ReceiverNote appended as "Recibe: …" line in SpecialInstructions
+    //     only when no Recibe: line already exists.
+    //   • Always bumps UpdatedAtUtc + AutoFilledAtUtc.
+    private static void ApplyHumanIntakeToDraft(ConversationFields state, HumanIntake intake, DateTime nowUtc)
+    {
+        var draft = state.OperatorDraft;
+        bool createdNow = false;
+        if (draft is null)
+        {
+            draft = new OperatorDraft { AutoFilledFromCustomer = true, AutoFilledAtUtc = nowUtc };
+            state.OperatorDraft = draft;
+            createdNow = true;
+        }
+        var ownsDraft = draft.AutoFilledFromCustomer;
+
+        bool CanWriteScalar(string? current) => ownsDraft || string.IsNullOrWhiteSpace(current);
+
+        if (!string.IsNullOrWhiteSpace(intake.CustomerName) && CanWriteScalar(draft.CustomerName))
+            draft.CustomerName = intake.CustomerName;
+        if (!string.IsNullOrWhiteSpace(intake.CustomerIdNumber) && CanWriteScalar(draft.CustomerIdNumber))
+            draft.CustomerIdNumber = intake.CustomerIdNumber;
+        if (!string.IsNullOrWhiteSpace(intake.CustomerPhone) && CanWriteScalar(draft.CustomerPhone))
+            draft.CustomerPhone = intake.CustomerPhone;
+        if (!string.IsNullOrWhiteSpace(intake.Address) && CanWriteScalar(draft.Address))
+            draft.Address = intake.Address;
+        if (!string.IsNullOrWhiteSpace(intake.PaymentMethod) && CanWriteScalar(draft.PaymentMethod))
+            draft.PaymentMethod = intake.PaymentMethod;
+
+        if (!string.IsNullOrWhiteSpace(intake.ReceiverNote))
+        {
+            var current = draft.SpecialInstructions ?? "";
+            if (!current.Contains("Recibe:", StringComparison.OrdinalIgnoreCase))
+            {
+                var line = "Recibe: " + intake.ReceiverNote!.Trim();
+                draft.SpecialInstructions = string.IsNullOrWhiteSpace(current)
+                    ? line
+                    : current + "\n" + line;
+            }
+        }
+
+        if (intake.Items.Count > 0 && (ownsDraft || draft.Items.Count == 0))
+        {
+            draft.Items = intake.Items
+                .Select(i => new OperatorDraftItem
+                {
+                    Name = i.Name,
+                    Quantity = i.Quantity,
+                    UnitPrice = i.UnitPrice,
+                    Modifiers = i.Modifiers
+                })
+                .ToList();
+        }
+
+        draft.AutoFilledFromCustomer = ownsDraft || createdNow;
+        draft.AutoFilledAtUtc = nowUtc;
+        draft.UpdatedAtUtc = nowUtc;
     }
 
     internal sealed class CheckoutForm
