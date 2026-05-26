@@ -422,6 +422,25 @@ public class AdminHandoffsController : ControllerBase
                     }
                 }
 
+                // Optional commit-1 surfaces — only present when set on the state.
+                // Frontend doesn't consume yet; the API contract is published now so
+                // later commits can iterate UI without another backend deploy.
+                OperatorDraft? operatorDraft = null;
+                if (root.TryGetProperty("operatorDraft", out var odProp) && odProp.ValueKind == JsonValueKind.Object)
+                {
+                    try { operatorDraft = odProp.Deserialize<OperatorDraft>(JsonOpts); }
+                    catch { /* malformed draft — surface as null */ }
+                }
+                Guid? orderCreatedByHumanId = null;
+                if (root.TryGetProperty("orderCreatedByHumanId", out var ocProp)
+                    && ocProp.ValueKind == JsonValueKind.String
+                    && Guid.TryParse(ocProp.GetString(), out var ocGuid))
+                {
+                    orderCreatedByHumanId = ocGuid;
+                }
+                var humanInterventionResolved = root.TryGetProperty("humanInterventionResolved", out var hirProp)
+                    && hirProp.ValueKind == JsonValueKind.True;
+
                 conversations.Add(new
                 {
                     conversationId = s.ConversationId,
@@ -434,7 +453,10 @@ public class AdminHandoffsController : ControllerBase
                     humanHandoffRequested = isHandoffRequested,
                     humanHandoffAtUtc = handoffAt,
                     lastMessageAt = s.UpdatedAtUtc,
-                    chatLog
+                    chatLog,
+                    operatorDraft,
+                    orderCreatedByHumanId,
+                    humanInterventionResolved
                 });
             }
             catch { /* skip malformed JSON */ }
@@ -632,6 +654,192 @@ public class AdminHandoffsController : ControllerBase
         catch { /* malformed JSON ⇒ treat as not referenced */ }
 
         return (null, false);
+    }
+
+    // ── Operator draft endpoints (Commit 1 of Human Order Capture) ──
+    //
+    // The operator's structured order draft lives on ConversationFields.OperatorDraft.
+    // These endpoints expose CRUD only — order creation, payment side effects, and
+    // bot mutations are out of scope for this commit and will land in later commits.
+
+    /// <summary>
+    /// GET /api/admin/handoffs/{conversationId}/draft
+    /// Returns the current operator draft, or null when none exists.
+    /// </summary>
+    [HttpGet("{conversationId}/draft")]
+    public async Task<IActionResult> GetDraft(string conversationId, CancellationToken ct)
+    {
+        if (!IsAuthorized()) return Unauthorized();
+        var entity = await _db.ConversationStates.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.ConversationId == conversationId, ct);
+        if (entity is null) return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
+
+        return Ok(new { draft = ReadDraftFromStateJson(entity.StateJson) });
+    }
+
+    /// <summary>
+    /// PUT /api/admin/handoffs/{conversationId}/draft
+    /// Replaces the operator draft in full. The If-Match request header (ISO-8601
+    /// timestamp of the expected current UpdatedAtUtc) gates concurrent edits —
+    /// 412 on mismatch, with the current draft included so the UI can re-sync.
+    /// </summary>
+    [HttpPut("{conversationId}/draft")]
+    public async Task<IActionResult> PutDraft(string conversationId, [FromBody] OperatorDraft draft, CancellationToken ct)
+    {
+        if (!IsAuthorized()) return Unauthorized();
+        if (draft is null) return BadRequest(new { error = "Draft body is required" });
+
+        var entity = await _db.ConversationStates.FindAsync(new object[] { conversationId }, ct);
+        if (entity is null) return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
+
+        var (concurrencyError, currentDraft) = CheckDraftConcurrency(entity.StateJson);
+        if (concurrencyError is not null)
+            return StatusCode(StatusCodes.Status412PreconditionFailed,
+                new { error = concurrencyError, current = currentDraft });
+
+        draft.UpdatedAtUtc = DateTime.UtcNow;
+        await WriteDraftAsync(entity, draft, ct);
+        return Ok(new { draft });
+    }
+
+    /// <summary>
+    /// PATCH /api/admin/handoffs/{conversationId}/draft
+    /// Merges the provided fields onto the current draft. Null-valued fields
+    /// leave the existing value alone; non-null fields replace; Items is special-
+    /// cased — null leaves the list alone, [] clears it, [..] replaces. Same
+    /// If-Match semantics as PUT. Creates a new draft when none exists.
+    /// </summary>
+    [HttpPatch("{conversationId}/draft")]
+    public async Task<IActionResult> PatchDraft(string conversationId, [FromBody] OperatorDraftPatchRequest patch, CancellationToken ct)
+    {
+        if (!IsAuthorized()) return Unauthorized();
+        if (patch is null) return BadRequest(new { error = "Patch body is required" });
+
+        var entity = await _db.ConversationStates.FindAsync(new object[] { conversationId }, ct);
+        if (entity is null) return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
+
+        var (concurrencyError, currentDraft) = CheckDraftConcurrency(entity.StateJson);
+        if (concurrencyError is not null)
+            return StatusCode(StatusCodes.Status412PreconditionFailed,
+                new { error = concurrencyError, current = currentDraft });
+
+        var merged = MergeDraftPatch(currentDraft ?? new OperatorDraft(), patch);
+        merged.UpdatedAtUtc = DateTime.UtcNow;
+        await WriteDraftAsync(entity, merged, ct);
+        return Ok(new { draft = merged });
+    }
+
+    /// <summary>
+    /// DELETE /api/admin/handoffs/{conversationId}/draft
+    /// Clears the operator draft. Idempotent — succeeds even when none exists.
+    /// </summary>
+    [HttpDelete("{conversationId}/draft")]
+    public async Task<IActionResult> DeleteDraft(string conversationId, CancellationToken ct)
+    {
+        if (!IsAuthorized()) return Unauthorized();
+        var entity = await _db.ConversationStates.FindAsync(new object[] { conversationId }, ct);
+        if (entity is null) return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
+
+        var dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(entity.StateJson ?? "{}", JsonOpts) ?? new();
+        var removed = dict.Remove("operatorDraft");
+        if (removed)
+        {
+            entity.StateJson = JsonSerializer.Serialize(dict, JsonOpts);
+            entity.UpdatedAtUtc = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+        return Ok(new { deleted = true, hadDraft = removed });
+    }
+
+    // ── Draft helpers (private) ──
+
+    private static OperatorDraft? ReadDraftFromStateJson(string? stateJson)
+    {
+        if (string.IsNullOrWhiteSpace(stateJson)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(stateJson);
+            if (doc.RootElement.TryGetProperty("operatorDraft", out var prop)
+                && prop.ValueKind == JsonValueKind.Object)
+                return prop.Deserialize<OperatorDraft>(JsonOpts);
+        }
+        catch { /* malformed JSON ⇒ treat as no draft */ }
+        return null;
+    }
+
+    private (string? error, OperatorDraft? current) CheckDraftConcurrency(string? stateJson)
+    {
+        var current = ReadDraftFromStateJson(stateJson);
+        if (!Request.Headers.TryGetValue("If-Match", out var hdr) || string.IsNullOrWhiteSpace(hdr))
+            return (null, current);
+
+        if (!DateTime.TryParse(hdr.ToString().Trim(), out var expected))
+            return ("If-Match header is not a valid ISO-8601 timestamp", current);
+
+        var currentTs = current?.UpdatedAtUtc;
+        if (currentTs is null)
+            return ("Draft does not exist on server (stale If-Match)", current);
+
+        if (Math.Abs((currentTs.Value - expected).TotalSeconds) > 1)
+            return ("Draft was updated by another session", current);
+
+        return (null, current);
+    }
+
+    private async Task WriteDraftAsync(ConversationState entity, OperatorDraft draft, CancellationToken ct)
+    {
+        var dict = JsonSerializer.Deserialize<Dictionary<string, object?>>(entity.StateJson ?? "{}", JsonOpts) ?? new();
+        dict["operatorDraft"] = draft;
+        entity.StateJson = JsonSerializer.Serialize(dict, JsonOpts);
+        entity.UpdatedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+    }
+
+    private static OperatorDraft MergeDraftPatch(OperatorDraft baseDraft, OperatorDraftPatchRequest patch)
+    {
+        return new OperatorDraft
+        {
+            // Items is special-cased: null in the patch means "leave alone";
+            // a non-null list (including []) replaces the current list outright.
+            Items               = patch.Items                ?? baseDraft.Items,
+            CustomerName        = patch.CustomerName         ?? baseDraft.CustomerName,
+            CustomerIdNumber    = patch.CustomerIdNumber     ?? baseDraft.CustomerIdNumber,
+            CustomerPhone       = patch.CustomerPhone        ?? baseDraft.CustomerPhone,
+            Address             = patch.Address              ?? baseDraft.Address,
+            DeliveryType        = patch.DeliveryType         ?? baseDraft.DeliveryType,
+            PaymentMethod       = patch.PaymentMethod        ?? baseDraft.PaymentMethod,
+            SpecialInstructions = patch.SpecialInstructions  ?? baseDraft.SpecialInstructions,
+            LocationText        = patch.LocationText         ?? baseDraft.LocationText,
+            ProofMediaId        = patch.ProofMediaId         ?? baseDraft.ProofMediaId,
+            // UpdatedAtUtc is always server-set on write — never accepted from the client.
+            UpdatedAtUtc        = baseDraft.UpdatedAtUtc
+        };
+    }
+
+    /// <summary>
+    /// PATCH body — every field is optional. Items is the only collection field;
+    /// null means "leave the existing list alone", a non-null list replaces it.
+    /// </summary>
+    public sealed class OperatorDraftPatchRequest
+    {
+        public List<OperatorDraftItem>? Items { get; set; }
+        public string? CustomerName { get; set; }
+        public string? CustomerIdNumber { get; set; }
+        public string? CustomerPhone { get; set; }
+        public string? Address { get; set; }
+        public string? DeliveryType { get; set; }
+        public string? PaymentMethod { get; set; }
+        public string? SpecialInstructions { get; set; }
+        public string? LocationText { get; set; }
+        public string? ProofMediaId { get; set; }
     }
 
     public sealed class ReplyRequest

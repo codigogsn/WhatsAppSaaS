@@ -54,6 +54,22 @@ public sealed class ConversationFields
     public DateTime? HumanHandoffAtUtc { get; set; }
     public int HumanHandoffNotifiedCount { get; set; }
 
+    // Set by /return-to-bot after a human-attention session that produced or
+    // resolved an order. The bot's next inbound check should skip the full
+    // greeting branch and acknowledge "tu pedido ya está siendo procesado".
+    // Cleared by ResetAfterConfirm so a fresh handoff cycle re-greets.
+    public bool HumanInterventionResolved { get; set; }
+
+    // Pointer to the Order created out of the operator's draft via a future
+    // /create-order handoff endpoint. Companion to LastOrderId — preserved
+    // through ResetAfterConfirm as a historical link, identical to LastOrderId.
+    public Guid? OrderCreatedByHumanId { get; set; }
+
+    // The operator's structured order draft for this conversation. Null when
+    // no draft exists. Replaced/cleared via the four /draft endpoints; never
+    // mutated by the bot.
+    public OperatorDraft? OperatorDraft { get; set; }
+
     // Human override: admin has actively taken over the conversation from the dashboard
     public bool HumanOverride { get; set; }
     public DateTime? HumanOverrideAtUtc { get; set; }
@@ -149,6 +165,12 @@ public sealed class ConversationFields
         HumanHandoffRequested = false;
         HumanHandoffAtUtc = null;
         HumanHandoffNotifiedCount = 0;
+        // Note: OrderCreatedByHumanId is NOT reset — kept as a historical
+        // pointer just like LastOrderId. HumanInterventionResolved IS reset so
+        // a future handoff cycle re-greets normally. OperatorDraft is reset
+        // because the draft has been promoted to a real Order at confirm time.
+        HumanInterventionResolved = false;
+        OperatorDraft = null;
         UpsellSent = false;
         ComboSuggestionSent = false;
         SuggestionDeclined = false;
@@ -243,4 +265,37 @@ public sealed class HumanChatEntry
     public string Kind { get; set; } = "text"; // "text" | "image" | "document"
     public string? MediaId { get; set; }
     public string? MimeType { get; set; }
+}
+
+/// <summary>
+/// Structured order the operator builds during a handoff. Lives on the same
+/// ConversationFields JSON blob as HumanChatLog so it shares the conversation
+/// scope, replication, and TTL. Independent of the bot's own checkout slots
+/// (Items / CustomerName / Address / etc) — those continue to feed the bot's
+/// flow if control returns to it.
+/// Materialised into a Domain.Entities.Order only by a future create-order
+/// endpoint that calls IOrderRepository.AddOrderAsync; commit 1 only persists
+/// the draft itself.
+/// </summary>
+public sealed class OperatorDraft
+{
+    public List<OperatorDraftItem> Items { get; set; } = new();
+    public string? CustomerName { get; set; }
+    public string? CustomerIdNumber { get; set; }
+    public string? CustomerPhone { get; set; }
+    public string? Address { get; set; }
+    public string? DeliveryType { get; set; }   // "delivery" | "pickup"
+    public string? PaymentMethod { get; set; }  // "pago_movil" | "zelle" | "divisas" | "cash" | "card" | …
+    public string? SpecialInstructions { get; set; }
+    public string? LocationText { get; set; }
+    public string? ProofMediaId { get; set; }   // resolves a HumanChatLog image bubble
+    public DateTime? UpdatedAtUtc { get; set; } // optimistic-concurrency token
+}
+
+public sealed class OperatorDraftItem
+{
+    public string Name { get; set; } = "";
+    public int Quantity { get; set; } = 1;
+    public decimal? UnitPrice { get; set; }
+    public string? Modifiers { get; set; }
 }
