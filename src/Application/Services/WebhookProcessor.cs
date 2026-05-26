@@ -381,13 +381,114 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
                             state.AwaitingPostConfirmProof = false;
 
-                            await SendAsync(new OutgoingMessage
+                            // P0 hotfix (Adriana incident, 2026-05-26 16:49 UTC):
+                            // Never tell the customer "Comprobante recibido. Tu pago quedó
+                            // pendiente de verificación." while no Order exists. That message
+                            // gave the false impression their pedido was placed when the bot
+                            // was actually still missing the cédula. Branching policy:
+                            //   • Order already exists (post-confirm or human-created) → keep
+                            //     the old confirmation, since the proof really IS attached to
+                            //     a real order.
+                            //   • Fashion vertical → unchanged for now; fashion finalize
+                            //     is a separate code path and will get the same treatment in
+                            //     a follow-up.
+                            //   • Default (restaurant, no order yet) → finalize NOW with the
+                            //     proof already in state. If finalize creates the order, send
+                            //     its receipt. If finalize blocks on missing fields, send the
+                            //     new Msg.ProofReceivedButPending listing the gaps. If finalize
+                            //     emits its own location-request, suppress the duplicate proof
+                            //     acknowledgement (customer was just asked for location).
+                            var hasExistingOrder = state.LastOrderId.HasValue
+                                || state.OrderCreatedByHumanId.HasValue;
+
+                            if (hasExistingOrder)
                             {
-                                To = message.From,
-                                Body = Msg.PaymentProofReceived,
-                                PhoneNumberId = phoneNumberId,
-                                AccessToken = businessContext.AccessToken
-                            }, businessContext.BusinessId, conversationId, cancellationToken);
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = Msg.PaymentProofReceived,
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+                            }
+                            else if (_verticalStrategy.HandlesOwnFlow)
+                            {
+                                // Fashion path stays on the legacy confirmation until the
+                                // fashion finalize gets the same gating in a follow-up.
+                                await SendAsync(new OutgoingMessage
+                                {
+                                    To = message.From,
+                                    Body = Msg.PaymentProofReceived,
+                                    PhoneNumberId = phoneNumberId,
+                                    AccessToken = businessContext.AccessToken
+                                }, businessContext.BusinessId, conversationId, cancellationToken);
+                            }
+                            else
+                            {
+                                // Restaurant pre-order proof. Try to finalize with the proof
+                                // already in state — either we land the real order + receipt,
+                                // or we surface the missing fields honestly.
+                                var orderIdBefore = state.LastOrderId;
+                                string? finalizeResult = null;
+                                try
+                                {
+                                    finalizeResult = await FinalizeOrderIfPossibleAsync(
+                                        state, message.From, phoneNumberId, businessContext, cancellationToken);
+                                }
+                                catch (Exception finEx)
+                                {
+                                    _logger.LogError(finEx,
+                                        "PROOF-TIME FINALIZE FAILED: conversationId={ConversationId} mediaId={MediaId}",
+                                        conversationId, mediaId);
+                                }
+
+                                var orderCreatedNow = state.LastOrderId.HasValue
+                                    && state.LastOrderId != orderIdBefore;
+
+                                if (orderCreatedNow && !string.IsNullOrWhiteSpace(finalizeResult))
+                                {
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = finalizeResult,
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
+                                else if (!string.IsNullOrWhiteSpace(finalizeResult))
+                                {
+                                    // Finalize blocked on Missing/Empty/Delivery. Send the
+                                    // new "proof captured + still pending" template instead
+                                    // of the old false-success copy.
+                                    var pendingMissing = BuildPendingFieldsList(state);
+                                    _logger.LogWarning(
+                                        "PROOF CAPTURED BUT ORDER NOT PERSISTED: " +
+                                        "conversationId={ConversationId} mediaId={MediaId} " +
+                                        "lastOrderId={LastOrderId} orderCreatedByHumanId={HumanOrderId} " +
+                                        "missing=[{Missing}]",
+                                        conversationId, mediaId,
+                                        state.LastOrderId, state.OrderCreatedByHumanId,
+                                        string.Join(",", pendingMissing));
+
+                                    await SendAsync(new OutgoingMessage
+                                    {
+                                        To = message.From,
+                                        Body = Msg.ProofReceivedButPending(pendingMissing),
+                                        PhoneNumberId = phoneNumberId,
+                                        AccessToken = businessContext.AccessToken
+                                    }, businessContext.BusinessId, conversationId, cancellationToken);
+                                }
+                                else
+                                {
+                                    // finalizeResult == null → finalize sent its own message
+                                    // (typically the location_request). Don't duplicate.
+                                    _logger.LogWarning(
+                                        "PROOF CAPTURED BUT ORDER NOT PERSISTED (location_request pending): " +
+                                        "conversationId={ConversationId} mediaId={MediaId} " +
+                                        "lastOrderId={LastOrderId}",
+                                        conversationId, mediaId, state.LastOrderId);
+                                }
+                            }
                         }
 
                         // Voice note fallback
@@ -2399,6 +2500,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 return v;
         }
         return null;
+    }
+
+    // Mirrors the missing-field predicate inside FinalizeOrderIfPossibleAsync
+    // so the proof-capture branch can produce a customer-visible list of
+    // pending slots WITHOUT re-running finalize for the sole purpose of
+    // discovering them. The bullet glyphs match the existing MissingFields
+    // template so the customer sees a consistent visual.
+    private static List<string> BuildPendingFieldsList(ConversationFields state)
+    {
+        var missing = new List<string>();
+        if (string.IsNullOrWhiteSpace(state.CustomerName))     missing.Add("• 👤 Nombre:");
+        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("• 🪪 Cédula:");
+        if (string.IsNullOrWhiteSpace(state.CustomerPhone))    missing.Add("• 📱 Teléfono:");
+        if (state.DeliveryType != "pickup" && string.IsNullOrWhiteSpace(state.Address))
+            missing.Add("• 🏡 Dirección:");
+        if (string.IsNullOrWhiteSpace(state.PaymentMethod))    missing.Add("• 💵 Pago:");
+        return missing;
     }
 
     // Builds a HumanChatLog entry for an inbound WhatsApp message, preserving
@@ -5838,6 +5956,28 @@ public sealed class WebhookProcessor : IWebhookProcessor
         var rawName = CleanFieldValue(GetLabeledValue("nombre"));
         form.CustomerName = rawName != null ? NormalizeDisplayName(rawName) : null;
         form.CustomerIdNumber = CleanFieldValue(GetLabeledValue("cedula"));
+        // P0 hotfix (Adriana incident, 2026-05-26): customers commonly write
+        // "CI", "C.I.", "C.I.:", "V-", "V." instead of the literal "Cédula:"
+        // label. When the "cedula" label misses, try those synonyms before
+        // falling through to Phase-2 inference (which used to misclassify
+        // "Ci 16556891" into the Address slot).
+        if (string.IsNullOrWhiteSpace(form.CustomerIdNumber))
+        {
+            foreach (var altLabel in new[] { "c.i.", "c.i", "ci", "v.", "v" })
+            {
+                var altRaw = GetLabeledValue(altLabel);
+                if (string.IsNullOrWhiteSpace(altRaw)) continue;
+                var altClean = CleanFieldValue(altRaw);
+                // Sanity-check: the captured value must contain a 6-9 digit
+                // run, otherwise something else hit the "v"/"ci" prefix
+                // (a name like "Vanessa", a brand, …).
+                if (altClean is not null && Regex.IsMatch(altClean, @"\d{6,9}"))
+                {
+                    form.CustomerIdNumber = altClean;
+                    break;
+                }
+            }
+        }
         form.CustomerPhone = CleanFieldValue(GetLabeledValue("telefono"));
         form.Address = CleanFieldValue(GetLabeledValue("direccion"));
         var payLabeled = GetLabeledValue("pago");
@@ -5890,12 +6030,24 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 continue;
             }
 
-            // ID detection: 6-10 digit number (not a phone)
+            // ID detection: 6-10 digit number (not a phone). Accepted shapes:
+            //   • bare digit run (e.g. "16556891")
+            //   • V/E/J/G prefix with optional "-"/"." (e.g. "V-16556891")
+            //   • CI / C.I. / Ci prefix with optional separator (e.g. "Ci 16556891")
+            //
+            // The CI variant was added in the Adriana hotfix — customers commonly
+            // type "Ci 16556891" without a colon, which the previous regex
+            // rejected, leading to the cédula being misclassified into the
+            // Address slot and the bot blocking finalize on a "missing cédula".
             if (form.CustomerIdNumber is null
                 && digitsOnly.Length >= 6 && digitsOnly.Length <= 10
-                && Regex.IsMatch(clean, @"^[VvEeJjGg]?[\-\.]?\d[\d\.\-]*$"))
+                && (Regex.IsMatch(clean, @"^[VvEeJjGg]?[\-\.]?\d[\d\.\-]*$")
+                    || Regex.IsMatch(clean, @"^[Cc]\.?[Ii]\.?[\s\:\-]+\d[\d\.\-]*$")))
             {
-                form.CustomerIdNumber = CleanFieldValue(clean);
+                // Strip a leading CI / C.I. / V-prefix so the stored value is
+                // canonical digits (downstream consumers don't carry the prefix).
+                var ciStripped = Regex.Replace(clean, @"^[Cc]\.?[Ii]\.?[\s\:\-]+", "");
+                form.CustomerIdNumber = CleanFieldValue(string.IsNullOrWhiteSpace(ciStripped) ? clean : ciStripped);
                 continue;
             }
 

@@ -265,6 +265,26 @@ internal static class Msg
         return sb.ToString();
     }
 
+    // Used when a customer sends payment proof BEFORE the order is finalised
+    // (e.g. missing c\u00e9dula). Replaces the previous misleading "Comprobante
+    // recibido. Tu pago qued\u00f3 pendiente de verificaci\u00f3n." that the bot used
+    // to send even when no Order existed yet. The customer now sees that
+    // their proof was captured AND that the order is still incomplete.
+    internal static string ProofReceivedButPending(IReadOnlyList<string> missing)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("\ud83d\udcf8 Recibimos tu comprobante, pero a\u00fan falta informaci\u00f3n para confirmar tu pedido:");
+        sb.AppendLine();
+        if (missing is { Count: > 0 })
+        {
+            foreach (var f in missing)
+                sb.AppendLine(f);
+            sb.AppendLine();
+        }
+        sb.Append("Por favor env\u00edanos los datos faltantes y luego presiona *Confirmar*.");
+        return sb.ToString();
+    }
+
     // ── GPS & payment evidence ──
 
     internal static string LocationRequestPrompt
