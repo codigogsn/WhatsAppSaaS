@@ -2427,7 +2427,8 @@
       display: grid;
       grid-template-columns: 280px 1fr;
       gap: 16px;
-      min-height: calc(100vh - 200px);
+      min-height: calc(100vh - 130px);
+      height: calc(100vh - 130px);
     }
     /* Three-column layout — adds the OperatorDraft viewer on the right.
        Activates only on wide screens so the transcript keeps room to breathe;
@@ -2443,7 +2444,8 @@
       border: 1px solid var(--border-light, var(--border));
       border-radius: var(--radius-sm, 8px);
       display: flex; flex-direction: column;
-      max-height: calc(100vh - 200px);
+      height: 100%;
+      max-height: calc(100vh - 130px);
       overflow: hidden;
     }
     #viewHandoff .hfc-queue-header {
@@ -2523,7 +2525,8 @@
       border: 1px solid var(--border-light, var(--border));
       border-radius: var(--radius-sm, 8px);
       display: flex; flex-direction: column;
-      max-height: calc(100vh - 200px);
+      height: 100%;
+      max-height: calc(100vh - 130px);
       overflow: hidden;
     }
     #viewHandoff .hfc-pane-header {
@@ -2737,7 +2740,8 @@
       border-radius: var(--radius-sm, 8px);
       display: none;
       flex-direction: column;
-      max-height: calc(100vh - 200px);
+      height: 100%;
+      max-height: calc(100vh - 130px);
       overflow: hidden;
     }
     @media (min-width: 1280px) {
@@ -2816,6 +2820,16 @@
     #viewHandoff .hfc-op-totals .is-grand dt,
     #viewHandoff .hfc-op-totals .is-grand dd {
       font-weight: 700; color: var(--text);
+    }
+    #viewHandoff .hfc-op-totals dd.is-loading {
+      color: var(--muted); font-style: italic;
+    }
+    #viewHandoff .hfc-op-stale-tag {
+      font-size: 10px; color: #b45309;
+      background: rgba(245,158,11,.12);
+      padding: 1px 6px; border-radius: 6px;
+      margin-left: 6px; font-weight: 600;
+      letter-spacing: .02em;
     }
     #viewHandoff .hfc-op-proof {
       font-size: 12px; color: var(--muted);
@@ -5685,15 +5699,21 @@ document.addEventListener('click', function(e){
 function _handoffComposerPrefill(){
   var businessName = _handoffResolveBusinessName();
   var headline = _handoffComposerHeadline(businessName);
-  return 'Para agilizar el proceso, y poder enviar a nuestro repartidor correctamente por favor envíenos lo siguiente:\n\n'
-       + (headline ? headline + '\n' : '')
+  // New intake template (commit 4B-2). Character-perfect: the stylistic
+  // inconsistencies — phone line with no trailing colon/asterisk, the
+  // address closing-asterisk after the colon, the payment colon inside
+  // the asterisks, the trailing NOTAS section — are intentional and
+  // match the customer-facing template La Mina hands out today.
+  return 'Para agilizar el proceso (COPIA Y PEGA), para poder enviar a nuestro repartidor correctamente por favor envíenos lo siguiente:\n\n'
+       + (headline ? headline + '\n\n' : '')
        + '👤 *Nombre y apellido*:\n'
        + '🪪 *Cédula de identidad*:\n'
-       + '📱 *Número de teléfono celular*:\n'
-       + '🏡 *Dirección escrita (Nombre de residencia, calle y N° apto/casa)*:\n'
+       + '📱 *Número de teléfono celular*\n'
+       + '🏡 *Dirección escrita  (Nombre de residencia, calle y N° apto/casa):*\n'
        + '📝 *Pedido*:\n'
-       + '📦 *¿Recibe usted mismo/a?*:\n'
-       + '💵 *Forma de Pago*:';
+       + '📦 *Tipo de entrega? (pick up / delivery)*:\n'
+       + '💵 *Forma de Pago:*\n\n'
+       + 'NOTAS/OBSERVACIONES DEL PEDIDO:';
 }
 
 // Resolves the business name for the currently-selected conversation by
@@ -5808,6 +5828,15 @@ function _handoffPaintOrderPanel(h){
   if (emptyEl) emptyEl.remove();
 
   body.innerHTML = _handoffOpRenderBody(h, draft);
+
+  // Server-driven totals fetch (commit 4B-2). The renderer above used the
+  // in-memory cache to draw a placeholder; this kicks the network request
+  // that will re-paint when the response lands. The fetch is keyed by the
+  // draft's updatedAtUtc so we don't re-fetch on every poll tick.
+  _handoffOpEnsureTotals(h.conversationId, draft.updatedAtUtc || '');
+  // Once totals come back complete, the auto-fetch chains into the message
+  // preview so the operator finds it ready in the textarea.
+  _handoffOpMaybeAutoFetchMessage(h.conversationId);
 }
 
 function _handoffOpRenderBody(h, d){
@@ -5917,31 +5946,174 @@ function _handoffOpRenderItems(items){
   return html + '</div>';
 }
 
+// Server-authoritative totals. Reads from window._handoffOrderTotals[cid]
+// (populated by _handoffOpEnsureTotals). While the fetch is in flight we
+// render a light client-side subtotal as a placeholder so the section isn't
+// blank; delivery / total stay "…" until the server responds so the
+// operator never sees an inaccurate USD/Bs preview.
 function _handoffOpRenderTotals(d){
-  var items = d.items || [];
-  var subtotal = 0;
-  var hasAllPrices = true;
-  for (var i = 0; i < items.length; i++){
-    var it = items[i];
-    if (typeof it.unitPrice === 'number' && it.unitPrice > 0){
-      subtotal += it.unitPrice * (it.quantity || 0);
-    } else {
-      hasAllPrices = false;
+  var cid = window._handoffSelectedCid;
+  var server = (cid && window._handoffOrderTotals) ? window._handoffOrderTotals[cid] : null;
+  var hasServerNumbers = server && !server.pending && !server.error && typeof server.totalUsd === 'number';
+
+  if (!hasServerNumbers){
+    // Light placeholder while loading. Subtotal is computed locally as a
+    // best-effort hint; delivery + total show "…" since the server owns the
+    // delivery-fee constant and any future per-business override.
+    var items = d.items || [];
+    var sub = 0;
+    var hasAllPrices = items.length > 0;
+    for (var i = 0; i < items.length; i++){
+      var it = items[i];
+      if (typeof it.unitPrice === 'number' && it.unitPrice > 0)
+        sub += it.unitPrice * (it.quantity || 0);
+      else hasAllPrices = false;
     }
+    return ''
+      + '<dl class="hfc-op-totals">'
+      +   '<dt>Subtotal</dt><dd>' + (hasAllPrices ? '$' + sub.toFixed(2) : '—') + '</dd>'
+      +   '<dt>Delivery</dt><dd class="is-loading">…</dd>'
+      +   '<dt class="is-grand">Total</dt><dd class="is-grand is-loading">…</dd>'
+      + '</dl>';
   }
-  // Delivery-fee preview: only when deliveryType=delivery AND at least one priced item.
-  // Authoritative fee comes from server at order-creation time; this is a client hint.
-  var fee = (d.deliveryType === 'delivery' && items.length > 0 && hasAllPrices) ? 4.00 : 0;
-  var total = subtotal + fee;
+
+  var subtotal = server.subtotal || 0;
+  var fee      = server.deliveryFee || 0;
+  var totalUsd = server.totalUsd || 0;
+  var totalBs  = (typeof server.totalBs === 'number') ? server.totalBs : null;
+  var rateLbl  = server.rateLabel || 'USD';
+  var stale    = !!server.isStaleRate;
+
+  var bsRow = '';
+  if (totalBs !== null){
+    var bsTxt = totalBs.toLocaleString('es-VE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    var staleSpan = stale ? ' <span class="hfc-op-stale-tag">tasa anterior</span>' : '';
+    bsRow = '<dt>Bs (BCV ' + esc(rateLbl) + ')</dt><dd>Bs. ' + esc(bsTxt) + staleSpan + '</dd>';
+  }
 
   return ''
     + '<dl class="hfc-op-totals">'
-    +   '<dt>Subtotal</dt><dd>' + (hasAllPrices ? '$' + subtotal.toFixed(2) : '—') + '</dd>'
+    +   '<dt>Subtotal</dt><dd>' + (subtotal > 0 ? '$' + subtotal.toFixed(2) : '—') + '</dd>'
     +   '<dt>Delivery</dt><dd>' + (fee > 0 ? '$' + fee.toFixed(2) : '—') + '</dd>'
-    +   '<dt class="is-grand">Total</dt><dd class="is-grand">'
-    +     (hasAllPrices ? '$' + total.toFixed(2) : '—')
+    +   '<dt class="is-grand">Total USD</dt><dd class="is-grand">'
+    +     (totalUsd > 0 ? '$' + totalUsd.toFixed(2) : '—')
     +   '</dd>'
+    +   bsRow
     + '</dl>';
+}
+
+// ── Server totals cache + fetch ─────────────────────────────────────────────
+// Keyed by conversationId. Refetched only when the draft's updatedAtUtc
+// changes — a single fetch per draft revision per session. Cache survives
+// conversation switches.
+window._handoffOrderTotals  = window._handoffOrderTotals  || {};
+window._handoffOrderMessage = window._handoffOrderMessage || {};
+
+function _handoffOpEnsureTotals(cid, draftKey){
+  if (!cid) return;
+  var cached = window._handoffOrderTotals[cid];
+  if (cached && cached.fetchedFor === draftKey && !cached.error) return;
+  if (cached && cached.pending && cached.requestedFor === draftKey) return;
+
+  window._handoffOrderTotals[cid] = Object.assign({}, cached || {}, {
+    pending: true,
+    requestedFor: draftKey
+  });
+
+  authFetch('/api/admin/handoffs/' + encodeURIComponent(cid) + '/draft/totals', { cache: 'no-store' })
+    .then(function(res){ return res.ok ? res.json() : Promise.reject(new Error('http ' + res.status)); })
+    .then(function(data){
+      window._handoffOrderTotals[cid] = Object.assign({}, data, {
+        pending: false,
+        fetchedFor: draftKey,
+        error: false
+      });
+      // Re-paint just the order panel (cheap; ~20 DOM nodes). Composer is
+      // not rebuilt — operator's typing is never touched.
+      if (window._handoffSelectedCid === cid){
+        var h = _handoffFindSelected();
+        if (h) _handoffPaintOrderPanel(h);
+      }
+    })
+    .catch(function(){
+      window._handoffOrderTotals[cid] = {
+        pending: false,
+        fetchedFor: draftKey,
+        error: true
+      };
+    });
+}
+
+// When totals report isComplete=true, fetch the preview-message body once
+// per draft revision. Lands the composed message into the textarea so the
+// operator only needs to click "Copiar al composer" + press Send.
+function _handoffOpMaybeAutoFetchMessage(cid){
+  if (!cid) return;
+  var t = window._handoffOrderTotals[cid];
+  if (!t || !t.isComplete) return;
+  var h = _handoffFindSelected();
+  if (!h || !h.operatorDraft) return;
+  var draftKey = h.operatorDraft.updatedAtUtc || '';
+
+  var cached = window._handoffOrderMessage[cid];
+  if (cached && cached.fetchedFor === draftKey && !cached.error) {
+    _handoffOpApplyMessageToUi(cached);
+    return;
+  }
+  if (cached && cached.pending && cached.requestedFor === draftKey) return;
+
+  window._handoffOrderMessage[cid] = Object.assign({}, cached || {}, {
+    pending: true,
+    requestedFor: draftKey
+  });
+
+  authFetch('/api/admin/handoffs/' + encodeURIComponent(cid) + '/draft/preview-message', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: '{}'
+  })
+    .then(function(res){
+      if (res.status === 422) return null;
+      return res.ok ? res.json() : null;
+    })
+    .then(function(body){
+      if (!body || !body.message){
+        window._handoffOrderMessage[cid] = { pending: false, fetchedFor: draftKey };
+        return;
+      }
+      window._handoffOrderMessage[cid] = {
+        pending: false,
+        fetchedFor: draftKey,
+        message: body.message,
+        hasPagoMobileConfig: body.hasPagoMobileConfig === true,
+        error: false
+      };
+      if (window._handoffSelectedCid === cid)
+        _handoffOpApplyMessageToUi(window._handoffOrderMessage[cid]);
+    })
+    .catch(function(){
+      window._handoffOrderMessage[cid] = {
+        pending: false,
+        fetchedFor: draftKey,
+        error: true
+      };
+    });
+}
+
+// Writes the cached message into the textarea + enables Copy-to-composer.
+// Surfaces the pago-móvil-config soft warning when applicable. Operator
+// always remains in control — message is never auto-sent.
+function _handoffOpApplyMessageToUi(cached){
+  if (!cached || !cached.message) return;
+  var ta = document.getElementById('hfcOpMsgText');
+  if (ta) ta.value = cached.message;
+  var copyBtn = document.getElementById('hfcOpMsgCopy');
+  if (copyBtn) copyBtn.disabled = !cached.message;
+  if (cached.hasPagoMobileConfig === false && typeof showToast === 'function'
+      && !cached.warnedNoPagoMobile){
+    cached.warnedNoPagoMobile = true;
+    showToast('Datos de Pago Móvil no configurados — añadirlos manualmente.', 'info');
+  }
 }
 
 // ── Mensaje para el cliente — message preview + copy-to-composer ───────────
