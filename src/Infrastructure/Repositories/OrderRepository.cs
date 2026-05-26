@@ -162,8 +162,24 @@ public sealed class OrderRepository : IOrderRepository
                 "ORDER SAVE: IX_Orders_ActivePending conflict — BusinessId={BusinessId} From={From} " +
                 "PhoneNumberId={PhoneNumberId}; reusing existing Pending order",
                 order.BusinessId, order.From, order.PhoneNumberId);
+
+            // Snapshot incoming.Items BEFORE DetachOrderEntities. EF Core 8 relationship
+            // fixup empties the parent Order's nav collection when its tracked OrderItem
+            // children are detached, which corrupted production order bb93fb41 (incoming
+            // arrived with 1 item, reuse logged newItems=0, the existing row was rewritten
+            // to Items=[], Sub=0, Total=DeliveryFee only). The snapshot is the kill switch.
+            var incomingSnapshot = order.Items
+                .Select(i => new OrderItem
+                {
+                    Name = i.Name,
+                    Quantity = i.Quantity,
+                    UnitPrice = i.UnitPrice,
+                    LineTotal = i.LineTotal
+                })
+                .ToList();
+
             DetachOrderEntities();
-            return await ReuseExistingPendingOrderAsync(order, ct);
+            return await ReuseExistingPendingOrderAsync(order, incomingSnapshot, ct);
         }
         catch (DbUpdateException dbEx)
         {
@@ -224,10 +240,16 @@ public sealed class OrderRepository : IOrderRepository
     /// <summary>
     /// Part B1 — reuse path. An active Pending order already exists for this
     /// (BusinessId, From, PhoneNumberId); update it in place from <paramref name="incoming"/>
-    /// (cart/items, location, payment fields, totals) instead of inserting a duplicate,
-    /// and return it so the caller's finalize flow continues against the real order.
+    /// (customer/payment/location fields, totals) and <paramref name="incomingItems"/>
+    /// (a snapshot of the cart captured BEFORE DetachOrderEntities ran, since EF Core's
+    /// nav-collection fixup empties incoming.Items when its children are detached first).
+    /// Returns the persisted existing order so the caller's finalize flow continues
+    /// against the real row.
     /// </summary>
-    private async Task<Order> ReuseExistingPendingOrderAsync(Order incoming, CancellationToken ct)
+    private async Task<Order> ReuseExistingPendingOrderAsync(
+        Order incoming,
+        IReadOnlyList<OrderItem> incomingItems,
+        CancellationToken ct)
     {
         // Reuse is scoped to the SAME business — multi-business isolation preserved.
         var existing = await _db.Orders
@@ -249,18 +271,37 @@ public sealed class OrderRepository : IOrderRepository
                 "IX_Orders_ActivePending conflict but no existing Pending order could be loaded for reuse.");
         }
 
+        // Kill switch: refuse to merge an empty / zero-subtotal cart into a previously
+        // valid Pending order. Without this guard, the EF fixup loss would silently
+        // rewrite a healthy order down to Items=[], Sub=0, Total=DeliveryFee (the
+        // exact signature of production incident bb93fb41). The repository must
+        // never persist a malformed reuse — let the caller surface a retry message.
+        var snapshotSubtotal = incomingItems.Sum(i => (i.UnitPrice ?? 0m) * i.Quantity);
+        if (incomingItems.Count == 0 || snapshotSubtotal <= 0m)
+        {
+            _logger.LogError(
+                "ORDER REUSE REJECTED: empty or zero-subtotal incoming cart — " +
+                "existingId={ExistingId} rejectedAttemptId={AttemptId} BusinessId={BusinessId} " +
+                "From={From} snapshotItems={NewItems} snapshotSubtotal={NewSub}",
+                existing.Id, incoming.Id, existing.BusinessId, existing.From,
+                incomingItems.Count, snapshotSubtotal);
+            DetachOrderEntities();
+            throw new InvalidOperationException(
+                "Cannot merge an empty or zero-subtotal cart into an existing Pending order.");
+        }
+
         _logger.LogInformation(
             "ORDER REUSED: existingId={ExistingId} rejectedAttemptId={AttemptId} BusinessId={BusinessId} " +
             "From={From} oldTotal={OldTotal} oldItems={OldItems} newItems={NewItems}",
             existing.Id, incoming.Id, existing.BusinessId, existing.From,
-            existing.TotalAmount ?? 0m, existing.Items.Count, incoming.Items.Count);
+            existing.TotalAmount ?? 0m, existing.Items.Count, incomingItems.Count);
 
         var oldTotal = existing.TotalAmount ?? 0m;
 
-        // ── Replace cart / items ──
+        // ── Replace cart / items (iterate the SNAPSHOT, not incoming.Items) ──
         _db.OrderItems.RemoveRange(existing.Items.ToList());
         existing.Items.Clear();
-        foreach (var i in incoming.Items)
+        foreach (var i in incomingItems)
         {
             existing.Items.Add(new OrderItem
             {
@@ -307,6 +348,28 @@ public sealed class OrderRepository : IOrderRepository
         // ── Totals ──
         existing.DeliveryFee = incoming.DeliveryFee;
         existing.RecalculateTotal();
+
+        // Structural validation after merge — last line of defense against an
+        // entity-level inconsistency producing a ghost order. Mirrors the
+        // TotalAmount > 0 guard at AddOrderAsync line ~89 (new-row path), but
+        // tightened: the reuse path must also enforce Items>0, Subtotal>0,
+        // and Total strictly greater than DeliveryFee. The third clause is
+        // the precise signature of the production incident (Total == Fee).
+        var mergedItemCount = existing.Items.Count;
+        var mergedSubtotal  = existing.SubtotalAmount ?? 0m;
+        var mergedTotal     = existing.TotalAmount ?? 0m;
+        var mergedFee       = existing.DeliveryFee ?? 0m;
+        if (mergedItemCount == 0 || mergedSubtotal <= 0m || mergedTotal <= mergedFee)
+        {
+            _logger.LogError(
+                "ORDER REUSE REJECTED: structurally invalid merge — existingId={ExistingId} " +
+                "items={Items} sub={Sub} fee={Fee} total={Total}",
+                existing.Id, mergedItemCount, mergedSubtotal, mergedFee, mergedTotal);
+            DetachOrderEntities();
+            throw new InvalidOperationException(
+                "Reused order would be structurally invalid: " +
+                $"items={mergedItemCount}, subtotal={mergedSubtotal}, total={mergedTotal}, fee={mergedFee}.");
+        }
 
         try
         {

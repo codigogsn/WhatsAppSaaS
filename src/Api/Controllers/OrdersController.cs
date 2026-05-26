@@ -396,6 +396,56 @@ public sealed class OrdersController : ControllerBase
                 });
             }
 
+            // Ghost-order kill switch: block non-Cancelled forward transitions on
+            // structurally invalid orders. Cancelled is always allowed so operators
+            // can clean up malformed rows without being trapped. Mirrors the same
+            // triple-check used by VerifyPayment so a corrupt order cannot advance
+            // through the lifecycle (the production incident bb93fb41 walked from
+            // Pending → Preparing → OutForDelivery → Completed with 0 items).
+            if (!string.Equals(newStatus, "Cancelled", StringComparison.OrdinalIgnoreCase))
+            {
+                using (var checkCmd = conn.CreateCommand())
+                {
+                    checkCmd.CommandText = """
+                        SELECT
+                          (SELECT COUNT(*) FROM "OrderItems" WHERE "OrderId" = @oid) AS "ItemCount",
+                          COALESCE("SubtotalAmount", 0) AS "Sub",
+                          COALESCE("DeliveryFee", 0)    AS "Fee",
+                          COALESCE("TotalAmount", 0)    AS "Total"
+                        FROM "Orders" WHERE "Id" = @oid LIMIT 1
+                    """;
+                    AddP(checkCmd, "oid", id);
+
+                    int itemCount = 0;
+                    decimal sub = 0m, fee = 0m, total = 0m;
+                    using var rr = await checkCmd.ExecuteReaderAsync();
+                    if (await rr.ReadAsync())
+                    {
+                        itemCount = Convert.ToInt32(rr["ItemCount"]);
+                        sub = Convert.ToDecimal(rr["Sub"]);
+                        fee = Convert.ToDecimal(rr["Fee"]);
+                        total = Convert.ToDecimal(rr["Total"]);
+                    }
+
+                    if (itemCount == 0 || sub <= 0m || total <= fee)
+                    {
+                        _logger.LogWarning(
+                            "UPDATE STATUS REJECTED: structurally invalid order {OrderId} — " +
+                            "requested={Requested} items={Items} sub={Sub} fee={Fee} total={Total}",
+                            id, newStatus, itemCount, sub, fee, total);
+                        return UnprocessableEntity(new
+                        {
+                            error = "No se puede actualizar el estado: el pedido no tiene productos o su monto no es válido.",
+                            requestedStatus = newStatus,
+                            items = itemCount,
+                            subtotal = sub,
+                            deliveryFee = fee,
+                            total
+                        });
+                    }
+                }
+            }
+
             // Step 2: Update status with optimistic concurrency guard
             using (var updCmd = conn.CreateCommand())
             {
@@ -527,6 +577,30 @@ public sealed class OrdersController : ControllerBase
         if (scopeBizIds is not null &&
             (!order.BusinessId.HasValue || !scopeBizIds.Contains(order.BusinessId.Value)))
             return NotFound(new { error = "Order not found" });
+
+        // Ghost-order kill switch: refuse to verify a structurally invalid order.
+        // Production incident bb93fb41 was verified at $4 / 0 items / $0 subtotal
+        // (Total == DeliveryFee). All three clauses must hold for an order to be
+        // verifiable. Items count is read via a scoped query because the loaded
+        // entity above does not Include(o => o.Items).
+        var itemCount = await _context.OrderItems.CountAsync(x => x.OrderId == order.Id);
+        var subtotal = order.SubtotalAmount ?? 0m;
+        var fee      = order.DeliveryFee ?? 0m;
+        var total    = order.TotalAmount ?? 0m;
+        if (itemCount == 0 || subtotal <= 0m || total <= fee)
+        {
+            _logger.LogWarning(
+                "VERIFY PAYMENT REJECTED: structurally invalid order {OrderId} — items={Items} sub={Sub} fee={Fee} total={Total}",
+                order.Id, itemCount, subtotal, fee, total);
+            return UnprocessableEntity(new
+            {
+                error = "No se puede verificar el pago: el pedido no tiene productos o su monto no es válido.",
+                items = itemCount,
+                subtotal,
+                deliveryFee = fee,
+                total
+            });
+        }
 
         order.PaymentVerifiedAtUtc = DateTime.UtcNow;
         order.PaymentVerifiedBy = "dashboard";
