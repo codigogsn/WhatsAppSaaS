@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using WhatsAppSaaS.Application.Common;
 using WhatsAppSaaS.Application.Interfaces;
 using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Domain.Entities;
@@ -23,6 +24,8 @@ public class AdminHandoffsController : ControllerBase
     private readonly IConfiguration _config;
     private readonly IWhatsAppClient _whatsAppClient;
     private readonly IExchangeRateProvider _exchangeRateProvider;
+    private readonly IOrderRepository _orderRepository;
+    private readonly INotificationService _notificationService;
     private readonly ILogger<AdminHandoffsController> _logger;
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -31,12 +34,16 @@ public class AdminHandoffsController : ControllerBase
         IConfiguration config,
         IWhatsAppClient whatsAppClient,
         IExchangeRateProvider exchangeRateProvider,
+        IOrderRepository orderRepository,
+        INotificationService notificationService,
         ILogger<AdminHandoffsController> logger)
     {
         _db = db;
         _config = config;
         _whatsAppClient = whatsAppClient;
         _exchangeRateProvider = exchangeRateProvider;
+        _orderRepository = orderRepository;
+        _notificationService = notificationService;
         _logger = logger;
     }
 
@@ -914,6 +921,324 @@ public class AdminHandoffsController : ControllerBase
             hasPagoMobileConfig = eval.HasPagoMobileConfig
         });
     }
+
+    /// <summary>
+    /// POST /api/admin/handoffs/{conversationId}/create-order
+    /// Promotes a structurally-valid OperatorDraft into a real Order via the
+    /// canonical IOrderRepository.AddOrderAsync path — the SAME persistence the
+    /// bot's checkout uses. Idempotent: a second call after success returns 409
+    /// with the existing orderId. Side effects in order:
+    ///   1. Validate draft via EvaluateDraftAsync (same as PreviewDraftMessage).
+    ///   2. Build Domain.Entities.Order from the draft + conversation context.
+    ///   3. Persist via IOrderRepository.AddOrderAsync (structural guards from
+    ///      commit 3394329 apply — IX_Orders_ActivePending reuse, snapshot
+    ///      protection, customer upsert + analytics).
+    ///   4. Mutate conversation state: OrderCreatedByHumanId + LastOrderId set;
+    ///      AwaitingPostConfirmProof set for pago_movil/divisas/zelle without
+    ///      a proof yet; OperatorDraft cleared; HumanChatLog gets the receipt.
+    ///   5. Send the same Msg.BuildReceipt copy the bot sends — customers
+    ///      cannot tell the difference between a bot-driven and human-driven
+    ///      order from the WhatsApp side.
+    ///   6. NotifyOrderConfirmedAsync to the business's staff channel.
+    /// </summary>
+    [HttpPost("{conversationId}/create-order")]
+    public async Task<IActionResult> CreateOrderFromDraft(string conversationId, CancellationToken ct)
+    {
+        if (!IsAuthorized()) return Unauthorized();
+
+        var entity = await _db.ConversationStates.FindAsync(new object[] { conversationId }, ct);
+        if (entity is null) return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
+
+        // Deserialize the typed conversation fields. We mutate this object,
+        // re-serialize into entity.StateJson, and SaveChangesAsync — the same
+        // round-trip pattern ConversationStateStore.SaveAsync uses inside the
+        // bot pipeline (so the format stays consistent across writers).
+        ConversationFields fields;
+        try
+        {
+            fields = JsonSerializer.Deserialize<ConversationFields>(entity.StateJson ?? "{}", JsonOpts)
+                     ?? new ConversationFields();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "CreateOrderFromDraft: malformed StateJson for {ConversationId}", conversationId);
+            return StatusCode(500, new { error = "Estado de conversación corrupto." });
+        }
+
+        // ── Idempotency ─────────────────────────────────────────────────────
+        // A second click after success returns the existing orderId rather
+        // than producing a duplicate row. Frontend disables the button on
+        // first success, but a network retry or double-click race lands here.
+        if (fields.OrderCreatedByHumanId is { } existingId)
+        {
+            return Conflict(new
+            {
+                error = "Ya se procesó un pedido para esta conversación.",
+                orderId = existingId,
+                orderNumber = FormatOrderNumber(existingId)
+            });
+        }
+
+        // ── Validate ────────────────────────────────────────────────────────
+        var eval = await EvaluateDraftAsync(entity, ct);
+        if (eval is null)
+        {
+            return UnprocessableEntity(new
+            {
+                ok = false,
+                error = "No hay borrador para esta conversación.",
+                missing = new[] { "draft" },
+                unpriced = Array.Empty<string>()
+            });
+        }
+        if (!eval.IsComplete)
+        {
+            return UnprocessableEntity(new
+            {
+                ok = false,
+                error = "El borrador no está completo para procesar el pedido.",
+                missing = eval.Missing,
+                unpriced = eval.Unpriced
+            });
+        }
+
+        // ── Build Order ─────────────────────────────────────────────────────
+        var parts = conversationId.Split(':');
+        if (parts.Length < 2)
+            return BadRequest(new { error = "Invalid conversationId format" });
+        var customerFrom = parts[0];
+        var phoneNumberId = parts[1];
+
+        var draft = eval.Draft;
+        var biz = eval.Business;
+        var nowUtc = DateTime.UtcNow;
+
+        // Prefer the operator-curated ProofMediaId on the draft; fall back to
+        // the state-level PaymentProofMediaId captured by the bot's media path.
+        var proofMediaId = !string.IsNullOrWhiteSpace(draft.ProofMediaId)
+            ? draft.ProofMediaId
+            : fields.PaymentProofMediaId;
+
+        var order = new Order
+        {
+            BusinessId          = entity.BusinessId,
+            From                = customerFrom,
+            PhoneNumberId       = phoneNumberId,
+            DeliveryType        = draft.DeliveryType!,
+            CreatedAtUtc        = nowUtc,
+
+            CustomerName        = draft.CustomerName,
+            CustomerIdNumber    = draft.CustomerIdNumber,
+            CustomerPhone       = draft.CustomerPhone,
+            Address             = draft.Address,
+            PaymentMethod       = draft.PaymentMethod,
+            LocationText        = draft.LocationText,
+            SpecialInstructions = draft.SpecialInstructions,
+
+            CheckoutCompleted      = true,
+            CheckoutCompletedAtUtc = nowUtc,
+            CheckoutFormSent       = true,
+
+            PaymentProofMediaId        = proofMediaId,
+            PaymentProofSubmittedAtUtc = !string.IsNullOrWhiteSpace(proofMediaId) ? nowUtc : (DateTime?)null,
+
+            Items = (draft.Items ?? new()).Select(i => new OrderItem
+            {
+                Name      = string.IsNullOrWhiteSpace(i.Modifiers) ? i.Name : $"{i.Name} ({i.Modifiers})",
+                Quantity  = i.Quantity,
+                UnitPrice = i.UnitPrice ?? 0m,
+                LineTotal = (i.UnitPrice ?? 0m) * i.Quantity
+            }).ToList(),
+
+            // Authoritative delivery fee from the server (no client-supplied value).
+            DeliveryFee = eval.DeliveryFee
+        };
+        // RecalculateTotal sums items × prices and adds DeliveryFee — same
+        // as the bot's flow. Idempotent if called again later.
+        order.RecalculateTotal();
+
+        // ── Persist ─────────────────────────────────────────────────────────
+        Order persisted;
+        try
+        {
+            persisted = await _orderRepository.AddOrderAsync(order, ct);
+        }
+        catch (InvalidOperationException invOpEx)
+        {
+            // AddOrderAsync's TotalAmount > 0 guard or ReuseExistingPendingOrderAsync's
+            // structural guard rejected the order. Surface as 422 so the panel can
+            // tell the operator what to fix.
+            _logger.LogWarning(invOpEx,
+                "CreateOrderFromDraft: structural rejection for {ConversationId}", conversationId);
+            return UnprocessableEntity(new
+            {
+                ok = false,
+                error = invOpEx.Message,
+                missing = new[] { "total" },
+                unpriced = Array.Empty<string>()
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "CreateOrderFromDraft: order persistence failed for {ConversationId}", conversationId);
+            return StatusCode(500, new { error = "No se pudo persistir el pedido. Intenta de nuevo." });
+        }
+
+        var orderNumber = FormatOrderNumber(persisted.Id);
+
+        // ── Mutate state ────────────────────────────────────────────────────
+        fields.OrderCreatedByHumanId = persisted.Id;
+        fields.LastOrderId           = persisted.Id;
+
+        // Post-confirm proof capture: when the payment method requires evidence
+        // and no proof was attached at creation time, leave the conversation in
+        // a state where the next inbound image attaches to this order — same
+        // semantics the bot uses at WebhookProcessor.cs:2761.
+        if (persisted.PaymentMethod is "pago_movil" or "divisas" or "zelle"
+            && string.IsNullOrWhiteSpace(persisted.PaymentProofMediaId))
+        {
+            fields.AwaitingPostConfirmProof = true;
+        }
+
+        // The draft has been consumed.
+        fields.OperatorDraft = null;
+
+        // Visible audit trail in the operator's chatLog.
+        fields.HumanChatLog ??= new List<HumanChatEntry>();
+        fields.HumanChatLog.Add(new HumanChatEntry
+        {
+            Sender = "bot",
+            Text   = $"✅ Pedido #{orderNumber} creado.",
+            Kind   = "text",
+            At     = nowUtc
+        });
+        if (fields.HumanChatLog.Count > 50)
+            fields.HumanChatLog = fields.HumanChatLog.Skip(fields.HumanChatLog.Count - 50).ToList();
+
+        // Persist the mutated state. AddOrderAsync already SaveChangesAsync'd
+        // the Order; this is a separate write on the ConversationState row.
+        entity.StateJson = JsonSerializer.Serialize(fields, JsonOpts);
+        entity.UpdatedAtUtc = nowUtc;
+        await _db.SaveChangesAsync(ct);
+
+        // ── Customer receipt (same template the bot's checkout sends) ───────
+        var receipt = HandoffMessageBuilder.BuildReceipt(
+            orderNumber:          orderNumber,
+            customerName:         draft.CustomerName ?? "",
+            customerIdNumber:     draft.CustomerIdNumber ?? "",
+            customerPhone:        draft.CustomerPhone ?? customerFrom,
+            items:                (draft.Items ?? new()).Select(i => new ConversationItemEntry
+                                  {
+                                      Name = i.Name ?? "",
+                                      Quantity = i.Quantity,
+                                      Modifiers = i.Modifiers,
+                                      UnitPrice = i.UnitPrice ?? 0m
+                                  }).ToList(),
+            specialInstructions:  draft.SpecialInstructions,
+            address:              draft.Address ?? "",
+            paymentText:          HandoffMessageBuilder.PaymentMethodText(draft.PaymentMethod),
+            deliveryType:         draft.DeliveryType ?? "",
+            bcvRate:              eval.BcvRate,
+            paymentMethod:        draft.PaymentMethod,
+            paymentProofReceived: !string.IsNullOrWhiteSpace(proofMediaId));
+
+        // Per-business WhatsApp access token resolution — same precedence the
+        // existing Reply / VerifyPayment endpoints use. Fall back to env so
+        // older single-tenant configs continue to work.
+        string? accessToken = biz?.AccessToken
+            ?? Environment.GetEnvironmentVariable("WHATSAPP_ACCESS_TOKEN")
+            ?? Environment.GetEnvironmentVariable("META_ACCESS_TOKEN");
+
+        bool customerNotified = false;
+        try
+        {
+            customerNotified = await _whatsAppClient.SendTextMessageAsync(new OutgoingMessage
+            {
+                To            = customerFrom,
+                Body          = receipt,
+                PhoneNumberId = phoneNumberId,
+                AccessToken   = accessToken
+            }, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "CreateOrderFromDraft: customer receipt send failed for order {OrderId}", persisted.Id);
+        }
+
+        // Append the actual receipt body to the operator transcript so the
+        // operator can see what the customer just received. Best-effort —
+        // if the chatLog write fails it doesn't roll back the order.
+        try
+        {
+            fields.HumanChatLog.Add(new HumanChatEntry
+            {
+                Sender = "bot",
+                Text   = receipt,
+                Kind   = "text",
+                At     = DateTime.UtcNow
+            });
+            if (fields.HumanChatLog.Count > 50)
+                fields.HumanChatLog = fields.HumanChatLog.Skip(fields.HumanChatLog.Count - 50).ToList();
+            entity.StateJson = JsonSerializer.Serialize(fields, JsonOpts);
+            entity.UpdatedAtUtc = DateTime.UtcNow;
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "CreateOrderFromDraft: chatLog tail write failed for order {OrderId}", persisted.Id);
+        }
+
+        // ── Staff notification ──────────────────────────────────────────────
+        if (biz is not null)
+        {
+            try
+            {
+                var businessContext = new BusinessContext(
+                    BusinessId:        biz.Id,
+                    PhoneNumberId:     biz.PhoneNumberId ?? phoneNumberId,
+                    AccessToken:       accessToken ?? "",
+                    BusinessName:      biz.Name ?? "",
+                    NotificationPhone: biz.NotificationPhone);
+
+                var itemsSummary = string.Join(", ",
+                    (draft.Items ?? new()).Select(i => $"{i.Quantity} {i.Name}"));
+                var totalText = $"${eval.TotalUsd:0.00}";
+
+                await _notificationService.NotifyOrderConfirmedAsync(
+                    businessContext, draft.CustomerName ?? "?", itemsSummary, totalText, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "CreateOrderFromDraft: staff notification failed for order {OrderId}", persisted.Id);
+            }
+        }
+
+        _logger.LogInformation(
+            "HANDOFF ORDER CREATED: conversationId={ConversationId} orderId={OrderId} orderNumber={OrderNumber} " +
+            "items={Items} subtotal={Sub} fee={Fee} total={Total} payment={Pay} customerNotified={Notified}",
+            conversationId, persisted.Id, orderNumber,
+            persisted.Items.Count, persisted.SubtotalAmount, persisted.DeliveryFee, persisted.TotalAmount,
+            persisted.PaymentMethod, customerNotified);
+
+        return Ok(new
+        {
+            ok = true,
+            orderId = persisted.Id,
+            orderNumber,
+            customerNotified
+        });
+    }
+
+    // Shared formatter for the customer-facing 8-char order number — same
+    // scheme the bot's checkout uses at WebhookProcessor.cs:2764.
+    private static string FormatOrderNumber(Guid orderId)
+        => orderId.ToString("N")[..8].ToUpperInvariant();
 
     // ── Draft helpers (private) ──
 

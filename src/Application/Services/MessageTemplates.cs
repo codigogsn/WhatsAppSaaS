@@ -865,6 +865,38 @@ public static class HandoffMessageBuilder
     // validate totals without re-deriving the value.
     public const decimal DeliveryFeeUsd = 4.00m;
 
+    /// <summary>
+    /// Public re-export of the bot's confirmed-order receipt template. The
+    /// handoff create-order endpoint uses this so the customer receives the
+    /// SAME Spanish copy whether the order came from the bot or from an
+    /// operator. Wrapping Msg.BuildReceipt rather than duplicating its body
+    /// keeps the two flows in lockstep — never drift the copy.
+    /// </summary>
+    public static string BuildReceipt(
+        string orderNumber,
+        string customerName,
+        string customerIdNumber,
+        string customerPhone,
+        IReadOnlyList<ConversationItemEntry> items,
+        string? specialInstructions,
+        string address,
+        string paymentText,
+        string deliveryType,
+        ResolvedRate? bcvRate,
+        string? paymentMethod,
+        bool paymentProofReceived)
+        => Msg.BuildReceipt(
+            orderNumber, customerName, customerIdNumber, customerPhone,
+            items, specialInstructions, address, paymentText, deliveryType, bcvRate,
+            paymentMethod: paymentMethod,
+            paymentProofReceived: paymentProofReceived);
+
+    /// <summary>
+    /// Public re-export of Msg.PaymentMethodText so the create-order endpoint
+    /// can build the receipt without exposing all of Msg.
+    /// </summary>
+    public static string PaymentMethodText(string? method) => Msg.PaymentMethodText(method);
+
     public static string Build(HandoffReviewInput input, ResolvedRate? bcvRate)
     {
         var sb = new StringBuilder();
