@@ -2429,6 +2429,15 @@
       gap: 16px;
       min-height: calc(100vh - 200px);
     }
+    /* Three-column layout — adds the OperatorDraft viewer on the right.
+       Activates only on wide screens so the transcript keeps room to breathe;
+       narrower breakpoints fall back to the existing 2-col / 1-col rules
+       defined later in this stylesheet (see #viewHandoff media queries). */
+    @media (min-width: 1280px) {
+      #viewHandoff .hfc-shell {
+        grid-template-columns: 280px 1fr 360px;
+      }
+    }
     #viewHandoff .hfc-queue {
       background: var(--card);
       border: 1px solid var(--border-light, var(--border));
@@ -2717,6 +2726,124 @@
     @media (max-width: 768px) {
       #viewHandoff .hfc-shell { grid-template-columns: 1fr; }
       #viewHandoff .hfc-queue { max-height: 280px; }
+    }
+
+    /* ── Operator draft panel (right column, Commit 2a — viewer only) ──
+       Hidden by default; the markup sets display:none until the viewport
+       activates the 3-col grid and the painter shows the card. */
+    #viewHandoff .hfc-orderpanel {
+      background: var(--card);
+      border: 1px solid var(--border-light, var(--border));
+      border-radius: var(--radius-sm, 8px);
+      display: none;
+      flex-direction: column;
+      max-height: calc(100vh - 200px);
+      overflow: hidden;
+    }
+    @media (min-width: 1280px) {
+      #viewHandoff .hfc-orderpanel.is-visible { display: flex; }
+    }
+    #viewHandoff .hfc-op-head {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--border-light, var(--border));
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    }
+    #viewHandoff .hfc-op-title {
+      margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .04em;
+      text-transform: uppercase; color: var(--text);
+    }
+    #viewHandoff .hfc-op-saved {
+      font-size: 10px; color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+    #viewHandoff .hfc-op-body {
+      flex: 1 1 auto; overflow-y: auto;
+      padding: 14px 16px;
+      display: flex; flex-direction: column; gap: 16px;
+      scrollbar-width: thin;
+    }
+    #viewHandoff .hfc-op-empty {
+      font-size: 12px; color: var(--muted);
+      padding: 24px 16px; text-align: center; line-height: 1.5;
+    }
+    #viewHandoff .hfc-op-section {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    #viewHandoff .hfc-op-section-title {
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--muted);
+    }
+    #viewHandoff .hfc-op-kv {
+      display: grid; grid-template-columns: 90px 1fr; gap: 6px 10px;
+      font-size: 12px; line-height: 1.4;
+    }
+    #viewHandoff .hfc-op-kv dt { color: var(--muted); font-weight: 500; margin: 0; }
+    #viewHandoff .hfc-op-kv dd { color: var(--text); margin: 0; word-break: break-word; }
+    #viewHandoff .hfc-op-kv dd.is-missing { color: var(--muted); font-style: italic; }
+    #viewHandoff .hfc-op-items {
+      display: flex; flex-direction: column; gap: 4px;
+    }
+    #viewHandoff .hfc-op-item {
+      display: grid; grid-template-columns: 30px 1fr auto;
+      gap: 8px; align-items: baseline;
+      font-size: 12px; line-height: 1.4;
+      padding: 6px 8px;
+      background: rgba(255,255,255,.02);
+      border-radius: 6px;
+    }
+    #viewHandoff .hfc-op-item-qty {
+      font-weight: 700; color: var(--text);
+      font-variant-numeric: tabular-nums; text-align: right;
+    }
+    #viewHandoff .hfc-op-item-name { color: var(--text); }
+    #viewHandoff .hfc-op-item-mods { color: var(--muted); font-size: 11px; }
+    #viewHandoff .hfc-op-item-price {
+      color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums;
+    }
+    #viewHandoff .hfc-op-items-empty {
+      font-size: 11px; color: var(--muted); padding: 6px 0; font-style: italic;
+    }
+    #viewHandoff .hfc-op-totals {
+      display: grid; grid-template-columns: 1fr auto; gap: 4px 12px;
+      font-size: 12px; line-height: 1.5;
+      padding-top: 8px;
+      border-top: 1px dashed var(--border-light, var(--border));
+    }
+    #viewHandoff .hfc-op-totals dt { color: var(--muted); margin: 0; }
+    #viewHandoff .hfc-op-totals dd {
+      margin: 0; font-variant-numeric: tabular-nums; color: var(--text); text-align: right;
+    }
+    #viewHandoff .hfc-op-totals .is-grand dt,
+    #viewHandoff .hfc-op-totals .is-grand dd {
+      font-weight: 700; color: var(--text);
+    }
+    #viewHandoff .hfc-op-proof {
+      font-size: 12px; color: var(--muted);
+      padding: 6px 8px;
+      background: rgba(59,130,246,.06);
+      border: 1px solid rgba(59,130,246,.18);
+      border-radius: 6px;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    #viewHandoff .hfc-op-proof a {
+      font-size: 11px; font-weight: 600; color: var(--accent, #3b82f6);
+      text-decoration: none;
+    }
+    #viewHandoff .hfc-op-proof a:hover { text-decoration: underline; }
+    #viewHandoff .hfc-op-foot {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border-light, var(--border));
+      display: flex; justify-content: flex-end; gap: 8px;
+    }
+    #viewHandoff .hfc-op-foot .hfc-action-btn.is-danger {
+      background: transparent; color: var(--danger, #ef4444);
+      border-color: rgba(239,68,68,.35);
+    }
+    #viewHandoff .hfc-op-foot .hfc-action-btn.is-danger:hover {
+      background: rgba(239,68,68,.08);
+    }
+    #viewHandoff .hfc-op-foot .hfc-action-btn[disabled] {
+      opacity: .4; cursor: not-allowed;
     }
   </style>
 </head>
@@ -3437,6 +3564,29 @@ Tipo: burger"></textarea>
           <button class="hfc-composer-send" id="hfcComposerSend" onclick="_handoffComposerSend()">Enviar</button>
         </div>
       </main>
+
+      <!-- Operator draft viewer (Commit 2a, read-only). Hydrated by
+           _handoffPaintOrderPanel from selected.operatorDraft (already in the
+           /api/admin/handoffs/human response). Stays hidden until the painter
+           adds .is-visible so the layout doesn't shift before there's a
+           conversation selected. -->
+      <aside class="hfc-orderpanel" id="hfcOrderPanel">
+        <div class="hfc-op-head">
+          <h4 class="hfc-op-title">Pedido borrador</h4>
+          <span class="hfc-op-saved" id="hfcOpSaved"></span>
+        </div>
+        <div class="hfc-op-body" id="hfcOpBody">
+          <div class="hfc-op-empty" id="hfcOpEmpty">
+            Aún no hay borrador para esta conversación.
+          </div>
+        </div>
+        <div class="hfc-op-foot">
+          <button class="hfc-action-btn is-danger" id="hfcOpDiscard"
+                  onclick="_handoffOrderPanelDiscard()" disabled>
+            Descartar borrador
+          </button>
+        </div>
+      </aside>
     </div>
   </section>
 
@@ -5252,6 +5402,10 @@ function _handoffPaintPaneEmpty(){
       ? 'Selecciona una conversación de la cola para responder.'
       : 'Sin conversaciones pendientes';
   }
+  // Hide the order panel when nothing is selected so the grid column stays
+  // empty without painting a stale draft.
+  var panel = document.getElementById('hfcOrderPanel');
+  if (panel) panel.classList.remove('is-visible');
 }
 
 function _handoffPaintPane(opts){
@@ -5302,6 +5456,9 @@ function _handoffPaintPane(opts){
   // OR a saved draft. Lives between header and transcript; surgical update
   // so the operator's scroll / focus stays intact.
   _handoffPaintDraftPanel(h);
+  // Operator-authored draft viewer (right column). Read-only in commit 2a;
+  // hydrates from selected.operatorDraft already present in the queue payload.
+  _handoffPaintOrderPanel(h);
   var digits = String(h.phone || '').replace(/[^0-9]/g, '');
   var wa = document.getElementById('hfcActWhatsApp');
   var call = document.getElementById('hfcActCall');
@@ -5532,6 +5689,254 @@ function _handoffPaintDraftPanel(h){
     + '<div class="hfc-draft-items">' + itemsHtml + '</div>'
     + (draft.reason ? '<div class="hfc-draft-reason"><b>Motivo:</b> ' + esc(draft.reason) + '</div>' : '')
     + (clearBtn ? '<div class="hfc-draft-actions">' + clearBtn + '</div>' : '');
+}
+
+// ═══ Operator draft viewer (right column, Commit 2a — read-only) ════════════
+//
+// Reads selected.operatorDraft (the field surfaced by AdminHandoffsController
+// in commit 8155ca7). No editing yet — that lands in commits 2b/2c. The only
+// mutating action available here is "Descartar borrador" which calls the
+// existing DELETE /api/admin/handoffs/{cid}/draft endpoint.
+
+function _handoffPaintOrderPanel(h){
+  var panel = document.getElementById('hfcOrderPanel');
+  if (!panel) return;
+  panel.classList.add('is-visible');
+
+  var body = document.getElementById('hfcOpBody');
+  var emptyEl = document.getElementById('hfcOpEmpty');
+  var savedEl = document.getElementById('hfcOpSaved');
+  var discardBtn = document.getElementById('hfcOpDiscard');
+
+  var draft = h && h.operatorDraft;
+  if (!draft){
+    // No server-side draft yet — show empty state, disable discard.
+    if (savedEl) savedEl.textContent = '';
+    if (discardBtn) discardBtn.disabled = true;
+    // Restore the empty placeholder if a previous paint replaced it.
+    if (body && !body.querySelector('#hfcOpEmpty')){
+      body.innerHTML = '<div class="hfc-op-empty" id="hfcOpEmpty">Aún no hay borrador para esta conversación.</div>';
+    }
+    return;
+  }
+
+  if (savedEl){
+    var ts = _handoffOpFormatSavedAt(draft.updatedAtUtc);
+    savedEl.textContent = ts ? ('Guardado ' + ts) : '';
+  }
+  if (discardBtn) discardBtn.disabled = false;
+  if (emptyEl) emptyEl.remove();
+
+  body.innerHTML = _handoffOpRenderBody(h, draft);
+}
+
+function _handoffOpRenderBody(h, d){
+  var sections = [];
+
+  // CLIENTE
+  sections.push(_handoffOpSection('Cliente', _handoffOpRenderKv([
+    ['Nombre',   d.customerName],
+    ['Cédula',   d.customerIdNumber],
+    ['Teléfono', d.customerPhone || (h && h.phone)],
+  ])));
+
+  // PEDIDO
+  sections.push(_handoffOpSection('Pedido', _handoffOpRenderItems(d.items || [])));
+
+  // ENTREGA
+  var entregaKv = [
+    ['Tipo', d.deliveryType === 'delivery' ? 'Delivery'
+            : d.deliveryType === 'pickup'   ? 'Pickup'
+            : null],
+  ];
+  if (d.deliveryType === 'delivery' || !d.deliveryType){
+    entregaKv.push(['Dirección', d.address]);
+  }
+  if (d.locationText) entregaKv.push(['GPS', d.locationText]);
+  sections.push(_handoffOpSection('Entrega', _handoffOpRenderKv(entregaKv)));
+
+  // PAGO + comprobante reference
+  var pagoHtml = _handoffOpRenderKv([
+    ['Método', _handoffOpPaymentLabel(d.paymentMethod)]
+  ]);
+  if (d.proofMediaId){
+    pagoHtml += ''
+      + '<div class="hfc-op-proof">'
+      +   '<span>Comprobante adjunto</span>'
+      +   '<a href="#" onclick="_handoffOpOpenProof(\''
+      +     esc(d.proofMediaId) + '\'); return false;">Abrir</a>'
+      + '</div>';
+  }
+  sections.push(_handoffOpSection('Pago', pagoHtml));
+
+  // NOTAS
+  if (d.specialInstructions){
+    sections.push(_handoffOpSection('Notas',
+      '<div style="font-size:12px;line-height:1.5;color:var(--text);white-space:pre-wrap;">'
+      + esc(d.specialInstructions) + '</div>'));
+  }
+
+  // TOTALS (preview only — server is authoritative when an Order is later persisted)
+  sections.push(_handoffOpRenderTotals(d));
+
+  return sections.join('');
+}
+
+function _handoffOpSection(title, innerHtml){
+  return ''
+    + '<div class="hfc-op-section">'
+    +   '<span class="hfc-op-section-title">' + esc(title) + '</span>'
+    +   innerHtml
+    + '</div>';
+}
+
+function _handoffOpRenderKv(rows){
+  var dl = '<dl class="hfc-op-kv">';
+  for (var i = 0; i < rows.length; i++){
+    var label = rows[i][0];
+    var value = rows[i][1];
+    var hasValue = value !== null && value !== undefined && String(value).trim() !== '';
+    dl += '<dt>' + esc(label) + '</dt>';
+    dl += hasValue
+      ? '<dd>' + esc(String(value)) + '</dd>'
+      : '<dd class="is-missing">—</dd>';
+  }
+  return dl + '</dl>';
+}
+
+function _handoffOpRenderItems(items){
+  if (!items || !items.length){
+    return '<div class="hfc-op-items-empty">Sin productos en el borrador.</div>';
+  }
+  var html = '<div class="hfc-op-items">';
+  for (var i = 0; i < items.length; i++){
+    var it = items[i];
+    var qty = it.quantity || 0;
+    var unit = (typeof it.unitPrice === 'number') ? it.unitPrice : null;
+    var line = unit !== null ? (unit * qty) : null;
+    var mods = it.modifiers ? ('<div class="hfc-op-item-mods">' + esc(it.modifiers) + '</div>') : '';
+    var price = line !== null
+      ? ('<span class="hfc-op-item-price">$' + line.toFixed(2) + '</span>')
+      : '<span class="hfc-op-item-price">—</span>';
+    html += ''
+      + '<div class="hfc-op-item">'
+      +   '<span class="hfc-op-item-qty">' + esc(String(qty)) + '×</span>'
+      +   '<div>'
+      +     '<div class="hfc-op-item-name">' + esc(it.name || '—') + '</div>'
+      +     mods
+      +   '</div>'
+      +   price
+      + '</div>';
+  }
+  return html + '</div>';
+}
+
+function _handoffOpRenderTotals(d){
+  var items = d.items || [];
+  var subtotal = 0;
+  var hasAllPrices = true;
+  for (var i = 0; i < items.length; i++){
+    var it = items[i];
+    if (typeof it.unitPrice === 'number' && it.unitPrice > 0){
+      subtotal += it.unitPrice * (it.quantity || 0);
+    } else {
+      hasAllPrices = false;
+    }
+  }
+  // Delivery-fee preview: only when deliveryType=delivery AND at least one priced item.
+  // Authoritative fee comes from server at order-creation time; this is a client hint.
+  var fee = (d.deliveryType === 'delivery' && items.length > 0 && hasAllPrices) ? 4.00 : 0;
+  var total = subtotal + fee;
+
+  return ''
+    + '<dl class="hfc-op-totals">'
+    +   '<dt>Subtotal</dt><dd>' + (hasAllPrices ? '$' + subtotal.toFixed(2) : '—') + '</dd>'
+    +   '<dt>Delivery</dt><dd>' + (fee > 0 ? '$' + fee.toFixed(2) : '—') + '</dd>'
+    +   '<dt class="is-grand">Total</dt><dd class="is-grand">'
+    +     (hasAllPrices ? '$' + total.toFixed(2) : '—')
+    +   '</dd>'
+    + '</dl>';
+}
+
+function _handoffOpPaymentLabel(method){
+  if (!method) return null;
+  var map = {
+    'pago_movil':    'Pago Móvil',
+    'pagomovil':     'Pago Móvil',
+    'zelle':         'Zelle',
+    'divisas':       'Divisas (USD efectivo)',
+    'efectivo':      'Efectivo',
+    'cash':          'Efectivo',
+    'card':          'Tarjeta',
+    'transferencia': 'Transferencia'
+  };
+  return map[method] || method;
+}
+
+function _handoffOpFormatSavedAt(iso){
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit' });
+}
+
+// Reuses the existing handoff media endpoint to open the proof image in the
+// shared lightbox. The image must already be referenced by the conversation —
+// the server checks chatLog + paymentProofMediaId before streaming bytes.
+function _handoffOpOpenProof(mediaId){
+  var cid = window._handoffSelectedCid;
+  if (!cid || !mediaId) return;
+  _handoffFetchMedia(cid, mediaId).then(function(url){
+    var box = document.getElementById('hfcMediaLightbox');
+    var img = document.getElementById('hfcMediaLightboxImg');
+    if (!box || !img) return;
+    img.src = url;
+    box.classList.add('is-open');
+  }).catch(function(){
+    if (typeof showToast === 'function') showToast('No se pudo cargar el comprobante', 'error');
+  });
+}
+
+// "Descartar borrador" — confirmation modal, then DELETE /draft. Re-fetches the
+// queue so the local cache reflects the cleared draft on the next paint.
+function _handoffOrderPanelDiscard(){
+  var cid = window._handoffSelectedCid;
+  if (!cid) return;
+  _handoffOpenConfirm(
+    'Descartar borrador',
+    '¿Eliminar el borrador del pedido para esta conversación? Esta acción no se puede deshacer.',
+    'Descartar',
+    function(){ _handoffOrderPanelDoDiscard(cid); }
+  );
+}
+
+async function _handoffOrderPanelDoDiscard(cid){
+  var btn = document.getElementById('hfcOpDiscard');
+  if (btn) btn.disabled = true;
+  try {
+    var res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(cid) + '/draft', {
+      method: 'DELETE'
+    });
+    if (!res.ok){
+      if (typeof showToast === 'function') showToast('No se pudo descartar: ' + res.status, 'error');
+      return;
+    }
+    // Patch the local cache so the next paint shows the empty state immediately,
+    // without waiting for the next /handoffs/human poll cycle.
+    var list = window._handoffLatest || [];
+    for (var i = 0; i < list.length; i++){
+      if (list[i].conversationId === cid){
+        list[i].operatorDraft = null;
+        break;
+      }
+    }
+    _handoffPaintPane({ rebuildComposer: false });
+    if (typeof showToast === 'function') showToast('Borrador descartado', 'info');
+  } catch (e){
+    if (typeof showToast === 'function') showToast('Error al descartar el borrador', 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function _handoffComposerAutosize(el){
