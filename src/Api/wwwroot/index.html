@@ -2859,6 +2859,28 @@
     #viewHandoff .hfc-op-foot .hfc-action-btn[disabled] {
       opacity: .4; cursor: not-allowed;
     }
+    /* Procesar pedido success row — replaces the buttons after order created. */
+    #viewHandoff .hfc-op-foot.hfc-op-success {
+      justify-content: space-between;
+      align-items: center;
+    }
+    #viewHandoff .hfc-op-success-pill {
+      display: inline-flex; align-items: center;
+      padding: 4px 10px; border-radius: 8px;
+      background: rgba(34,197,94,.14); color: #16a34a;
+      font-size: 11px; font-weight: 700;
+      letter-spacing: .04em; text-transform: uppercase;
+      line-height: 1.4;
+    }
+    #viewHandoff .hfc-op-success-pill::before {
+      content: "✓ "; margin-right: 2px;
+    }
+    #viewHandoff .hfc-op-foot .hfc-action-btn.is-pending {
+      pointer-events: none; opacity: .7;
+    }
+    #viewHandoff .hfc-op-foot .hfc-action-btn.is-pending::after {
+      content: "…"; margin-left: 4px;
+    }
 
     /* Operator draft "Mensaje para el cliente" section (Commit 3c) */
     #viewHandoff .hfc-op-msg-head {
@@ -3634,11 +3656,22 @@ Tipo: burger"></textarea>
             Aún no hay borrador para esta conversación.
           </div>
         </div>
-        <div class="hfc-op-foot">
+        <div class="hfc-op-foot" id="hfcOpFootButtons">
           <button class="hfc-action-btn is-danger" id="hfcOpDiscard"
                   onclick="_handoffOrderPanelDiscard()" disabled>
             Descartar borrador
           </button>
+          <button class="hfc-action-btn is-primary" id="hfcOpProcess"
+                  onclick="_handoffOpProcessOrder()" disabled
+                  title="Crear pedido real, enviar recibo al cliente y notificar al negocio.">
+            Procesar pedido
+          </button>
+        </div>
+        <div class="hfc-op-foot hfc-op-success" id="hfcOpFootSuccess" style="display:none;">
+          <span class="hfc-op-success-pill" id="hfcOpSuccessPill">Pedido creado</span>
+          <a class="hfc-action-btn is-primary" id="hfcOpViewOrder" href="#" onclick="_handoffOpViewOrder(); return false;">
+            Ver pedido
+          </a>
         </div>
       </aside>
     </div>
@@ -5807,16 +5840,37 @@ function _handoffPaintOrderPanel(h){
   var emptyEl = document.getElementById('hfcOpEmpty');
   var savedEl = document.getElementById('hfcOpSaved');
   var discardBtn = document.getElementById('hfcOpDiscard');
+  var processBtn = document.getElementById('hfcOpProcess');
+
+  // Hydrate the local "already-processed" cache from the queue payload so
+  // a fresh page load that lands on an already-processed conversation still
+  // shows the green success row. Server returns orderCreatedByHumanId on
+  // ListHumanOverride (commit 8155ca7 exposes it).
+  var cid = h && h.conversationId;
+  if (cid && h && h.orderCreatedByHumanId && !window._handoffProcessedOrders[cid]){
+    var orderNumber = String(h.orderCreatedByHumanId).replace(/-/g, '').slice(0, 8).toUpperCase();
+    window._handoffProcessedOrders[cid] = {
+      orderId: h.orderCreatedByHumanId,
+      orderNumber: orderNumber
+    };
+  }
 
   var draft = h && h.operatorDraft;
   if (!draft){
-    // No server-side draft yet — show empty state, disable discard.
+    // No server-side draft. Two sub-cases:
+    //   • This conversation already produced an order — show success row.
+    //   • Truly empty — show "Aún no hay borrador …" and disable actions.
     if (savedEl) savedEl.textContent = '';
     if (discardBtn) discardBtn.disabled = true;
-    // Restore the empty placeholder if a previous paint replaced it.
+    if (processBtn) processBtn.disabled = true;
     if (body && !body.querySelector('#hfcOpEmpty')){
-      body.innerHTML = '<div class="hfc-op-empty" id="hfcOpEmpty">Aún no hay borrador para esta conversación.</div>';
+      body.innerHTML = '<div class="hfc-op-empty" id="hfcOpEmpty">'
+        + (window._handoffProcessedOrders[cid]
+            ? 'Pedido ya procesado. Ver dashboard de pedidos para detalles.'
+            : 'Aún no hay borrador para esta conversación.')
+        + '</div>';
     }
+    _handoffOpApplySuccessRow(cid);
     return;
   }
 
@@ -5837,6 +5891,19 @@ function _handoffPaintOrderPanel(h){
   // Once totals come back complete, the auto-fetch chains into the message
   // preview so the operator finds it ready in the textarea.
   _handoffOpMaybeAutoFetchMessage(h.conversationId);
+
+  // Footer state. Procesar pedido is enabled only when the server-side totals
+  // report isComplete=true; otherwise the chip + validation already told the
+  // operator what's missing. Already-processed conversations show the success
+  // row instead of the button row.
+  if (window._handoffProcessedOrders[cid]){
+    _handoffOpApplySuccessRow(cid);
+  } else {
+    _handoffOpApplySuccessRow(null); // re-show button row if previously hidden
+    var totals = window._handoffOrderTotals && window._handoffOrderTotals[cid];
+    var canProcess = !!(totals && totals.isComplete);
+    if (processBtn) processBtn.disabled = !canProcess || !!window._handoffProcessInflight[cid];
+  }
 }
 
 function _handoffOpRenderBody(h, d){
@@ -6354,6 +6421,153 @@ async function _handoffOrderPanelDoDiscard(cid){
   } finally {
     if (btn) btn.disabled = false;
   }
+}
+
+// ═══ Procesar pedido — turn the draft into a real Order ═══════════════════
+// Confirmation modal → POST .../create-order. Handles 200/409/422/500. Once
+// successful, the footer swaps to a green pill + "Ver pedido" link; further
+// clicks are prevented at the in-flight guard (window._handoffProcessInflight),
+// at the button.disabled state, and at the server's idempotency 409.
+
+window._handoffProcessedOrders = window._handoffProcessedOrders || {};  // cid → { orderId, orderNumber }
+window._handoffProcessInflight = window._handoffProcessInflight || {};  // cid → true while POST is open
+
+function _handoffOpProcessOrder(){
+  var cid = window._handoffSelectedCid;
+  if (!cid) return;
+  if (window._handoffProcessInflight[cid]) return;
+  // Defensive: if the operator somehow opens the button while incomplete,
+  // refuse rather than POSTing a guaranteed 422.
+  var totals = window._handoffOrderTotals && window._handoffOrderTotals[cid];
+  if (!totals || !totals.isComplete){
+    if (typeof showToast === 'function') showToast('El borrador no está listo para procesar.', 'warn');
+    return;
+  }
+  _handoffOpenConfirm(
+    'Procesar pedido',
+    'Esta acción creará el pedido real, enviará el recibo al cliente y notificará al negocio.',
+    'Procesar',
+    function(){ _handoffOpDoProcessOrder(cid); }
+  );
+}
+
+async function _handoffOpDoProcessOrder(cid){
+  var btn = document.getElementById('hfcOpProcess');
+  var discardBtn = document.getElementById('hfcOpDiscard');
+  window._handoffProcessInflight[cid] = true;
+  if (btn) { btn.disabled = true; btn.classList.add('is-pending'); }
+  if (discardBtn) discardBtn.disabled = true;
+
+  try {
+    var res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(cid) + '/create-order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+
+    // 409 — already processed for this conversation. Treat like a success
+    // (surface the existing orderId/orderNumber) so a network retry that
+    // hit a stale UI doesn't show an error.
+    if (res.status === 409){
+      var existing = await res.json().catch(function(){ return null; });
+      if (existing && existing.orderId){
+        _handoffOpMarkProcessed(cid, existing.orderId, existing.orderNumber);
+        if (typeof showToast === 'function') showToast('Este pedido ya estaba creado.', 'info');
+      } else {
+        if (typeof showToast === 'function') showToast('Conflicto al procesar el pedido.', 'error');
+      }
+      return;
+    }
+
+    // 422 — backend validation failed. Surface missing/unpriced for the operator.
+    if (res.status === 422){
+      var err = await res.json().catch(function(){ return null; });
+      var reason = 'No se pudo procesar el pedido.';
+      if (err && Array.isArray(err.unpriced) && err.unpriced.length)
+        reason = 'Revisar precio: ' + err.unpriced.join(', ');
+      else if (err && Array.isArray(err.missing) && err.missing.length)
+        reason = 'Faltan: ' + err.missing.map(_handoffOpFieldLabel).join(', ');
+      else if (err && err.error)
+        reason = err.error;
+      if (typeof showToast === 'function') showToast(reason, 'error');
+      return;
+    }
+
+    if (!res.ok){
+      if (typeof showToast === 'function') showToast('Error al procesar (' + res.status + ')', 'error');
+      return;
+    }
+
+    var body = await res.json();
+    if (!body || body.ok !== true || !body.orderId){
+      if (typeof showToast === 'function') showToast('Respuesta inválida del servidor.', 'error');
+      return;
+    }
+    _handoffOpMarkProcessed(cid, body.orderId, body.orderNumber);
+    var notif = body.customerNotified === false
+      ? ' (el envío al cliente falló — reenviar manualmente)'
+      : '';
+    if (typeof showToast === 'function')
+      showToast('Pedido #' + (body.orderNumber || '????') + ' creado' + notif, 'success');
+
+  } catch (e) {
+    if (typeof showToast === 'function') showToast('Error de red al procesar el pedido.', 'error');
+  } finally {
+    delete window._handoffProcessInflight[cid];
+    if (btn) btn.classList.remove('is-pending');
+    // Don't re-enable the buttons on success — _handoffOpMarkProcessed
+    // hides the row entirely. On error we restore enabled state below.
+    if (!window._handoffProcessedOrders[cid]){
+      if (btn) btn.disabled = !(window._handoffOrderTotals[cid] && window._handoffOrderTotals[cid].isComplete);
+      if (discardBtn) discardBtn.disabled = false;
+    }
+  }
+}
+
+// Locks the panel into the "order created" success state. Hides the button
+// row, shows the green pill + Ver pedido link, clears local draft caches so
+// the panel surfaces the empty state on next paint. Idempotent.
+function _handoffOpMarkProcessed(cid, orderId, orderNumber){
+  if (!cid || !orderId) return;
+  window._handoffProcessedOrders[cid] = {
+    orderId: orderId,
+    orderNumber: orderNumber || ''
+  };
+  // Local cache invalidation so the panel doesn't keep auto-fetching totals
+  // / preview-message for a conversation whose draft was just consumed.
+  if (window._handoffOrderTotals)  delete window._handoffOrderTotals[cid];
+  if (window._handoffOrderMessage) delete window._handoffOrderMessage[cid];
+  // Optimistic local cache: also clear the operatorDraft on the queue entry
+  // so the panel re-paints with the empty placeholder before the next poll
+  // tick brings the server-side change.
+  var list = window._handoffLatest || [];
+  for (var i = 0; i < list.length; i++){
+    if (list[i].conversationId === cid){
+      list[i].operatorDraft = null;
+      list[i].orderCreatedByHumanId = orderId;
+      break;
+    }
+  }
+  _handoffOpApplySuccessRow(cid);
+}
+
+function _handoffOpApplySuccessRow(cid){
+  var foot     = document.getElementById('hfcOpFootButtons');
+  var success  = document.getElementById('hfcOpFootSuccess');
+  var pill     = document.getElementById('hfcOpSuccessPill');
+  var info = window._handoffProcessedOrders[cid];
+  if (!info){
+    if (foot)    foot.style.display    = '';
+    if (success) success.style.display = 'none';
+    return;
+  }
+  if (pill) pill.textContent = 'Pedido #' + (info.orderNumber || '????') + ' creado';
+  if (foot)    foot.style.display    = 'none';
+  if (success) success.style.display = '';
+}
+
+function _handoffOpViewOrder(){
+  if (typeof navigateTo === 'function') navigateTo('orders');
 }
 
 function _handoffComposerAutosize(el){
