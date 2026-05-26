@@ -793,84 +793,26 @@ public class AdminHandoffsController : ControllerBase
         if (!IsAuthorizedForConversation(entity))
             return Unauthorized(new { error = "Not authorized for this conversation's business" });
 
-        var draft = ReadDraftFromStateJson(entity.StateJson);
-        if (draft is null)
+        var eval = await EvaluateDraftAsync(entity, ct);
+        if (eval is null)
             return UnprocessableEntity(new { ok = false, error = "No hay borrador para esta conversación.", missing = new[] { "draft" }, unpriced = Array.Empty<string>() });
 
-        // ── Validation ──────────────────────────────────────────────────────
-        var missing = new List<string>();
-        var unpriced = new List<string>();
-
-        if (string.IsNullOrWhiteSpace(draft.CustomerName))     missing.Add("customerName");
-        if (string.IsNullOrWhiteSpace(draft.CustomerIdNumber)) missing.Add("customerIdNumber");
-        if (string.IsNullOrWhiteSpace(draft.CustomerPhone))    missing.Add("customerPhone");
-        if (string.IsNullOrWhiteSpace(draft.DeliveryType))     missing.Add("deliveryType");
-        if (string.IsNullOrWhiteSpace(draft.PaymentMethod))    missing.Add("paymentMethod");
-        if (draft.DeliveryType == "delivery" && string.IsNullOrWhiteSpace(draft.Address))
-            missing.Add("address");
-        if (draft.Items is null || draft.Items.Count == 0)
-            missing.Add("items");
-
-        if (draft.Items is { Count: > 0 })
-        {
-            foreach (var i in draft.Items)
-            {
-                if (!(i.UnitPrice is { } up && up > 0m))
-                    unpriced.Add(string.IsNullOrWhiteSpace(i.Name) ? "(sin nombre)" : i.Name);
-            }
-        }
-
-        // Compute totals for the response (and the post-validation guard).
-        var subtotal = 0m;
-        if (draft.Items is { Count: > 0 })
-            foreach (var i in draft.Items)
-                if (i.UnitPrice is { } up && up > 0m)
-                    subtotal += up * i.Quantity;
-        var deliveryFee = draft.DeliveryType == "delivery" ? HandoffMessageBuilder.DeliveryFeeUsd : 0m;
-        var totalUsd = subtotal + deliveryFee;
-
-        if (missing.Count == 0 && unpriced.Count == 0 && totalUsd <= deliveryFee)
-            missing.Add("total");
-
-        if (missing.Count > 0 || unpriced.Count > 0)
+        if (!eval.IsComplete)
         {
             return UnprocessableEntity(new
             {
                 ok = false,
                 error = "El borrador no está completo para generar el mensaje.",
-                missing,
-                unpriced
+                missing = eval.Missing,
+                unpriced = eval.Unpriced
             });
         }
 
-        // ── Resolve business config + BCV rate ──────────────────────────────
-        Business? biz = null;
-        if (entity.BusinessId.HasValue)
-        {
-            biz = await _db.Businesses.AsNoTracking()
-                .Where(b => b.Id == entity.BusinessId.Value)
-                .FirstOrDefaultAsync(ct);
-        }
+        // Compose the customer-facing message using the existing template
+        // helpers. EvaluateDraftAsync already resolved biz + BCV.
+        var draft = eval.Draft;
+        var biz = eval.Business;
 
-        ResolvedRate? bcvRate = null;
-        try
-        {
-            bcvRate = await _exchangeRateProvider.GetRateAsync(biz?.CurrencyReference, ct);
-        }
-        catch (Exception ex)
-        {
-            // Rate fetch failure is non-fatal — message renders without the Bs line.
-            _logger.LogWarning(ex,
-                "PreviewDraftMessage: BCV rate fetch failed for {ConversationId}", conversationId);
-        }
-
-        var hasPagoMobileConfig =
-            !string.IsNullOrWhiteSpace(biz?.PaymentMobileBank)
-            && !string.IsNullOrWhiteSpace(biz?.PaymentMobileId)
-            && !string.IsNullOrWhiteSpace(biz?.PaymentMobilePhone);
-
-        // Convert OperatorDraftItem → ConversationItemEntry (the shape the
-        // existing OrderSummaryWithTotal template consumes).
         var items = draft.Items!
             .Select(i => new ConversationItemEntry
             {
@@ -896,11 +838,7 @@ public class AdminHandoffsController : ControllerBase
             PagoMovilPhone      = biz?.PaymentMobilePhone
         };
 
-        var message = HandoffMessageBuilder.Build(input, bcvRate);
-
-        decimal? totalBs = null;
-        if (bcvRate is { Rate: > 0 } && totalUsd > 0)
-            totalBs = totalUsd * bcvRate.Rate;
+        var message = HandoffMessageBuilder.Build(input, eval.BcvRate);
 
         return Ok(new
         {
@@ -908,19 +846,176 @@ public class AdminHandoffsController : ControllerBase
             message,
             totals = new
             {
-                subtotal,
-                deliveryFee,
-                totalUsd,
-                bsRate     = bcvRate?.Rate,
-                totalBs,
-                isStaleRate = bcvRate?.IsStale ?? false,
-                rateLabel  = bcvRate?.CurrencyLabel
+                subtotal    = eval.Subtotal,
+                deliveryFee = eval.DeliveryFee,
+                totalUsd    = eval.TotalUsd,
+                bsRate      = eval.BcvRate?.Rate,
+                totalBs     = eval.TotalBs,
+                isStaleRate = eval.BcvRate?.IsStale ?? false,
+                rateLabel   = eval.BcvRate?.CurrencyLabel
             },
-            hasPagoMobileConfig
+            hasPagoMobileConfig = eval.HasPagoMobileConfig
+        });
+    }
+
+    /// <summary>
+    /// GET /api/admin/handoffs/{conversationId}/draft/totals
+    /// Lightweight totals + validation view of the current OperatorDraft.
+    /// Returns 200 in every case (even when the draft is missing/invalid) so
+    /// the dashboard can poll cheaply without producing 422 noise in the UI;
+    /// the response carries `isComplete` + `missing[]` + `unpriced[]` for the
+    /// frontend to decide what to render. Re-uses EvaluateDraftAsync so the
+    /// numbers are identical to those PreviewDraftMessage computes.
+    /// </summary>
+    [HttpGet("{conversationId}/draft/totals")]
+    public async Task<IActionResult> GetDraftTotals(string conversationId, CancellationToken ct)
+    {
+        if (!IsAuthorized()) return Unauthorized();
+
+        var entity = await _db.ConversationStates.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.ConversationId == conversationId, ct);
+        if (entity is null) return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
+
+        var eval = await EvaluateDraftAsync(entity, ct);
+        if (eval is null)
+        {
+            return Ok(new
+            {
+                isComplete           = false,
+                missing              = new[] { "draft" },
+                unpriced             = Array.Empty<string>(),
+                subtotal             = 0m,
+                deliveryFee          = 0m,
+                totalUsd             = 0m,
+                paymentMethod        = (string?)null,
+                bsRate               = (decimal?)null,
+                totalBs              = (decimal?)null,
+                isStaleRate          = false,
+                rateLabel            = (string?)null,
+                hasPagoMobileConfig  = false
+            });
+        }
+
+        return Ok(new
+        {
+            isComplete          = eval.IsComplete,
+            missing             = eval.Missing,
+            unpriced            = eval.Unpriced,
+            subtotal            = eval.Subtotal,
+            deliveryFee         = eval.DeliveryFee,
+            totalUsd            = eval.TotalUsd,
+            paymentMethod       = eval.Draft.PaymentMethod,
+            bsRate              = eval.BcvRate?.Rate,
+            totalBs             = eval.TotalBs,
+            isStaleRate         = eval.BcvRate?.IsStale ?? false,
+            rateLabel           = eval.BcvRate?.CurrencyLabel,
+            hasPagoMobileConfig = eval.HasPagoMobileConfig
         });
     }
 
     // ── Draft helpers (private) ──
+
+    /// <summary>
+    /// Single source of truth for draft validation + total computation +
+    /// business / BCV resolution. Returns null when no draft exists on the
+    /// conversation; otherwise an immutable evaluation record that both the
+    /// preview-message endpoint and the totals endpoint render.
+    ///
+    /// Validation mirrors the structural-guard contract from commit 3394329:
+    /// items > 0, every unitPrice > 0, customer slots present, deliveryType
+    /// + address-when-delivery, paymentMethod, and total > deliveryFee.
+    /// </summary>
+    private async Task<DraftEvaluation?> EvaluateDraftAsync(ConversationState entity, CancellationToken ct)
+    {
+        var draft = ReadDraftFromStateJson(entity.StateJson);
+        if (draft is null) return null;
+
+        var missing = new List<string>();
+        var unpriced = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(draft.CustomerName))     missing.Add("customerName");
+        if (string.IsNullOrWhiteSpace(draft.CustomerIdNumber)) missing.Add("customerIdNumber");
+        if (string.IsNullOrWhiteSpace(draft.CustomerPhone))    missing.Add("customerPhone");
+        if (string.IsNullOrWhiteSpace(draft.DeliveryType))     missing.Add("deliveryType");
+        if (string.IsNullOrWhiteSpace(draft.PaymentMethod))    missing.Add("paymentMethod");
+        if (draft.DeliveryType == "delivery" && string.IsNullOrWhiteSpace(draft.Address))
+            missing.Add("address");
+        if (draft.Items is null || draft.Items.Count == 0)
+            missing.Add("items");
+
+        if (draft.Items is { Count: > 0 })
+        {
+            foreach (var i in draft.Items)
+            {
+                if (!(i.UnitPrice is { } up && up > 0m))
+                    unpriced.Add(string.IsNullOrWhiteSpace(i.Name) ? "(sin nombre)" : i.Name);
+            }
+        }
+
+        var subtotal = 0m;
+        if (draft.Items is { Count: > 0 })
+            foreach (var i in draft.Items)
+                if (i.UnitPrice is { } up && up > 0m)
+                    subtotal += up * i.Quantity;
+        var deliveryFee = draft.DeliveryType == "delivery" ? HandoffMessageBuilder.DeliveryFeeUsd : 0m;
+        var totalUsd = subtotal + deliveryFee;
+
+        if (missing.Count == 0 && unpriced.Count == 0 && totalUsd <= deliveryFee)
+            missing.Add("total");
+
+        Business? biz = null;
+        if (entity.BusinessId.HasValue)
+        {
+            biz = await _db.Businesses.AsNoTracking()
+                .Where(b => b.Id == entity.BusinessId.Value)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        ResolvedRate? bcvRate = null;
+        try
+        {
+            bcvRate = await _exchangeRateProvider.GetRateAsync(biz?.CurrencyReference, ct);
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal — totals + message still render without the Bs line.
+            _logger.LogWarning(ex,
+                "EvaluateDraftAsync: BCV rate fetch failed for conversation {ConversationId}", entity.ConversationId);
+        }
+
+        decimal? totalBs = null;
+        if (bcvRate is { Rate: > 0 } && totalUsd > 0)
+            totalBs = totalUsd * bcvRate.Rate;
+
+        var hasPagoMobileConfig =
+            !string.IsNullOrWhiteSpace(biz?.PaymentMobileBank)
+            && !string.IsNullOrWhiteSpace(biz?.PaymentMobileId)
+            && !string.IsNullOrWhiteSpace(biz?.PaymentMobilePhone);
+
+        var isComplete = missing.Count == 0 && unpriced.Count == 0;
+
+        return new DraftEvaluation(
+            draft, biz, bcvRate,
+            isComplete, missing, unpriced,
+            subtotal, deliveryFee, totalUsd, totalBs, hasPagoMobileConfig);
+    }
+
+    private sealed record DraftEvaluation(
+        OperatorDraft Draft,
+        Business? Business,
+        ResolvedRate? BcvRate,
+        bool IsComplete,
+        List<string> Missing,
+        List<string> Unpriced,
+        decimal Subtotal,
+        decimal DeliveryFee,
+        decimal TotalUsd,
+        decimal? TotalBs,
+        bool HasPagoMobileConfig);
+
+    // ── Draft state-JSON helpers (private) ──
 
     private static OperatorDraft? ReadDraftFromStateJson(string? stateJson)
     {

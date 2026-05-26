@@ -5269,11 +5269,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         // New labels for the updated La Mina intake template:
         //   • "tipo de entrega" → DeliveryType  ("pickup" | "delivery")
-        //   • "notas" / "observaciones" → Notes (multi-line, captured below)
+        //   • "notas" / "observaciones" → Notes  (multi-line, captured below)
         // "recibe" stays handled above for customers who paste the old template.
-        var deliveryRaw = CleanFieldValue(GetLabeled("tipo de entrega"));
-        if (!string.IsNullOrWhiteSpace(deliveryRaw))
-            intake.DeliveryType = NormalizeDeliveryType(deliveryRaw);
+        //
+        // Multi-line capture for tipo-de-entrega is critical because customers
+        // commonly answer on the line BELOW the label (e.g. when the template
+        // line ends with ":" and they hit Enter before typing the value).
 
         var payLabeled = CleanFieldValue(GetLabeled("forma de pago")) ?? CleanFieldValue(GetLabeled("pago"));
         if (!string.IsNullOrWhiteSpace(payLabeled))
@@ -5317,10 +5318,41 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (!string.IsNullOrWhiteSpace(pedidoText))
             intake.Items = ParseItemsFreeform(pedidoText, menu);
 
+        // Tipo de entrega — multi-line capture so a value typed on the line
+        // below the label still counts. NormalizeDeliveryType handles the
+        // common synonyms (delivery / domicilio / envio / envío / pick / pickup
+        // / recoger / retirar / buscar).
+        var deliveryLabeled = ExtractMultiLineLabeled(lines, new[] { "tipo de entrega" }, knownKeys);
+        if (!string.IsNullOrWhiteSpace(deliveryLabeled))
+            intake.DeliveryType = NormalizeDeliveryType(deliveryLabeled);
+
         // Notas / Observaciones: same multi-line capture as Pedido. The label
         // may carry a colon ("NOTAS:" / "Observaciones:") or stand alone with
         // free text on the next line. Either form is supported.
         intake.Notes = ExtractMultiLineLabeled(lines, new[] { "notas", "observaciones" }, knownKeys);
+
+        // Whole-text DeliveryType fallback. Even when the label-line capture
+        // misses (e.g. customer types "voy a recoger" anywhere in the reply),
+        // scanning the raw text once with the same singularized vocabulary
+        // catches the intent. Only fires when no label-derived value exists,
+        // so a labeled value always wins.
+        if (string.IsNullOrWhiteSpace(intake.DeliveryType))
+        {
+            var inferredDelivery = NormalizeDeliveryType(rawText);
+            if (!string.IsNullOrWhiteSpace(inferredDelivery))
+                intake.DeliveryType = inferredDelivery;
+        }
+
+        // Whole-text PaymentMethod fallback. Mirrors the delivery fallback —
+        // when the label parser misses, scan the raw text. NormalizePaymentMethod
+        // already rejects template option separators like "/" + "efectivo" +
+        // "divis" (so the template itself doesn't self-match).
+        if (string.IsNullOrWhiteSpace(intake.PaymentMethod))
+        {
+            var inferredPay = NormalizePaymentMethod(rawText);
+            if (!string.IsNullOrWhiteSpace(inferredPay))
+                intake.PaymentMethod = inferredPay;
+        }
 
         // Phase 2 — freeform fallback. Only runs when nothing was extracted
         // by labels (otherwise we trust the labels). Resists destroying a
@@ -5366,7 +5398,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         }
 
         // Walk backwards from the end collecting payment vocabulary.
-        // "pago movil", "pago móvil", "zelle", "divisas", "efectivo", etc.
+        // "pago movil", "pago móvil", "zelle", "divisas", "efectivo", "pm",
+        // "transferencia", "tarjeta", "tdc"/"tdd", etc.
         int tailEnd = tokens.Length;
         int? paymentStart = null;
         for (int i = tokens.Length - 1; i >= 0; i--)
@@ -5374,10 +5407,12 @@ public sealed class WebhookProcessor : IWebhookProcessor
             var t = StripAccents(tokens[i].ToLowerInvariant());
             bool isPaymentToken =
                    t.StartsWith("pago")
-                || t is "movil" or "moc" or "mobil" or "mocil"
+                || t is "pm"
+                or "movil" or "moc" or "mobil" or "mocil"
                 or "zelle" or "efectivo" or "divisas" or "divisa"
-                or "transferencia" or "tarjeta" or "cash"
-                or "usd" or "dolar" or "dolares";
+                or "transferencia" or "transfer"
+                or "tarjeta" or "tdc" or "tdd"
+                or "cash" or "usd" or "dolar" or "dolares";
             if (isPaymentToken) paymentStart = i;
             else break;
         }
@@ -5972,6 +6007,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
             return "efectivo";
         if (p.Contains("zelle"))
             return "zelle";
+        // Bank transfer — Venezuelan customers often say "transferencia bancaria"
+        // or just "transfer".
+        if (p.Contains("transferenc") || p is "transfer")
+            return "transferencia";
+        // Card payments — "tarjeta", "tdc" (tarjeta de crédito), "tdd" (tarjeta
+        // de débito). Single-token matches kept narrow to avoid false hits.
+        if (p.Contains("tarjeta") || p is "tdc" or "tdd")
+            return "card";
 
         return null;
     }
