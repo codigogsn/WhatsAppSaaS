@@ -232,7 +232,15 @@ public interface IConversationStateStore
 
 public sealed class HumanChatEntry
 {
-    public string Sender { get; set; } = ""; // "customer" or "operator"
+    public string Sender { get; set; } = ""; // "customer" or "operator" or "bot"
     public string Text { get; set; } = "";
     public DateTime? At { get; set; }
+
+    // Media attachment fields — optional, populated only when the inbound
+    // WhatsApp message carried an image or document. Kept on the same entry
+    // (rather than a separate collection) so chronological order is implicit
+    // in the chat log's own ordering.
+    public string Kind { get; set; } = "text"; // "text" | "image" | "document"
+    public string? MediaId { get; set; }
+    public string? MimeType { get; set; }
 }

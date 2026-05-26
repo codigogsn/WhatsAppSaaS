@@ -398,7 +398,9 @@ public class AdminHandoffsController : ControllerBase
                 if (root.TryGetProperty("humanHandoffAtUtc", out var haProp) && haProp.ValueKind == JsonValueKind.String)
                     handoffAt = DateTime.TryParse(haProp.GetString(), out var dt2) ? dt2 : null;
 
-                // Extract chat log for transcript
+                // Extract chat log for transcript. Media metadata (kind/mediaId/mimeType)
+                // is optional — older entries written before the schema extension simply
+                // get null/"text" defaults so the frontend renders them as plain text.
                 var chatLog = new List<object>();
                 if (root.TryGetProperty("humanChatLog", out var clProp) && clProp.ValueKind == JsonValueKind.Array)
                 {
@@ -409,7 +411,13 @@ public class AdminHandoffsController : ControllerBase
                             sender = entry.TryGetProperty("sender", out var sp) ? sp.GetString() : "unknown",
                             text = entry.TryGetProperty("text", out var tp) ? tp.GetString() : "",
                             at = entry.TryGetProperty("at", out var ap) && ap.ValueKind == JsonValueKind.String
-                                ? ap.GetString() : null
+                                ? ap.GetString() : null,
+                            kind = entry.TryGetProperty("kind", out var kp) && kp.ValueKind == JsonValueKind.String
+                                ? kp.GetString() : "text",
+                            mediaId = entry.TryGetProperty("mediaId", out var mp) && mp.ValueKind == JsonValueKind.String
+                                ? mp.GetString() : null,
+                            mimeType = entry.TryGetProperty("mimeType", out var mtp) && mtp.ValueKind == JsonValueKind.String
+                                ? mtp.GetString() : null
                         });
                     }
                 }
@@ -433,6 +441,197 @@ public class AdminHandoffsController : ControllerBase
         }
 
         return Ok(new { total = conversations.Count, conversations });
+    }
+
+    /// <summary>
+    /// GET /api/admin/handoffs/{conversationId}/media/{mediaId}
+    /// Streams an inbound WhatsApp media attachment (image/document) so the
+    /// handoff console can render thumbnails / lightbox previews. Mirrors the
+    /// security model + disk cache of OrdersController.GetPaymentProof but
+    /// keyed on the conversation, since handoff media may exist before any
+    /// Order row is created.
+    /// </summary>
+    [HttpGet("{conversationId}/media/{mediaId}")]
+    public async Task<IActionResult> GetMedia(string conversationId, string mediaId, CancellationToken ct)
+    {
+        if (!IsAuthorized())
+            return Unauthorized();
+
+        if (string.IsNullOrWhiteSpace(mediaId))
+            return BadRequest(new { error = "mediaId is required" });
+
+        var entity = await _db.ConversationStates.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.ConversationId == conversationId, ct);
+        if (entity is null)
+            return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
+
+        // Verify the mediaId actually appears in this conversation's chatLog
+        // OR matches the conversation's PaymentProofMediaId. Prevents using
+        // this endpoint as an arbitrary WhatsApp media fetcher.
+        var (knownMime, isReferenced) = ScanChatLogForMedia(entity.StateJson, mediaId);
+        if (!isReferenced)
+            return NotFound(new { error = "Media not referenced by this conversation" });
+
+        // ── Local cache: serve from disk if previously downloaded ──
+        var (cachedData, cachedType) = await ReadMediaCacheAsync(mediaId, ct);
+        if (cachedData is not null)
+        {
+            Response.Headers["Cache-Control"] = "private, max-age=300";
+            return File(cachedData, SafeMediaContentType(cachedType!));
+        }
+
+        // Resolve per-business token. Fail closed — never fall back to a
+        // global token for tenant-bound media.
+        if (!entity.BusinessId.HasValue)
+        {
+            _logger.LogError("GetMedia: conversation {ConversationId} has no BusinessId", conversationId);
+            return StatusCode(500, new { error = "No se pudo verificar la cuenta del negocio para esta conversación." });
+        }
+
+        string? bizToken = null;
+        try
+        {
+            bizToken = await _db.Businesses.AsNoTracking()
+                .Where(b => b.Id == entity.BusinessId.Value && b.IsActive)
+                .Select(b => b.AccessToken)
+                .FirstOrDefaultAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "GetMedia: failed to look up business {BusinessId} for conversation {ConversationId}",
+                entity.BusinessId, conversationId);
+            return StatusCode(502, new { error = "No se pudo obtener las credenciales del negocio. Intenta de nuevo." });
+        }
+
+        if (string.IsNullOrWhiteSpace(bizToken))
+        {
+            _logger.LogError(
+                "GetMedia: no access token for business {BusinessId} (conversation {ConversationId})",
+                entity.BusinessId, conversationId);
+            return StatusCode(502, new { error = "El negocio no tiene token de acceso configurado." });
+        }
+
+        var result = await _whatsAppClient.GetMediaAsync(mediaId, bizToken, ct);
+        if (result is null)
+        {
+            _logger.LogWarning(
+                "GetMedia: download returned null for mediaId={MediaId} conversation={ConversationId}",
+                mediaId, conversationId);
+            return StatusCode(502, new { error = "No se pudo descargar el archivo desde WhatsApp." });
+        }
+
+        await WriteMediaCacheAsync(mediaId, result.Data, result.ContentType, ct);
+
+        var contentType = SafeMediaContentType(result.ContentType ?? knownMime ?? "application/octet-stream");
+        Response.Headers["Cache-Control"] = "private, max-age=300";
+        return File(result.Data, contentType);
+    }
+
+    // ── Handoff media disk cache (mirrors OrdersController proof cache pattern) ──
+
+    private static readonly string MediaCacheDir =
+        Path.Combine(AppContext.BaseDirectory, "data", "handoff_media");
+
+    private static string MediaBinPath(string mediaId) =>
+        Path.Combine(MediaCacheDir, SafeFileToken(mediaId) + ".bin");
+
+    private static string MediaTypePath(string mediaId) =>
+        Path.Combine(MediaCacheDir, SafeFileToken(mediaId) + ".type");
+
+    private static string SafeFileToken(string mediaId)
+    {
+        // WhatsApp media ids are numeric strings, but defensive sanitisation
+        // keeps this safe against any future format change.
+        var sb = new StringBuilder(mediaId.Length);
+        foreach (var ch in mediaId)
+            sb.Append(char.IsLetterOrDigit(ch) || ch is '-' or '_' ? ch : '_');
+        return sb.ToString();
+    }
+
+    private static async Task<(byte[]? data, string? contentType)> ReadMediaCacheAsync(string mediaId, CancellationToken ct)
+    {
+        var binPath = MediaBinPath(mediaId);
+        var typePath = MediaTypePath(mediaId);
+        if (!System.IO.File.Exists(binPath) || !System.IO.File.Exists(typePath))
+            return (null, null);
+        try
+        {
+            var data = await System.IO.File.ReadAllBytesAsync(binPath, ct);
+            var contentType = (await System.IO.File.ReadAllTextAsync(typePath, ct)).Trim();
+            if (data.Length == 0 || string.IsNullOrWhiteSpace(contentType))
+                return (null, null);
+            return (data, contentType);
+        }
+        catch
+        {
+            return (null, null);
+        }
+    }
+
+    private async Task WriteMediaCacheAsync(string mediaId, byte[] data, string contentType, CancellationToken ct)
+    {
+        try
+        {
+            Directory.CreateDirectory(MediaCacheDir);
+            await System.IO.File.WriteAllBytesAsync(MediaBinPath(mediaId), data, ct);
+            await System.IO.File.WriteAllTextAsync(MediaTypePath(mediaId), contentType ?? "application/octet-stream", ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to cache handoff media for mediaId={MediaId}", mediaId);
+        }
+    }
+
+    private static readonly HashSet<string> AllowedMediaTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"
+    };
+
+    private static string SafeMediaContentType(string ct) =>
+        AllowedMediaTypes.Contains(ct) ? ct : "application/octet-stream";
+
+    /// <summary>
+    /// Scans a conversation's StateJson for any HumanChatLog entry referencing
+    /// the given mediaId, OR for a top-level PaymentProofMediaId match. Returns
+    /// the recorded MIME type (if any) and whether the reference was found.
+    /// </summary>
+    private static (string? mimeType, bool isReferenced) ScanChatLogForMedia(string? stateJson, string mediaId)
+    {
+        if (string.IsNullOrWhiteSpace(stateJson)) return (null, false);
+        try
+        {
+            using var doc = JsonDocument.Parse(stateJson);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("paymentProofMediaId", out var ppm)
+                && ppm.ValueKind == JsonValueKind.String
+                && string.Equals(ppm.GetString(), mediaId, StringComparison.Ordinal))
+            {
+                return (null, true);
+            }
+
+            if (root.TryGetProperty("humanChatLog", out var cl) && cl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var entry in cl.EnumerateArray())
+                {
+                    if (entry.TryGetProperty("mediaId", out var mp)
+                        && mp.ValueKind == JsonValueKind.String
+                        && string.Equals(mp.GetString(), mediaId, StringComparison.Ordinal))
+                    {
+                        var mime = entry.TryGetProperty("mimeType", out var mtp) && mtp.ValueKind == JsonValueKind.String
+                            ? mtp.GetString()
+                            : null;
+                        return (mime, true);
+                    }
+                }
+            }
+        }
+        catch { /* malformed JSON ⇒ treat as not referenced */ }
+
+        return (null, false);
     }
 
     public sealed class ReplyRequest

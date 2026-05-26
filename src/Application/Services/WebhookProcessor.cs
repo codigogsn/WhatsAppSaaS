@@ -177,9 +177,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (state.HumanOverride)
                     {
                         state.LastActivityUtc = DateTime.UtcNow;
-                        // Log customer message to chat transcript for operator visibility
-                        var msgText = message.Text?.Body ?? $"[{message.Type}]";
-                        state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = msgText, At = DateTime.UtcNow });
+                        // Log customer message to chat transcript for operator visibility.
+                        // Image/document inbound messages are stored with media metadata so
+                        // the operator pane can render a thumbnail via the handoff media
+                        // endpoint; text messages keep the original {Sender,Text,At} shape.
+                        state.HumanChatLog.Add(BuildInboundChatEntry(message));
                         if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
                         await _stateStore.SaveAsync(conversationId, state, cancellationToken);
                         continue;
@@ -319,6 +321,20 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     //    OR order was confirmed but proof is still pending (post-confirm capture)
                     if (message.Type != "text")
                     {
+                        // Mirror inbound media into the operator transcript whenever the
+                        // conversation is in any handoff state so the console pane renders
+                        // a thumbnail immediately. The bot's payment-evidence capture below
+                        // is untouched — this is a transcript-only mirror. HumanOverride
+                        // already short-circuits at the top of the loop, so in practice
+                        // this only fires for HumanHandoffRequested-but-not-yet-overridden
+                        // and for any other future handoff state.
+                        if ((state.HumanHandoffRequested || state.HumanOverride)
+                            && message.Type is "image" or "document")
+                        {
+                            state.HumanChatLog.Add(BuildInboundChatEntry(message));
+                            if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
+                        }
+
                         var shouldCaptureProof = !state.PaymentEvidenceReceived
                             && (state.PaymentEvidenceRequested
                                 || (state.Items.Count > 0 && state.PaymentMethod is "pago_movil" or "divisas" or "zelle")
@@ -2367,6 +2383,42 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 return v;
         }
         return null;
+    }
+
+    // Builds a HumanChatLog entry for an inbound WhatsApp message, preserving
+    // media metadata (id + mime type) when the message carries an image or
+    // document. Used by the HumanOverride branch and by the inbound-image
+    // mirror inside the media-capture path so the operator pane renders
+    // thumbnails in chronological order.
+    private static HumanChatEntry BuildInboundChatEntry(WebhookMessage message)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        if (message.Type is "image" or "document")
+        {
+            var media = message.Type == "image" ? message.Image : message.Document;
+            if (media is not null && !string.IsNullOrWhiteSpace(media.Id))
+            {
+                return new HumanChatEntry
+                {
+                    Sender = "customer",
+                    Kind = message.Type,
+                    MediaId = media.Id,
+                    MimeType = string.IsNullOrWhiteSpace(media.MimeType) ? null : media.MimeType,
+                    Text = "",
+                    At = nowUtc
+                };
+            }
+        }
+
+        var msgText = message.Text?.Body ?? $"[{message.Type}]";
+        return new HumanChatEntry
+        {
+            Sender = "customer",
+            Text = msgText,
+            Kind = "text",
+            At = nowUtc
+        };
     }
 
     private BotReply BuildReply(

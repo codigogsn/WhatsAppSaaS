@@ -1220,6 +1220,23 @@
     .hf-bubble-time { font-size: 10px; color: var(--muted); margin-top: 2px; }
     .hf-empty { font-size: 12px; color: var(--muted); padding: 12px 0; text-align: center; }
 
+    /* Inbound media — image thumbnail / document tile inside a chat bubble */
+    .hf-bubble.has-media { padding: 4px; max-width: 220px; cursor: pointer; }
+    .hf-media { position: relative; min-height: 96px; min-width: 140px; border-radius: 8px; overflow: hidden; background: rgba(255,255,255,.03); display: flex; align-items: center; justify-content: center; }
+    .hf-media img { display: block; max-width: 100%; max-height: 260px; border-radius: 8px; object-fit: cover; }
+    .hf-media .hf-media-spin { width: 18px; height: 18px; border: 2px solid var(--border-light); border-top-color: var(--accent, #3b82f6); border-radius: 50%; animation: hfMediaSpin 700ms linear infinite; }
+    .hf-media .hf-media-err { padding: 12px; font-size: 11px; color: var(--muted); text-align: center; line-height: 1.4; }
+    .hf-media .hf-media-doc { padding: 12px; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--text, #e5e5e5); }
+    .hf-media .hf-media-doc-icon { width: 28px; height: 28px; border-radius: 6px; background: rgba(59,130,246,.18); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 11px; letter-spacing: .3px; }
+    @keyframes hfMediaSpin { to { transform: rotate(360deg); } }
+
+    /* Full-screen lightbox overlay */
+    .hf-lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.86); z-index: 9999; display: none; align-items: center; justify-content: center; padding: 24px; }
+    .hf-lightbox.is-open { display: flex; }
+    .hf-lightbox img { max-width: 95vw; max-height: 90vh; border-radius: 6px; box-shadow: 0 24px 64px rgba(0,0,0,.6); }
+    .hf-lightbox-close { position: absolute; top: 16px; right: 20px; background: rgba(255,255,255,.08); color: #fff; border: 0; width: 36px; height: 36px; border-radius: 50%; font-size: 18px; cursor: pointer; }
+    .hf-lightbox-close:hover { background: rgba(255,255,255,.15); }
+
     @media (max-width: 1024px) {
       .hero-kpi { grid-template-columns: 1fr 1fr; }
       .hero-alerts { grid-column: 1 / -1; flex-direction: row; }
@@ -4907,17 +4924,46 @@ function _handoffBuildChat(log){
   }
   var html = '<div class="hf-chat">';
   for (var i = 0; i < log.length; i++) {
-    var m = log[i];
-    var cls = m.sender === 'operator' ? 'operator'
-            : m.sender === 'bot'      ? 'bot'
-            :                           'customer';
-    var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
-    html += '<div class="hf-bubble ' + cls + '">' + esc(m.text || '')
-      + (timeStr ? '<div class="hf-bubble-time">' + timeStr + '</div>' : '')
-      + '</div>';
+    html += _handoffBuildBubbleHtml(log[i]);
   }
   html += '</div>';
   return html;
+}
+
+// Renders a single chat bubble — text, image, or document. For media entries
+// the <img> starts hidden behind a spinner; _handoffLoadPendingMedia() then
+// fetches the bytes via authFetch and swaps in a blob URL, or shows the
+// localized error string when the WhatsApp media has expired / can't be reached.
+function _handoffBuildBubbleHtml(m){
+  if (!m) return '';
+  var cls = m.sender === 'operator' ? 'operator'
+          : m.sender === 'bot'      ? 'bot'
+          :                           'customer';
+  var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
+  var timeHtml = timeStr ? '<div class="hf-bubble-time">' + timeStr + '</div>' : '';
+
+  if (m.kind === 'image' && m.mediaId){
+    return '<div class="hf-bubble ' + cls + ' has-media" data-media-id="' + esc(m.mediaId) + '" data-media-kind="image" onclick="_handoffLightboxOpenFromBubble(this)">'
+         +   '<div class="hf-media">'
+         +     '<div class="hf-media-spin" aria-label="Cargando archivo"></div>'
+         +     '<img alt="Imagen del cliente" style="display:none;" />'
+         +     '<div class="hf-media-err" style="display:none;">No se pudo cargar el archivo</div>'
+         +   '</div>'
+         +   timeHtml
+         + '</div>';
+  }
+  if (m.kind === 'document' && m.mediaId){
+    return '<div class="hf-bubble ' + cls + ' has-media" data-media-id="' + esc(m.mediaId) + '" data-media-kind="document" onclick="_handoffLightboxOpenFromBubble(this)">'
+         +   '<div class="hf-media">'
+         +     '<div class="hf-media-doc">'
+         +       '<div class="hf-media-doc-icon">PDF</div>'
+         +       '<div>Documento del cliente</div>'
+         +     '</div>'
+         +   '</div>'
+         +   timeHtml
+         + '</div>';
+  }
+  return '<div class="hf-bubble ' + cls + '">' + esc(m.text || '') + timeHtml + '</div>';
 }
 
 function _handoffBuildCard(h){
@@ -5288,21 +5334,19 @@ function _handoffPaintPane(opts){
           }
         } else if (newLog.length > existingCount){
           for (var j = existingCount; j < newLog.length; j++){
-            var m = newLog[j];
-            var cls = m.sender === 'operator' ? 'operator'
-                    : m.sender === 'bot'      ? 'bot'
-                    :                           'customer';
-            var timeStr = m.at ? new Date(m.at).toLocaleTimeString('es-VE', {hour:'2-digit',minute:'2-digit'}) : '';
-            var bubble = document.createElement('div');
-            bubble.className = 'hf-bubble ' + cls;
-            bubble.innerHTML = esc(m.text || '')
-              + (timeStr ? '<div class="hf-bubble-time">' + timeStr + '</div>' : '');
-            chatEl.appendChild(bubble);
+            var wrap = document.createElement('div');
+            wrap.innerHTML = _handoffBuildBubbleHtml(newLog[j]);
+            var bubble = wrap.firstChild;
+            if (bubble) chatEl.appendChild(bubble);
           }
           if (wasAtBottom) chatEl.scrollTop = chatEl.scrollHeight;
         }
       }
     }
+    // Kick off async fetch for any media bubble that hasn't been hydrated yet.
+    // Each bubble carries its own lifecycle (spinner → image | error), and the
+    // loader is idempotent so a re-paint on the next tick is harmless.
+    _handoffLoadPendingMedia(slot, h.conversationId);
   }
 
   // Composer — only restore draft when switching conversation (never on
@@ -5331,6 +5375,104 @@ function _handoffOperatorHasReplied(h){
   }
   return false;
 }
+
+// Cache of already-resolved blob URLs keyed by mediaId so reloading the same
+// conversation (or switching away and back) doesn't refetch.
+window._handoffMediaUrlCache = window._handoffMediaUrlCache || {};
+
+// Scans the transcript for media bubbles still in their pending state and
+// hydrates each one in parallel. Re-running this is safe — bubbles already
+// loaded or already failed are marked with data-loaded / data-failed.
+function _handoffLoadPendingMedia(rootEl, conversationId){
+  if (!rootEl || !conversationId) return;
+  var bubbles = rootEl.querySelectorAll('.hf-bubble.has-media[data-media-id]:not([data-loaded]):not([data-failed])');
+  for (var i = 0; i < bubbles.length; i++){
+    (function(bubble){
+      var mediaId = bubble.getAttribute('data-media-id');
+      var kind = bubble.getAttribute('data-media-kind') || 'image';
+      if (!mediaId) return;
+      bubble.setAttribute('data-loading', '1');
+      _handoffFetchMedia(conversationId, mediaId).then(function(url){
+        bubble.removeAttribute('data-loading');
+        bubble.setAttribute('data-loaded', '1');
+        var spin = bubble.querySelector('.hf-media-spin');
+        var img = bubble.querySelector('img');
+        var doc = bubble.querySelector('.hf-media-doc');
+        if (spin) spin.style.display = 'none';
+        if (kind === 'image' && img){
+          img.src = url;
+          img.style.display = '';
+        } else if (doc){
+          doc.setAttribute('data-url', url);
+        }
+      }).catch(function(){
+        bubble.removeAttribute('data-loading');
+        bubble.setAttribute('data-failed', '1');
+        var spin = bubble.querySelector('.hf-media-spin');
+        var img = bubble.querySelector('img');
+        var doc = bubble.querySelector('.hf-media-doc');
+        var err = bubble.querySelector('.hf-media-err');
+        if (spin) spin.style.display = 'none';
+        if (img) img.style.display = 'none';
+        if (doc) doc.style.display = 'none';
+        if (err) err.style.display = '';
+      });
+    })(bubbles[i]);
+  }
+}
+
+async function _handoffFetchMedia(conversationId, mediaId){
+  if (window._handoffMediaUrlCache[mediaId])
+    return window._handoffMediaUrlCache[mediaId];
+  var url = '/api/admin/handoffs/' + encodeURIComponent(conversationId)
+          + '/media/' + encodeURIComponent(mediaId);
+  var res = await authFetch(url);
+  if (!res.ok) throw new Error('http ' + res.status);
+  var blob = await res.blob();
+  var objUrl = URL.createObjectURL(blob);
+  window._handoffMediaUrlCache[mediaId] = objUrl;
+  return objUrl;
+}
+
+function _handoffLightboxOpenFromBubble(bubble){
+  if (!bubble) return;
+  // Only open the lightbox when the media is ready (image case). Pending /
+  // failed bubbles are no-ops so a stray click doesn't show a blank overlay.
+  if (bubble.getAttribute('data-failed')) return;
+  if (!bubble.getAttribute('data-loaded')) return;
+  var kind = bubble.getAttribute('data-media-kind') || 'image';
+  var box = document.getElementById('hfcMediaLightbox');
+  var img = document.getElementById('hfcMediaLightboxImg');
+  if (!box || !img) return;
+  if (kind === 'image'){
+    var srcImg = bubble.querySelector('img');
+    if (!srcImg || !srcImg.src) return;
+    img.src = srcImg.src;
+    box.classList.add('is-open');
+  } else if (kind === 'document'){
+    var doc = bubble.querySelector('.hf-media-doc');
+    var url = doc && doc.getAttribute('data-url');
+    if (url) window.open(url, '_blank', 'noopener');
+  }
+}
+
+function _handoffLightboxClose(){
+  var box = document.getElementById('hfcMediaLightbox');
+  var img = document.getElementById('hfcMediaLightboxImg');
+  if (box) box.classList.remove('is-open');
+  if (img) img.removeAttribute('src');
+}
+
+// ESC closes the lightbox; backdrop click closes too.
+document.addEventListener('keydown', function(e){
+  if (e.key === 'Escape'){
+    var box = document.getElementById('hfcMediaLightbox');
+    if (box && box.classList.contains('is-open')) _handoffLightboxClose();
+  }
+});
+document.addEventListener('click', function(e){
+  if (e.target && e.target.id === 'hfcMediaLightbox') _handoffLightboxClose();
+});
 
 // Returns an editable Spanish greeting suggestion for the composer when the
 // operator opens a fresh conversation. Uses the operator's first name from
@@ -8024,6 +8166,12 @@ async function sendPromotion(){
       </div>
     </div>
   </div>
+</div>
+
+<!-- Handoff media lightbox — single, reused across all conversations -->
+<div id="hfcMediaLightbox" class="hf-lightbox" role="dialog" aria-modal="true" aria-label="Vista previa">
+  <button class="hf-lightbox-close" type="button" aria-label="Cerrar" onclick="_handoffLightboxClose()">×</button>
+  <img id="hfcMediaLightboxImg" alt="Vista previa del archivo" />
 </div>
 </body>
 </html>
