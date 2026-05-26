@@ -5631,19 +5631,59 @@ document.addEventListener('click', function(e){
   if (e.target && e.target.id === 'hfcMediaLightbox') _handoffLightboxClose();
 });
 
-// Returns an editable Spanish greeting suggestion for the composer when the
-// operator opens a fresh conversation. Uses the operator's first name from
-// the JWT user payload when available; otherwise falls back to a neutral
-// phrasing. The composer never auto-sends — the operator must press Enter
-// or click Enviar.
+// Returns the editable Spanish intake template for the composer when the
+// operator opens a fresh conversation. The composer never auto-sends — the
+// operator must press Enter or click Enviar. Suppression of re-prefill after
+// the operator's first reply is enforced by _handoffOperatorHasReplied at the
+// caller site, so this function does not need to track per-conversation state.
+//
+// Brand headline is tenant-aware. La Mina (business name contains both "mina"
+// and "shawarma") gets the branded line; every other tenant gets a generic
+// header carrying the business's own name. The fields below the header are
+// identical across tenants so the upcoming server-side parser (commit 3b) can
+// extract them with one pass.
 function _handoffComposerPrefill(){
-  var name = '';
+  var businessName = _handoffResolveBusinessName();
+  var headline = _handoffComposerHeadline(businessName);
+  return 'Para agilizar el proceso, y poder enviar a nuestro repartidor correctamente por favor envíenos lo siguiente:\n\n'
+       + (headline ? headline + '\n' : '')
+       + '👤 *Nombre y apellido*:\n'
+       + '🪪 *Cédula de identidad*:\n'
+       + '📱 *Número de teléfono celular*:\n'
+       + '🏡 *Dirección escrita (Nombre de residencia, calle y N° apto/casa)*:\n'
+       + '📝 *Pedido*:\n'
+       + '📦 *¿Recibe usted mismo/a?*:\n'
+       + '💵 *Forma de Pago*:';
+}
+
+// Resolves the business name for the currently-selected conversation by
+// looking up the businessId against the JWT user's businesses list. Returns
+// '' when no match is found so callers can fall back to a generic headline
+// without breaking the multi-sede UX.
+function _handoffResolveBusinessName(){
   try {
+    var h = (typeof _handoffFindSelected === 'function') ? _handoffFindSelected() : null;
+    if (!h || !h.businessId) return '';
     var u = (typeof getJwtUser === 'function') ? getJwtUser() : null;
-    if (u && typeof u.name === 'string') name = u.name.trim().split(/\s+/)[0] || '';
+    var list = (u && Array.isArray(u.businesses)) ? u.businesses : [];
+    for (var i = 0; i < list.length; i++){
+      if (list[i] && String(list[i].id) === String(h.businessId))
+        return String(list[i].name || '');
+    }
   } catch (e) {}
-  var who = name ? ('soy ' + name) : 'te atiendo yo';
-  return 'Hola, ' + who + '. Estoy revisando tu caso. Cuéntame qué ocurrió y qué querías pedir para ayudarte por aquí.';
+  return '';
+}
+
+// Brand-specific intake headline. La Mina opts in by name match; every other
+// tenant gets a bolded business name so the customer sees who they're
+// answering. Returns '' when no business name is known, in which case the
+// caller renders the fields without a headline.
+function _handoffComposerHeadline(businessName){
+  if (!businessName) return '';
+  var s = businessName.toLowerCase();
+  if (s.indexOf('mina') !== -1 && s.indexOf('shawarma') !== -1)
+    return '🌯LA MINA DEL SHAWARMA 🌯';
+  return '*' + businessName.trim() + '*';
 }
 
 // Persistent draft panel between header and transcript. Visible whenever
