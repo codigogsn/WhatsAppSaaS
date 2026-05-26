@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using WhatsAppSaaS.Application.Interfaces;
+using WhatsAppSaaS.Application.Services;
 using WhatsAppSaaS.Domain.Entities;
 using WhatsAppSaaS.Infrastructure.Persistence;
 
@@ -21,14 +22,21 @@ public class AdminHandoffsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
     private readonly IWhatsAppClient _whatsAppClient;
+    private readonly IExchangeRateProvider _exchangeRateProvider;
     private readonly ILogger<AdminHandoffsController> _logger;
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    public AdminHandoffsController(AppDbContext db, IConfiguration config, IWhatsAppClient whatsAppClient, ILogger<AdminHandoffsController> logger)
+    public AdminHandoffsController(
+        AppDbContext db,
+        IConfiguration config,
+        IWhatsAppClient whatsAppClient,
+        IExchangeRateProvider exchangeRateProvider,
+        ILogger<AdminHandoffsController> logger)
     {
         _db = db;
         _config = config;
         _whatsAppClient = whatsAppClient;
+        _exchangeRateProvider = exchangeRateProvider;
         _logger = logger;
     }
 
@@ -764,6 +772,152 @@ public class AdminHandoffsController : ControllerBase
             await _db.SaveChangesAsync(ct);
         }
         return Ok(new { deleted = true, hadDraft = removed });
+    }
+
+    /// <summary>
+    /// POST /api/admin/handoffs/{conversationId}/draft/preview-message
+    /// Validates the operator draft and, when structurally valid, returns a
+    /// composed customer-facing message (Spanish) using the existing bot-flow
+    /// templates plus the per-business Pago-Móvil config and current BCV rate.
+    /// Side-effect free — the message is NOT sent. The operator copies it into
+    /// the composer and presses Enviar manually.
+    /// </summary>
+    [HttpPost("{conversationId}/draft/preview-message")]
+    public async Task<IActionResult> PreviewDraftMessage(string conversationId, CancellationToken ct)
+    {
+        if (!IsAuthorized()) return Unauthorized();
+
+        var entity = await _db.ConversationStates.AsNoTracking()
+            .FirstOrDefaultAsync(c => c.ConversationId == conversationId, ct);
+        if (entity is null) return NotFound(new { error = "Conversation not found" });
+        if (!IsAuthorizedForConversation(entity))
+            return Unauthorized(new { error = "Not authorized for this conversation's business" });
+
+        var draft = ReadDraftFromStateJson(entity.StateJson);
+        if (draft is null)
+            return UnprocessableEntity(new { ok = false, error = "No hay borrador para esta conversación.", missing = new[] { "draft" }, unpriced = Array.Empty<string>() });
+
+        // ── Validation ──────────────────────────────────────────────────────
+        var missing = new List<string>();
+        var unpriced = new List<string>();
+
+        if (string.IsNullOrWhiteSpace(draft.CustomerName))     missing.Add("customerName");
+        if (string.IsNullOrWhiteSpace(draft.CustomerIdNumber)) missing.Add("customerIdNumber");
+        if (string.IsNullOrWhiteSpace(draft.CustomerPhone))    missing.Add("customerPhone");
+        if (string.IsNullOrWhiteSpace(draft.DeliveryType))     missing.Add("deliveryType");
+        if (string.IsNullOrWhiteSpace(draft.PaymentMethod))    missing.Add("paymentMethod");
+        if (draft.DeliveryType == "delivery" && string.IsNullOrWhiteSpace(draft.Address))
+            missing.Add("address");
+        if (draft.Items is null || draft.Items.Count == 0)
+            missing.Add("items");
+
+        if (draft.Items is { Count: > 0 })
+        {
+            foreach (var i in draft.Items)
+            {
+                if (!(i.UnitPrice is { } up && up > 0m))
+                    unpriced.Add(string.IsNullOrWhiteSpace(i.Name) ? "(sin nombre)" : i.Name);
+            }
+        }
+
+        // Compute totals for the response (and the post-validation guard).
+        var subtotal = 0m;
+        if (draft.Items is { Count: > 0 })
+            foreach (var i in draft.Items)
+                if (i.UnitPrice is { } up && up > 0m)
+                    subtotal += up * i.Quantity;
+        var deliveryFee = draft.DeliveryType == "delivery" ? HandoffMessageBuilder.DeliveryFeeUsd : 0m;
+        var totalUsd = subtotal + deliveryFee;
+
+        if (missing.Count == 0 && unpriced.Count == 0 && totalUsd <= deliveryFee)
+            missing.Add("total");
+
+        if (missing.Count > 0 || unpriced.Count > 0)
+        {
+            return UnprocessableEntity(new
+            {
+                ok = false,
+                error = "El borrador no está completo para generar el mensaje.",
+                missing,
+                unpriced
+            });
+        }
+
+        // ── Resolve business config + BCV rate ──────────────────────────────
+        Business? biz = null;
+        if (entity.BusinessId.HasValue)
+        {
+            biz = await _db.Businesses.AsNoTracking()
+                .Where(b => b.Id == entity.BusinessId.Value)
+                .FirstOrDefaultAsync(ct);
+        }
+
+        ResolvedRate? bcvRate = null;
+        try
+        {
+            bcvRate = await _exchangeRateProvider.GetRateAsync(biz?.CurrencyReference, ct);
+        }
+        catch (Exception ex)
+        {
+            // Rate fetch failure is non-fatal — message renders without the Bs line.
+            _logger.LogWarning(ex,
+                "PreviewDraftMessage: BCV rate fetch failed for {ConversationId}", conversationId);
+        }
+
+        var hasPagoMobileConfig =
+            !string.IsNullOrWhiteSpace(biz?.PaymentMobileBank)
+            && !string.IsNullOrWhiteSpace(biz?.PaymentMobileId)
+            && !string.IsNullOrWhiteSpace(biz?.PaymentMobilePhone);
+
+        // Convert OperatorDraftItem → ConversationItemEntry (the shape the
+        // existing OrderSummaryWithTotal template consumes).
+        var items = draft.Items!
+            .Select(i => new ConversationItemEntry
+            {
+                Name = i.Name ?? "",
+                Quantity = i.Quantity,
+                Modifiers = i.Modifiers,
+                UnitPrice = i.UnitPrice ?? 0m
+            })
+            .ToList();
+
+        var input = new HandoffReviewInput
+        {
+            CustomerName        = draft.CustomerName!,
+            CustomerIdNumber    = draft.CustomerIdNumber!,
+            CustomerPhone       = draft.CustomerPhone!,
+            Address             = draft.Address,
+            DeliveryType        = draft.DeliveryType!,
+            PaymentMethod       = draft.PaymentMethod!,
+            SpecialInstructions = draft.SpecialInstructions,
+            Items               = items,
+            PagoMovilBank       = biz?.PaymentMobileBank,
+            PagoMovilId         = biz?.PaymentMobileId,
+            PagoMovilPhone      = biz?.PaymentMobilePhone
+        };
+
+        var message = HandoffMessageBuilder.Build(input, bcvRate);
+
+        decimal? totalBs = null;
+        if (bcvRate is { Rate: > 0 } && totalUsd > 0)
+            totalBs = totalUsd * bcvRate.Rate;
+
+        return Ok(new
+        {
+            ok = true,
+            message,
+            totals = new
+            {
+                subtotal,
+                deliveryFee,
+                totalUsd,
+                bsRate     = bcvRate?.Rate,
+                totalBs,
+                isStaleRate = bcvRate?.IsStale ?? false,
+                rateLabel  = bcvRate?.CurrencyLabel
+            },
+            hasPagoMobileConfig
+        });
     }
 
     // ── Draft helpers (private) ──

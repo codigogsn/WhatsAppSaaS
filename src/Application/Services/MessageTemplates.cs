@@ -558,6 +558,7 @@ internal static class Msg
         return text;
     }
 
+
     private static string FormatDeliveryType(string dt)
         => dt switch
         {
@@ -820,5 +821,121 @@ internal static class Msg
         sb.Append("Gracias por tu compra \ud83d\ude4f");
 
         return sb.ToString();
+    }
+}
+
+// \u2500\u2500 Handoff review message (Commit 3c) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+//
+// Composes the message the operator pastes into the composer and sends to
+// the customer after building an OperatorDraft. Reuses the existing bot-flow
+// templates inside Msg so the customer-facing copy stays consistent whether
+// the order was driven by the bot or by a human:
+//   \u2022 Msg.OrderSummaryWithTotal     \u2014 items list + Subtotal/Delivery/Total + Bs ref
+//   \u2022 Msg.PagoMovilDetails / ZelleDetails \u2014 payment instructions
+//   \u2022 Msg.PagoMovilProofRequest / Msg.ZelleProofRequest / Msg.DivisasProofRequest \u2014 tail
+//
+// Public class (Msg itself is internal) so Api.Controllers.AdminHandoffsController
+// can call it across the assembly boundary. Validation belongs to the caller \u2014
+// this builder assumes the input has already been structurally checked.
+
+public sealed class HandoffReviewInput
+{
+    public string CustomerName        { get; set; } = "";
+    public string CustomerIdNumber    { get; set; } = "";
+    public string CustomerPhone       { get; set; } = "";
+    public string? Address            { get; set; }
+    public string DeliveryType        { get; set; } = "";   // "delivery" | "pickup"
+    public string PaymentMethod       { get; set; } = "";   // "pago_movil" | "zelle" | "divisas" | "efectivo" | "transferencia" | "card"
+    public string? SpecialInstructions { get; set; }
+    public IReadOnlyList<ConversationItemEntry> Items { get; set; } = Array.Empty<ConversationItemEntry>();
+
+    // Per-business Pago-M\u00f3vil credentials. When any of these are blank the
+    // payment-data block is omitted and only the proof request is emitted;
+    // the endpoint signals this back to the UI so the operator can fill the
+    // missing fields manually in the composer before sending.
+    public string? PagoMovilBank  { get; set; }
+    public string? PagoMovilId    { get; set; }
+    public string? PagoMovilPhone { get; set; }
+}
+
+public static class HandoffMessageBuilder
+{
+    // Public re-export of the bot-flow delivery-fee constant so callers
+    // outside the Application assembly (e.g. AdminHandoffsController) can
+    // validate totals without re-deriving the value.
+    public const decimal DeliveryFeeUsd = 4.00m;
+
+    public static string Build(HandoffReviewInput input, ResolvedRate? bcvRate)
+    {
+        var sb = new StringBuilder();
+
+        sb.AppendLine("\ud83d\udccb *Confirmaci\u00f3n de tu pedido*");
+        sb.AppendLine();
+        sb.AppendLine($"\ud83d\udc64 *Nombre:* {input.CustomerName}");
+        sb.AppendLine($"\ud83e\udeaa *C\u00e9dula:* {input.CustomerIdNumber}");
+        sb.AppendLine($"\ud83d\udcf1 *Tel\u00e9fono:* {input.CustomerPhone}");
+        if (input.DeliveryType == "delivery" && !string.IsNullOrWhiteSpace(input.Address))
+            sb.AppendLine($"\ud83c\udfe1 *Direcci\u00f3n:* {input.Address}");
+        sb.AppendLine($"\ud83d\ude9a *Entrega:* {(input.DeliveryType == "pickup" ? "Pick up en tienda" : "Delivery")}");
+        sb.AppendLine();
+
+        // Items + Subtotal/Delivery/Total + Bs ref \u2014 reuses the same template
+        // the bot's checkout flow already emits.
+        sb.AppendLine(Msg.OrderSummaryWithTotal(input.Items, bcvRate, input.DeliveryType));
+        sb.AppendLine();
+
+        var subtotal = 0m;
+        foreach (var it in input.Items) subtotal += it.UnitPrice * it.Quantity;
+        var fee = input.DeliveryType == "delivery" ? Msg.DeliveryFeeUsd : 0m;
+        var totalUsd = subtotal + fee;
+
+        var paymentBlock = BuildPaymentBlock(input, bcvRate, totalUsd);
+        if (!string.IsNullOrWhiteSpace(paymentBlock))
+        {
+            sb.AppendLine(paymentBlock);
+            sb.AppendLine();
+        }
+
+        if (!string.IsNullOrWhiteSpace(input.SpecialInstructions))
+        {
+            sb.AppendLine($"\u270d\ufe0f *Observaciones:* {input.SpecialInstructions!.Trim()}");
+            sb.AppendLine();
+        }
+
+        var proofTail = input.PaymentMethod switch
+        {
+            "pago_movil" => Msg.PagoMovilProofRequest,
+            "zelle"      => Msg.ZelleProofRequest,
+            "divisas"    => Msg.DivisasProofRequest,
+            _            => null
+        };
+        if (!string.IsNullOrWhiteSpace(proofTail))
+            sb.Append(proofTail);
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string? BuildPaymentBlock(HandoffReviewInput input, ResolvedRate? bcvRate, decimal totalUsd)
+    {
+        switch (input.PaymentMethod)
+        {
+            case "pago_movil":
+                if (string.IsNullOrWhiteSpace(input.PagoMovilBank)
+                    || string.IsNullOrWhiteSpace(input.PagoMovilId)
+                    || string.IsNullOrWhiteSpace(input.PagoMovilPhone))
+                    return null;
+                string? bsAmount = null;
+                if (bcvRate is { Rate: > 0 } && totalUsd > 0)
+                    bsAmount = $"{totalUsd * bcvRate.Rate:N2}";
+                return Msg.PagoMovilDetails(input.PagoMovilBank!, input.PagoMovilId!, input.PagoMovilPhone!, bsAmount);
+
+            case "zelle":
+                // Per-business Zelle recipient isn't on the Business entity yet;
+                // render a placeholder so the operator fills it in the composer.
+                return Msg.ZelleDetails(recipient: "(a\u00f1adir destinatario Zelle)");
+
+            default:
+                return null;
+        }
     }
 }

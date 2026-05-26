@@ -2845,6 +2845,46 @@
     #viewHandoff .hfc-op-foot .hfc-action-btn[disabled] {
       opacity: .4; cursor: not-allowed;
     }
+
+    /* Operator draft "Mensaje para el cliente" section (Commit 3c) */
+    #viewHandoff .hfc-op-msg-head {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 8px;
+    }
+    #viewHandoff .hfc-op-chip {
+      font-size: 10px; font-weight: 700; letter-spacing: .04em;
+      text-transform: uppercase;
+      padding: 2px 8px; border-radius: 8px;
+      background: rgba(148,163,184,.18); color: var(--muted);
+      white-space: nowrap;
+    }
+    #viewHandoff .hfc-op-chip.is-ok    { background: rgba(34,197,94,.14);  color: #16a34a; }
+    #viewHandoff .hfc-op-chip.is-warn  { background: rgba(245,158,11,.14); color: #b45309; }
+    #viewHandoff .hfc-op-chip.is-err   { background: rgba(239,68,68,.14);  color: #dc2626; }
+    #viewHandoff .hfc-op-msg-text {
+      width: 100%;
+      min-height: 120px; max-height: 220px;
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      padding: 10px;
+      border: 1px solid var(--border-light, var(--border));
+      border-radius: 6px;
+      background: rgba(255,255,255,.02);
+      color: var(--text);
+      resize: vertical;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    #viewHandoff .hfc-op-msg-text[readonly] { cursor: default; }
+    #viewHandoff .hfc-op-msg-actions {
+      display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end;
+    }
+    #viewHandoff .hfc-op-msg-actions .hfc-action-btn {
+      font-size: 11px; padding: 6px 12px;
+    }
+    #viewHandoff .hfc-op-msg-issue {
+      font-size: 11px; color: var(--muted);
+      padding: 4px 0; line-height: 1.5;
+    }
+    #viewHandoff .hfc-op-msg-issue.is-err { color: #dc2626; }
   </style>
 </head>
 <body>
@@ -5819,6 +5859,12 @@ function _handoffOpRenderBody(h, d){
   // TOTALS (preview only — server is authoritative when an Order is later persisted)
   sections.push(_handoffOpRenderTotals(d));
 
+  // MENSAJE PARA EL CLIENTE — server-generated review message + Copy-to-composer.
+  // Validation chip mirrors the server rules for instant UX feedback. The
+  // message itself is fetched on demand via POST .../draft/preview-message;
+  // the textarea stays empty until the operator clicks "Generar mensaje".
+  sections.push(_handoffOpRenderMessageSection(d));
+
   return sections.join('');
 }
 
@@ -5896,6 +5942,165 @@ function _handoffOpRenderTotals(d){
     +     (hasAllPrices ? '$' + total.toFixed(2) : '—')
     +   '</dd>'
     + '</dl>';
+}
+
+// ── Mensaje para el cliente — message preview + copy-to-composer ───────────
+// Validates client-side, then on Generar mensaje posts to the server. Server
+// is authoritative for both validation and copy. Operator copies into the
+// composer and presses Send manually — this section never auto-sends.
+
+function _handoffOpValidateForMessage(d){
+  // Mirrors the server validation rules so the chip + button state update
+  // instantly. Returns { ok, severity: "ok"|"warn"|"err", missing[], unpriced[], reason }.
+  var missing = [];
+  var unpriced = [];
+  if (!d){
+    return { ok: false, severity: 'err', missing: ['draft'], unpriced: [],
+             reason: 'Sin borrador para esta conversación.' };
+  }
+  if (!d.customerName     || !String(d.customerName).trim())     missing.push('customerName');
+  if (!d.customerIdNumber || !String(d.customerIdNumber).trim()) missing.push('customerIdNumber');
+  if (!d.customerPhone    || !String(d.customerPhone).trim())    missing.push('customerPhone');
+  if (!d.deliveryType)  missing.push('deliveryType');
+  if (!d.paymentMethod) missing.push('paymentMethod');
+  if (d.deliveryType === 'delivery' && (!d.address || !String(d.address).trim()))
+    missing.push('address');
+  var items = d.items || [];
+  if (!items.length) missing.push('items');
+  for (var i = 0; i < items.length; i++){
+    var it = items[i];
+    if (!(typeof it.unitPrice === 'number' && it.unitPrice > 0))
+      unpriced.push(it.name || '(sin nombre)');
+  }
+  // Total > deliveryFee guard (matches server)
+  var subtotal = 0;
+  for (var k = 0; k < items.length; k++){
+    var k_it = items[k];
+    if (typeof k_it.unitPrice === 'number' && k_it.unitPrice > 0)
+      subtotal += k_it.unitPrice * (k_it.quantity || 0);
+  }
+  var fee = d.deliveryType === 'delivery' ? 4.00 : 0;
+  if (missing.length === 0 && unpriced.length === 0 && (subtotal + fee) <= fee)
+    missing.push('total');
+
+  if (unpriced.length > 0)
+    return { ok: false, severity: 'err', missing: missing, unpriced: unpriced,
+             reason: 'Revisar precio: ' + unpriced.join(', ') };
+  if (missing.length > 0)
+    return { ok: false, severity: 'warn', missing: missing, unpriced: unpriced,
+             reason: 'Faltan: ' + missing.map(_handoffOpFieldLabel).join(', ') };
+  return { ok: true, severity: 'ok', missing: [], unpriced: [], reason: 'Listo para generar' };
+}
+
+function _handoffOpFieldLabel(key){
+  return ({
+    customerName:     'nombre',
+    customerIdNumber: 'cédula',
+    customerPhone:    'teléfono',
+    address:          'dirección',
+    deliveryType:     'tipo de entrega',
+    paymentMethod:    'forma de pago',
+    items:            'productos',
+    total:            'total válido',
+    draft:            'borrador'
+  })[key] || key;
+}
+
+function _handoffOpRenderMessageSection(d){
+  var v = _handoffOpValidateForMessage(d);
+  var chipClass = v.severity === 'ok'   ? 'is-ok'
+                : v.severity === 'warn' ? 'is-warn'
+                :                         'is-err';
+  var chipLabel = v.severity === 'ok'   ? '✓ Listo'
+                : v.severity === 'warn' ? '⚠ Falta info'
+                :                         '🛇 Revisar precios';
+  var canGenerate = v.ok;
+
+  return ''
+    + '<div class="hfc-op-section">'
+    +   '<div class="hfc-op-msg-head">'
+    +     '<span class="hfc-op-section-title">Mensaje para el cliente</span>'
+    +     '<span class="hfc-op-chip ' + chipClass + '">' + esc(chipLabel) + '</span>'
+    +   '</div>'
+    +   '<div class="hfc-op-msg-issue ' + (v.severity === 'err' ? 'is-err' : '') + '">'
+    +     esc(v.reason)
+    +   '</div>'
+    +   '<textarea id="hfcOpMsgText" class="hfc-op-msg-text" readonly '
+    +     'placeholder="Pulsa &quot;Generar mensaje&quot; para previsualizar el texto que se enviará al cliente."></textarea>'
+    +   '<div class="hfc-op-msg-actions">'
+    +     '<button class="hfc-action-btn" id="hfcOpMsgGenerate"'
+    +       (canGenerate ? '' : ' disabled')
+    +       ' onclick="_handoffOpGenerateMessage()">Generar mensaje</button>'
+    +     '<button class="hfc-action-btn is-primary" id="hfcOpMsgCopy" disabled'
+    +       ' onclick="_handoffOpCopyMessageToComposer()">Copiar al composer</button>'
+    +   '</div>'
+    + '</div>';
+}
+
+// Calls POST /api/admin/handoffs/{cid}/draft/preview-message and writes the
+// returned body into the readonly textarea. On a 422 server response we show
+// the canonical reason in a toast (server beats client when they disagree).
+async function _handoffOpGenerateMessage(){
+  var cid = window._handoffSelectedCid;
+  if (!cid) return;
+  var btn = document.getElementById('hfcOpMsgGenerate');
+  var ta  = document.getElementById('hfcOpMsgText');
+  var copyBtn = document.getElementById('hfcOpMsgCopy');
+  if (!ta) return;
+  if (btn) btn.disabled = true;
+  ta.value = 'Generando…';
+  try {
+    var res = await authFetch('/api/admin/handoffs/' + encodeURIComponent(cid) + '/draft/preview-message', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    if (res.status === 422){
+      var bodyErr = await res.json().catch(function(){ return null; });
+      ta.value = '';
+      var reason = 'No se pudo generar el mensaje.';
+      if (bodyErr && Array.isArray(bodyErr.unpriced) && bodyErr.unpriced.length)
+        reason = 'Revisar precio: ' + bodyErr.unpriced.join(', ');
+      else if (bodyErr && Array.isArray(bodyErr.missing) && bodyErr.missing.length)
+        reason = 'Faltan: ' + bodyErr.missing.map(_handoffOpFieldLabel).join(', ');
+      if (typeof showToast === 'function') showToast(reason, 'error');
+      if (copyBtn) copyBtn.disabled = true;
+      return;
+    }
+    if (!res.ok){
+      ta.value = '';
+      if (typeof showToast === 'function') showToast('Error al generar (' + res.status + ')', 'error');
+      if (copyBtn) copyBtn.disabled = true;
+      return;
+    }
+    var body = await res.json();
+    ta.value = body && body.message ? body.message : '';
+    if (copyBtn) copyBtn.disabled = !ta.value;
+    if (body && body.hasPagoMobileConfig === false && body.message
+        && typeof showToast === 'function')
+      showToast('Datos de Pago Móvil no configurados — añadirlos manualmente.', 'info');
+  } catch (e){
+    ta.value = '';
+    if (typeof showToast === 'function') showToast('Error al generar el mensaje', 'error');
+    if (copyBtn) copyBtn.disabled = true;
+  } finally {
+    if (btn) btn.disabled = !_handoffOpValidateForMessage(_handoffFindSelected() && _handoffFindSelected().operatorDraft).ok;
+  }
+}
+
+// Writes the generated body into the composer textarea and triggers the
+// existing autosize + draft-persistence path. Send is still manual — the
+// operator must press Enter or click Enviar.
+function _handoffOpCopyMessageToComposer(){
+  var ta  = document.getElementById('hfcOpMsgText');
+  var dst = document.getElementById('hfcComposerInput');
+  if (!ta || !dst || !ta.value) return;
+  dst.value = ta.value;
+  dst.focus();
+  // Hook into the existing change pipeline so the draft persists and the
+  // textarea resizes — same path the operator uses when typing.
+  if (typeof _handoffComposerChanged === 'function') _handoffComposerChanged(dst);
+  if (typeof showToast === 'function') showToast('Mensaje copiado al composer · pulsa Enviar para enviarlo', 'info');
 }
 
 function _handoffOpPaymentLabel(method){
