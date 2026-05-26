@@ -566,29 +566,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             if (IsHumanHandoffRequest(t))
                             {
                                 _logger.LogInformation("Global override: HUMAN HANDOFF in trapping state for {ConversationId}", conversationId);
-                                state.HumanHandoffRequested = true;
-                                state.HumanHandoffAtUtc = DateTime.UtcNow;
-                                state.HumanHandoffNotifiedCount = 1;
-
-                                // Seed the operator pane with the customer's trigger message + the
-                                // bot's deterministic handoff reply, so the console transcript shows
-                                // real WhatsApp content from the moment the operator opens it.
-                                state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = rawText, At = DateTime.UtcNow });
-                                state.HumanChatLog.Add(new HumanChatEntry { Sender = "bot", Text = Msg.HandoffInitiated, At = DateTime.UtcNow });
-                                if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
-
-                                await SendAsync(new OutgoingMessage
-                                {
-                                    To = message.From,
-                                    Body = Msg.HandoffInitiated,
-                                    PhoneNumberId = phoneNumberId,
-                                    AccessToken = businessContext.AccessToken
-                                }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                                if (_notificationService is not null)
-                                    await _notificationService.NotifyHumanHandoffAsync(businessContext, message.From, cancellationToken);
-
-                                await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                                // Trapping-state preserves any pre-handoff transcript content
+                                // already accumulated for the operator — pass clearChatLogFirst:false.
+                                await EnterHandoffAsync(
+                                    state, conversationId, rawText, message.From, phoneNumberId,
+                                    businessContext, clearChatLogFirst: false, cancellationToken);
                                 continue;
                             }
 
@@ -604,35 +586,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         }
                     }
 
-                    // 0) Human handoff request — only sets HumanHandoffRequested.
-                    //    HumanOverride is only set when admin actually replies from dashboard.
+                    // 0) Human handoff request — keyword-match path. Only sets
+                    //    HumanHandoffRequested; HumanOverride is reserved for the
+                    //    moment the operator first replies from the dashboard.
                     if (IsHumanHandoffRequest(t))
                     {
-                        state.HumanHandoffRequested = true;
-                        state.HumanHandoffAtUtc = DateTime.UtcNow;
-                        state.HumanHandoffNotifiedCount = 1;
-                        // Start fresh transcript for this handoff session (preserves order state)
-                        state.HumanChatLog.Clear();
-                        // Seed the operator pane with the customer's trigger + the bot's
-                        // handoff reply. Without this seed the pane is empty until the
-                        // first operator reply flips HumanOverride, leaving the operator
-                        // without the visible context that already exists on WhatsApp.
-                        state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = rawText, At = DateTime.UtcNow });
-                        state.HumanChatLog.Add(new HumanChatEntry { Sender = "bot", Text = Msg.HandoffInitiated, At = DateTime.UtcNow });
-
-                        await SendAsync(new OutgoingMessage
-                        {
-                            To = message.From,
-                            Body = Msg.HandoffInitiated,
-                            PhoneNumberId = phoneNumberId,
-                            AccessToken = businessContext.AccessToken
-                        }, businessContext.BusinessId, conversationId, cancellationToken);
-
-                        // Notify staff
-                        if (_notificationService is not null)
-                            await _notificationService.NotifyHumanHandoffAsync(businessContext, message.From, cancellationToken);
-
-                        await _stateStore.SaveAsync(conversationId, state, cancellationToken);
+                        await EnterHandoffAsync(
+                            state, conversationId, rawText, message.From, phoneNumberId,
+                            businessContext, clearChatLogFirst: true, cancellationToken);
                         continue;
                     }
 
@@ -2123,6 +2084,23 @@ public sealed class WebhookProcessor : IWebhookProcessor
                     if (effectiveIntent == RestaurantIntent.General && LooksLikeOrderIntent(t))
                         effectiveIntent = RestaurantIntent.OrderCreate;
 
+                    // AI-parser handoff entry — when the parser classifies a phrase the
+                    // keyword matcher (IsHumanHandoffRequest) missed, route through the
+                    // canonical handoff entry so the dashboard queue and bot mute gate
+                    // both see ownership flip atomically. Without this, the bot would
+                    // send HandoffInitiated as a plain body and leave the conversation
+                    // structurally orphaned (production incident: "quiero cambiar el pedido"
+                    // produced the bot reply but no queue entry, no bot mute).
+                    if (effectiveIntent == RestaurantIntent.HumanHandoff)
+                    {
+                        _logger.LogInformation(
+                            "AI parser routed to HumanHandoff for {ConversationId}", conversationId);
+                        await EnterHandoffAsync(
+                            state, conversationId, rawText, message.From, phoneNumberId,
+                            businessContext, clearChatLogFirst: true, cancellationToken);
+                        continue;
+                    }
+
                     var reply = BuildReply(effectiveIntent, parsed, state);
 
                     await SendAsync(new OutgoingMessage
@@ -2419,6 +2397,58 @@ public sealed class WebhookProcessor : IWebhookProcessor
             Kind = "text",
             At = nowUtc
         };
+    }
+
+    /// <summary>
+    /// Canonical handoff entry — the single source of truth for "this conversation
+    /// is now owned by a human operator". Performs, in order: flag mutations,
+    /// optional chatLog clear, seed customer trigger + bot HandoffInitiated, send
+    /// the WhatsApp deferral, notify staff, persist state. Three call sites use
+    /// this: the trapping-state override branch, the primary keyword-match branch,
+    /// and the AI-parser intent branch. HumanOverride is INTENTIONALLY not set
+    /// here — that flag is reserved for the moment the operator first replies.
+    /// </summary>
+    private async Task EnterHandoffAsync(
+        ConversationFields state,
+        string conversationId,
+        string rawText,
+        string customerFrom,
+        string phoneNumberId,
+        BusinessContext businessContext,
+        bool clearChatLogFirst,
+        CancellationToken ct)
+    {
+        var nowUtc = DateTime.UtcNow;
+
+        state.HumanHandoffRequested = true;
+        state.HumanHandoffAtUtc = nowUtc;
+        state.HumanHandoffNotifiedCount = 1;
+
+        // Primary + AI-parser entries start a fresh transcript so the operator's
+        // pane reflects the current handoff cycle. Trapping-state entry preserves
+        // any pre-handoff transcript content already accumulated.
+        if (clearChatLogFirst) state.HumanChatLog.Clear();
+
+        // Seed the operator pane with the customer's trigger message + the
+        // bot's deterministic handoff reply, so the console transcript shows
+        // real WhatsApp content from the moment the operator opens it.
+        state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = rawText, Kind = "text", At = nowUtc });
+        state.HumanChatLog.Add(new HumanChatEntry { Sender = "bot", Text = Msg.HandoffInitiated, Kind = "text", At = nowUtc });
+        if (state.HumanChatLog.Count > 50)
+            state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
+
+        await SendAsync(new OutgoingMessage
+        {
+            To = customerFrom,
+            Body = Msg.HandoffInitiated,
+            PhoneNumberId = phoneNumberId,
+            AccessToken = businessContext.AccessToken
+        }, businessContext.BusinessId, conversationId, ct);
+
+        if (_notificationService is not null)
+            await _notificationService.NotifyHumanHandoffAsync(businessContext, customerFrom, ct);
+
+        await _stateStore.SaveAsync(conversationId, state, ct);
     }
 
     private BotReply BuildReply(
