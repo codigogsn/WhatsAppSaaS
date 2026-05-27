@@ -5718,8 +5718,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
             for (int i = 0; i < toks.Length; i++)
             {
                 var t = toks[i];
+                // Only treat a 1-2 digit token as a quantity boundary when at least
+                // one following token contains non-digit content (i.e. an item name
+                // actually follows). Prevents "combo 1" / "combo 01" from collapsing
+                // to "quantity 1, no item".
                 if (t.Length <= 2 && t.All(char.IsDigit)
-                    && int.TryParse(t, out var n) && n >= 1 && n <= 50)
+                    && int.TryParse(t, out var n) && n >= 1 && n <= 50
+                    && i + 1 < toks.Length
+                    && toks[i + 1].Any(c => !char.IsDigit(c)))
                 {
                     boundaries.Add(i);
                 }
@@ -5835,6 +5841,48 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
     private readonly record struct HumanIntakeMatch(MenuEntry Entry, string[] MatchedTokens);
 
+    // Maps numeric-shaped tokens onto the form used by menu aliases
+    // ("combo 1", "combo 2", ...) so the resolver doesn't need per-tenant
+    // aliases for "#1" / "01" / "uno" variants. Applied to candidate,
+    // canonical, and alias text inside MatchHumanIntakeMenuEntry only —
+    // catalog-agnostic, never mutates menu data.
+    private static string NormalizeNumericTokens(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s)) return s;
+        var toks = s.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (toks.Length == 0) return s;
+        for (int i = 0; i < toks.Length; i++)
+        {
+            var t = toks[i];
+            if (t.Length >= 2 && t[0] == '#' && t.Skip(1).All(char.IsDigit))
+            {
+                toks[i] = t[1..];
+                continue;
+            }
+            if (t.Length == 2 && t.All(char.IsDigit) && t[0] == '0' && t[1] != '0')
+            {
+                toks[i] = t[1..];
+                continue;
+            }
+            var mapped = t switch
+            {
+                "uno" => "1",
+                "dos" => "2",
+                "tres" => "3",
+                "cuatro" => "4",
+                "cinco" => "5",
+                "seis" => "6",
+                "siete" => "7",
+                "ocho" => "8",
+                "nueve" => "9",
+                "diez" => "10",
+                _ => null
+            };
+            if (mapped is not null) toks[i] = mapped;
+        }
+        return string.Join(' ', toks);
+    }
+
     // Singularize-aware matcher. Both the customer's candidate and each
     // canonical/alias are run through SingularizeWords before comparison so
     // "shawarmas 350 gramos" resolves to alias "shawarma 350 gramos" (whose
@@ -5850,26 +5898,29 @@ public sealed class WebhookProcessor : IWebhookProcessor
 
         var candNorm = StripAccents(candidate.ToLowerInvariant());
         var candSing = SingularizeWords(candNorm);
+        var candNum = NormalizeNumericTokens(candSing);
 
-        // Pass 1: exact canonical match (singularized).
+        // Pass 1: exact canonical match (singularized + numeric-normalized).
         foreach (var m in menu)
         {
             var cSing = SingularizeWords(StripAccents(m.Canonical.ToLowerInvariant()));
-            if (candSing == cSing)
+            var cNum = NormalizeNumericTokens(cSing);
+            if (candNum == cNum)
                 return new HumanIntakeMatch(m, cSing.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         }
 
-        // Pass 2: canonical substring (singularized; longest canonical wins).
+        // Pass 2: canonical substring (longest canonical wins).
         foreach (var m in menu.OrderByDescending(x => x.Canonical.Length))
         {
             var cSing = SingularizeWords(StripAccents(m.Canonical.ToLowerInvariant()));
-            if (cSing.Length >= 3 && (" " + candSing + " ").Contains(" " + cSing + " "))
+            var cNum = NormalizeNumericTokens(cSing);
+            if (cNum.Length >= 3 && (" " + candNum + " ").Contains(" " + cNum + " "))
                 return new HumanIntakeMatch(m, cSing.Split(' ', StringSplitOptions.RemoveEmptyEntries));
         }
 
-        // Pass 3: alias substring (singularized). Token-count descending tie-
-        // breaker so the most-specific alias wins (e.g. "shawarma 350 gramos"
-        // over "shawarma 350" when both substring-match the candidate).
+        // Pass 3: alias substring. Token-count descending tie-breaker so the
+        // most-specific alias wins (e.g. "shawarma 350 gramos" over
+        // "shawarma 350" when both substring-match the candidate).
         var aliasCandidates = new List<(MenuEntry Entry, string AliasSing, int TokenCount)>();
         foreach (var m in menu)
         {
@@ -5877,8 +5928,9 @@ public sealed class WebhookProcessor : IWebhookProcessor
             foreach (var a in m.Aliases)
             {
                 var aSing = SingularizeWords(StripAccents(a.ToLowerInvariant()));
-                if (aSing.Length < 3) continue;
-                if (!(" " + candSing + " ").Contains(" " + aSing + " ")) continue;
+                var aNum = NormalizeNumericTokens(aSing);
+                if (aNum.Length < 3) continue;
+                if (!(" " + candNum + " ").Contains(" " + aNum + " ")) continue;
                 aliasCandidates.Add((m, aSing, aSing.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length));
             }
         }
