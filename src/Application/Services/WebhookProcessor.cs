@@ -5516,6 +5516,15 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // free text on the next line. Either form is supported.
         intake.Notes = ExtractMultiLineLabeled(lines, new[] { "notas", "observaciones" }, knownKeys);
 
+        // Snapshot whether Phase 1 LABELED extraction found anything. This must
+        // be captured BEFORE the whole-text delivery/payment fallbacks below,
+        // because those fallbacks scan the raw text and can flip HasAnySignal
+        // true on a label-less message that just happens to contain the words
+        // "delivery" or "pago movil". Phase 2 (freeform) must run on any reply
+        // that had no labels — regardless of how many whole-text fallbacks
+        // fired afterwards.
+        var hadLabeledSignal = intake.HasAnySignal;
+
         // Whole-text DeliveryType fallback. Even when the label-line capture
         // misses (e.g. customer types "voy a recoger" anywhere in the reply),
         // scanning the raw text once with the same singularized vocabulary
@@ -5539,11 +5548,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 intake.PaymentMethod = inferredPay;
         }
 
-        // Phase 2 — freeform fallback. Only runs when nothing was extracted
-        // by labels (otherwise we trust the labels). Resists destroying a
-        // labeled draft when a customer pastes the template with most fields
-        // blank.
-        if (!intake.HasAnySignal)
+        // Phase 2 — freeform fallback. Runs whenever Phase 1 LABEL extraction
+        // produced nothing (snapshot above), so freeform replies that include
+        // "delivery" / "pago movil" anywhere don't lock out positional parsing
+        // of name/cedula/phone/address/items. Labeled pastes still skip Phase 2.
+        if (!hadLabeledSignal)
             ParseFreeformIntake(rawText, menu, intake);
 
         return intake.HasAnySignal;
