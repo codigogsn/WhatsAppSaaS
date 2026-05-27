@@ -2661,6 +2661,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
         state.HumanHandoffAtUtc = nowUtc;
         state.HumanHandoffNotifiedCount = 1;
 
+        // New human handoff cycle starts fresh.
+        // Clear previous processed-order markers so operator draft
+        // and payment flows don't inherit UI state from the previous cycle.
+        state.OrderCreatedByHumanId = null;
+        state.LastOrderId = null;
+        state.AwaitingPostConfirmProof = false;
+
         // Primary + AI-parser entries start a fresh transcript so the operator's
         // pane reflects the current handoff cycle. Trapping-state entry preserves
         // any pre-handoff transcript content already accumulated.

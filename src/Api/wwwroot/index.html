@@ -5847,6 +5847,9 @@ function _handoffPaintOrderPanel(h){
   // shows the green success row. Server returns orderCreatedByHumanId on
   // ListHumanOverride (commit 8155ca7 exposes it).
   var cid = h && h.conversationId;
+  if (!h || !h.orderCreatedByHumanId) {
+    if (cid) delete window._handoffProcessedOrders[cid];
+  }
   if (cid && h && h.orderCreatedByHumanId && !window._handoffProcessedOrders[cid]){
     var orderNumber = String(h.orderCreatedByHumanId).replace(/-/g, '').slice(0, 8).toUpperCase();
     window._handoffProcessedOrders[cid] = {

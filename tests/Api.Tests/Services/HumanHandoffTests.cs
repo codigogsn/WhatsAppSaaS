@@ -439,6 +439,33 @@ public sealed class HumanHandoffTests
         fields.HumanOverrideAtUtc.Should().NotBeNull();
     }
 
+    // New handoff cycle clears previous processed-order markers so operator
+    // draft and payment-proof flows don't inherit stale UI state from a prior
+    // cycle where an order was already processed by a human.
+    [Fact]
+    public async Task HandoffKeyword_ClearsPreviousProcessedOrderMarkers()
+    {
+        var previousOrderId = Guid.NewGuid();
+        var state = new ConversationFields
+        {
+            HumanHandoffRequested = false,
+            HumanOverride = false,
+            OrderCreatedByHumanId = previousOrderId,
+            LastOrderId = previousOrderId,
+            AwaitingPostConfirmProof = true
+        };
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(MakePayload("humano"), _testBusiness);
+
+        _capturedState.HumanHandoffRequested.Should().BeTrue();
+        _capturedState.OrderCreatedByHumanId.Should().BeNull();
+        _capturedState.LastOrderId.Should().BeNull();
+        _capturedState.AwaitingPostConfirmProof.Should().BeFalse();
+    }
+
     // Handoff waiting messages are sent (max 3) for non-escape messages
     [Fact]
     public async Task HandoffRequested_NonEscapeMessage_SendsWaitingNotification()
