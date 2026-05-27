@@ -2916,6 +2916,72 @@ public class WebhookProcessorTests
         state.PaymentProofMediaId.Should().Be("doc_media_456");
     }
 
+    // ══════════════════════════════════════════════════════════════════════════
+    //  REGRESSION — handoff proof auto-attach to OperatorDraft.ProofMediaId
+    //  When the customer uploads a payment screenshot DURING a human handoff
+    //  (HumanHandoffRequested or HumanOverride), the bot's evidence-capture
+    //  branch typically misses it because state.Items/PaymentMethod live on the
+    //  OperatorDraft, not on state. The draft-side mirror lets
+    //  CreateOrderFromDraft surface the comprobante on the resulting Order.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task HandoffImage_AutoAttachesToOperatorDraftProofMediaId_WhenPaymentMethodRequiresProof()
+    {
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields
+        {
+            HumanOverride = true,
+            OperatorDraft = new OperatorDraft
+            {
+                PaymentMethod = "pago_movil"
+            }
+        };
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var imagePayload = CreateImageMessagePayload("5511999999999", "handoff_proof_abc");
+        await _sut.ProcessAsync(imagePayload, _testBusiness);
+
+        state.OperatorDraft!.ProofMediaId.Should().Be("handoff_proof_abc");
+        state.OperatorDraft.UpdatedAtUtc.Should().NotBeNull();
+        // The state-level field is owned by the bot's evidence-capture branch
+        // and must NOT be touched by the draft-side mirror.
+        state.PaymentProofMediaId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task HandoffImage_DoesNotOverwriteExistingOperatorDraftProofMediaId()
+    {
+        _whatsAppClientMock
+            .Setup(x => x.SendTextMessageAsync(It.IsAny<OutgoingMessage>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var state = new ConversationFields
+        {
+            HumanOverride = true,
+            OperatorDraft = new OperatorDraft
+            {
+                PaymentMethod = "zelle",
+                ProofMediaId = "operator_curated_xyz"
+            }
+        };
+
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        var imagePayload = CreateImageMessagePayload("5511999999999", "later_screenshot_def");
+        await _sut.ProcessAsync(imagePayload, _testBusiness);
+
+        state.OperatorDraft!.ProofMediaId.Should().Be("operator_curated_xyz");
+    }
+
     private static WebhookPayload CreateImageMessagePayload(string from, string mediaId) => new()
     {
         Object = "whatsapp_business_account",

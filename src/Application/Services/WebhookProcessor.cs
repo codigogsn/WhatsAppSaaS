@@ -189,6 +189,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         // endpoint; text messages keep the original {Sender,Text,At} shape.
                         state.HumanChatLog.Add(BuildInboundChatEntry(message));
                         if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
+                        TryAutoAttachHandoffProof(state, message);
 
                         // Human-intake parser (Commit 3b). Best-effort population of
                         // ConversationFields.OperatorDraft from the customer's text reply.
@@ -360,6 +361,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
                         {
                             state.HumanChatLog.Add(BuildInboundChatEntry(message));
                             if (state.HumanChatLog.Count > 50) state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
+                            TryAutoAttachHandoffProof(state, message);
                         }
 
                         var shouldCaptureProof = !state.PaymentEvidenceReceived
@@ -2556,6 +2558,29 @@ public sealed class WebhookProcessor : IWebhookProcessor
         _staticLogger.Value?.LogInformation(
             "CHECKOUT_EVENT event={Event} conversationId={ConversationId} businessId={BusinessId} customerPhone={CustomerPhone} orderId={OrderId}",
             eventName, ctx?.ConversationId, ctx?.BusinessId, ctx?.CustomerPhone, orderId);
+    }
+
+    // Auto-attaches an inbound payment screenshot to OperatorDraft.ProofMediaId
+    // when the draft expects a digital-payment proof and the operator has not
+    // already curated a different bubble. Called from BOTH handoff sites:
+    //   • HumanOverride branch (section 0) — admin has actively taken over
+    //   • Mirror branch in section 2b — HumanHandoffRequested-but-not-yet-overridden
+    // Does NOT touch state.PaymentProofMediaId (owned by the bot's evidence-
+    // capture branch + PROOF_RECEIVED lifecycle log) and never overwrites an
+    // existing draft.ProofMediaId so a manual operator-PATCH always wins.
+    private static void TryAutoAttachHandoffProof(ConversationFields state, WebhookMessage message)
+    {
+        if (message.Type is not ("image" or "document")) return;
+        var draft = state.OperatorDraft;
+        if (draft is null) return;
+        if (!string.IsNullOrWhiteSpace(draft.ProofMediaId)) return;
+        if (draft.PaymentMethod is not ("pago_movil" or "divisas" or "zelle")) return;
+
+        var mediaId = message.Image?.Id ?? message.Document?.Id;
+        if (string.IsNullOrWhiteSpace(mediaId)) return;
+
+        draft.ProofMediaId = mediaId;
+        draft.UpdatedAtUtc = DateTime.UtcNow;
     }
 
     // Mirrors the missing-field predicate inside FinalizeOrderIfPossibleAsync
