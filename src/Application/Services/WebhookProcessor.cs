@@ -6598,7 +6598,14 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Otherwise "shawarma pollo 350 gramos" would split into
         // ["shawarma pollo", "350 gramos"] and the weight token would never reach
         // ExtractItemAndModifiers' size-aware matcher.
-        var splitPattern = @"(?<=\p{L})\s+(?=(?:\d+(?!\s*(?:gramos|grs|gr|g)\b)|un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+\p{L})";
+        //
+        // Also block the bare canonical shawarma sizes (200/350/500) from being
+        // read as a chained quantity prefix when the customer omits the weight
+        // unit. Without this guard, "1 shawarma 350 pollo" splits into
+        // ["1 shawarma", "350 pollo"] and the second segment stages a 350x line
+        // before the ambiguity for "shawarma" is even surfaced to the customer.
+        // Kept in sync with BareShawarmaSizeRegex.
+        var splitPattern = @"(?<=\p{L})\s+(?=(?:(?!(?:200|350|500)\b)\d+(?!\s*(?:gramos|grs|gr|g)\b)|un[ao]?|dos|tres|cuatro|cinco|seis|siete|ocho|nueve|diez)\s+\p{L})";
         var parts = Regex.Split(segment, splitPattern, RegexOptions.IgnoreCase);
 
         if (parts.Length <= 1)
@@ -6904,11 +6911,13 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return existing + ", " + flavor;
     }
 
-    // Matches bare "200" or "350" used as shawarma sizes when the customer omits
-    // the weight unit ("2 shawarmas de pollo 350"). Limited to the two canonical
-    // shawarma weights to avoid collateral damage on prices/years/quantities.
+    // Matches bare "200", "350" or "500" used as shawarma sizes when the
+    // customer omits the weight unit ("2 shawarmas de pollo 350"). Limited to
+    // the canonical shawarma weights to avoid collateral damage on prices/
+    // years/quantities. Kept in sync with the bare-size guard inside
+    // SplitChainedQuantities.
     private static readonly Regex BareShawarmaSizeRegex =
-        new(@"\b(200|350)\b", RegexOptions.Compiled);
+        new(@"\b(200|350|500)\b", RegexOptions.Compiled);
 
     /// <summary>
     /// Shawarma-only fallback for size promotion when the customer wrote the
