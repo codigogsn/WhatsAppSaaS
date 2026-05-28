@@ -2588,15 +2588,26 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // pending slots WITHOUT re-running finalize for the sole purpose of
     // discovering them. The bullet glyphs match the existing MissingFields
     // template so the customer sees a consistent visual.
-    private static List<string> BuildPendingFieldsList(ConversationFields state)
+    // OperatorDraft is preferred over the legacy ConversationFields slots:
+    // on the human-handoff path the intake parser writes to the draft only,
+    // so reading state.* alone would mis-report fields as missing.
+    internal static List<string> BuildPendingFieldsList(ConversationFields state)
     {
+        var draft = state.OperatorDraft;
+        var name         = !string.IsNullOrWhiteSpace(draft?.CustomerName)     ? draft!.CustomerName     : state.CustomerName;
+        var cedula       = !string.IsNullOrWhiteSpace(draft?.CustomerIdNumber) ? draft!.CustomerIdNumber : state.CustomerIdNumber;
+        var phone        = !string.IsNullOrWhiteSpace(draft?.CustomerPhone)    ? draft!.CustomerPhone    : state.CustomerPhone;
+        var address      = !string.IsNullOrWhiteSpace(draft?.Address)          ? draft!.Address          : state.Address;
+        var payment      = !string.IsNullOrWhiteSpace(draft?.PaymentMethod)    ? draft!.PaymentMethod    : state.PaymentMethod;
+        var deliveryType = !string.IsNullOrWhiteSpace(draft?.DeliveryType)     ? draft!.DeliveryType     : state.DeliveryType;
+
         var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(state.CustomerName))     missing.Add("• 👤 Nombre:");
-        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("• 🪪 Cédula:");
-        if (string.IsNullOrWhiteSpace(state.CustomerPhone))    missing.Add("• 📱 Teléfono:");
-        if (state.DeliveryType != "pickup" && string.IsNullOrWhiteSpace(state.Address))
+        if (string.IsNullOrWhiteSpace(name))     missing.Add("• 👤 Nombre:");
+        if (string.IsNullOrWhiteSpace(cedula))   missing.Add("• 🪪 Cédula:");
+        if (string.IsNullOrWhiteSpace(phone))    missing.Add("• 📱 Teléfono:");
+        if (deliveryType != "pickup" && string.IsNullOrWhiteSpace(address))
             missing.Add("• 🏡 Dirección:");
-        if (string.IsNullOrWhiteSpace(state.PaymentMethod))    missing.Add("• 💵 Pago:");
+        if (string.IsNullOrWhiteSpace(payment))  missing.Add("• 💵 Pago:");
         return missing;
     }
 
@@ -2815,12 +2826,21 @@ public sealed class WebhookProcessor : IWebhookProcessor
         if (string.IsNullOrWhiteSpace(state.DeliveryType))
             return Msg.MissingDeliveryType;
 
+        // Prefer OperatorDraft when the human-handoff intake parser populated it;
+        // legacy state.* slots are only filled by the bot checkout form path.
+        var draft = state.OperatorDraft;
+        var name         = !string.IsNullOrWhiteSpace(draft?.CustomerName)     ? draft!.CustomerName     : state.CustomerName;
+        var cedula       = !string.IsNullOrWhiteSpace(draft?.CustomerIdNumber) ? draft!.CustomerIdNumber : state.CustomerIdNumber;
+        var phone        = !string.IsNullOrWhiteSpace(draft?.CustomerPhone)    ? draft!.CustomerPhone    : state.CustomerPhone;
+        var address      = !string.IsNullOrWhiteSpace(draft?.Address)          ? draft!.Address          : state.Address;
+        var payment      = !string.IsNullOrWhiteSpace(draft?.PaymentMethod)    ? draft!.PaymentMethod    : state.PaymentMethod;
+
         var missing = new List<string>();
-        if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("\u2022 \ud83d\udc64 Nombre:");
-        if (string.IsNullOrWhiteSpace(state.CustomerIdNumber)) missing.Add("\u2022 \ud83e\udeaa C\u00e9dula:");
-        if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("\u2022 \ud83d\udcf1 Tel\u00e9fono:");
-        if (state.DeliveryType != "pickup" && string.IsNullOrWhiteSpace(state.Address)) missing.Add("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
-        if (string.IsNullOrWhiteSpace(state.PaymentMethod)) missing.Add("\u2022 \ud83d\udcb5 Pago:");
+        if (string.IsNullOrWhiteSpace(name)) missing.Add("\u2022 \ud83d\udc64 Nombre:");
+        if (string.IsNullOrWhiteSpace(cedula)) missing.Add("\u2022 \ud83e\udeaa C\u00e9dula:");
+        if (string.IsNullOrWhiteSpace(phone)) missing.Add("\u2022 \ud83d\udcf1 Tel\u00e9fono:");
+        if (state.DeliveryType != "pickup" && string.IsNullOrWhiteSpace(address)) missing.Add("\u2022 \ud83c\udfe1 Direcci\u00f3n:");
+        if (string.IsNullOrWhiteSpace(payment)) missing.Add("\u2022 \ud83d\udcb5 Pago:");
 
         // GPS requirement is vertical-specific (e.g. restaurant delivery needs it, pickup doesn't)
         if (!state.GpsPinReceived && _verticalStrategy.RequiresGps(state.DeliveryType))
@@ -3098,11 +3118,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 return;
             }
 
-            // Try to finalize
+            // Try to finalize. Prefer OperatorDraft if populated (human-handoff
+            // intake parser writes only to the draft); fall back to legacy
+            // bot-checkout slots.
+            var draft = state.OperatorDraft;
+            var name    = !string.IsNullOrWhiteSpace(draft?.CustomerName)  ? draft!.CustomerName  : state.CustomerName;
+            var phone   = !string.IsNullOrWhiteSpace(draft?.CustomerPhone) ? draft!.CustomerPhone : state.CustomerPhone;
+            var address = !string.IsNullOrWhiteSpace(draft?.Address)       ? draft!.Address       : state.Address;
+
             var missing = new List<string>();
-            if (string.IsNullOrWhiteSpace(state.CustomerName)) missing.Add("• \ud83d\udc64 Nombre:");
-            if (string.IsNullOrWhiteSpace(state.CustomerPhone)) missing.Add("• \ud83d\udcf1 Teléfono:");
-            if (state.DeliveryType == "shipping" && string.IsNullOrWhiteSpace(state.Address))
+            if (string.IsNullOrWhiteSpace(name)) missing.Add("• \ud83d\udc64 Nombre:");
+            if (string.IsNullOrWhiteSpace(phone)) missing.Add("• \ud83d\udcf1 Teléfono:");
+            if (state.DeliveryType == "shipping" && string.IsNullOrWhiteSpace(address))
                 missing.Add("• \ud83c\udfe1 Dirección de envío:");
 
             if (missing.Count > 0)
