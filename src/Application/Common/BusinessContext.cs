@@ -20,4 +20,5 @@ public sealed record BusinessContext(
     string? ZelleRecipient = null,
     string? ZelleInstructions = null,
     bool InteractiveMenuEnabled = false,
-    string? OrderInstructions = null);
+    string? OrderInstructions = null,
+    bool MemoryLogEnabled = true);

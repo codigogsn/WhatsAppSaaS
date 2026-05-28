@@ -27,6 +27,7 @@ public class AppDbContext : DbContext
     public DbSet<UpsellRule> UpsellRules => Set<UpsellRule>();
     public DbSet<DashboardLayout> DashboardLayouts => Set<DashboardLayout>();
     public DbSet<EmailRecord> EmailRecords => Set<EmailRecord>();
+    public DbSet<ConversationMessage> ConversationMessages => Set<ConversationMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -431,6 +432,49 @@ public class AppDbContext : DbContext
             b.HasIndex(x => x.BusinessId);
             b.HasIndex(x => new { x.BusinessId, x.GmailMessageId }).IsUnique()
                 .HasFilter(null);
+        });
+
+        modelBuilder.Entity<Business>(b =>
+        {
+            // Feature flag for the durable conversation-message log.
+            // Default true; flip to false on a per-tenant basis for emergency rollback.
+            b.Property(x => x.MemoryLogEnabled)
+                .IsRequired()
+                .HasDefaultValue(true);
+        });
+
+        modelBuilder.Entity<ConversationMessage>(b =>
+        {
+            b.HasKey(x => x.Id);
+            b.Property(x => x.BusinessId).IsRequired();
+            b.Property(x => x.ConversationId).IsRequired().HasMaxLength(256);
+            b.Property(x => x.CustomerPhoneE164).HasMaxLength(32);
+            b.Property(x => x.WhatsAppMessageId).HasMaxLength(128);
+            b.Property(x => x.Direction).IsRequired().HasMaxLength(16);
+            b.Property(x => x.Sender).IsRequired().HasMaxLength(16);
+            b.Property(x => x.Kind).IsRequired().HasMaxLength(16);
+            // Body capped to avoid runaway storage; long bodies are truncated
+            // at the call site (MaxMessageLength = 4096 in WebhookProcessor).
+            b.Property(x => x.Body).HasMaxLength(8192);
+            b.Property(x => x.MediaId).HasMaxLength(128);
+            b.Property(x => x.MimeType).HasMaxLength(64);
+            // RawPayloadJson + TemplateName intentionally untyped — variable size.
+            b.Property(x => x.TemplateName).HasMaxLength(64);
+            b.Property(x => x.HandoffMode).IsRequired();
+            b.Property(x => x.ReceivedAtUtc).IsRequired();
+            b.Property(x => x.CreatedAtUtc).IsRequired();
+
+            // Operator panel transcript paging — the dominant read pattern once P3+ lands.
+            b.HasIndex(x => new { x.BusinessId, x.ConversationId, x.ReceivedAtUtc });
+
+            // Idempotency for inbound webhooks. Filtered to non-null so bot outbound rows
+            // (which have no WhatsApp id from the synchronous send response) don't conflict.
+            b.HasIndex(x => new { x.BusinessId, x.WhatsAppMessageId })
+                .IsUnique()
+                .HasFilter("\"WhatsAppMessageId\" IS NOT NULL");
+
+            // Retention purger scan.
+            b.HasIndex(x => new { x.BusinessId, x.CreatedAtUtc });
         });
     }
 }

@@ -26,6 +26,7 @@ public class AdminHandoffsController : ControllerBase
     private readonly IExchangeRateProvider _exchangeRateProvider;
     private readonly IOrderRepository _orderRepository;
     private readonly INotificationService _notificationService;
+    private readonly IConversationMessageStore? _messageStore;
     private readonly ILogger<AdminHandoffsController> _logger;
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -36,7 +37,8 @@ public class AdminHandoffsController : ControllerBase
         IExchangeRateProvider exchangeRateProvider,
         IOrderRepository orderRepository,
         INotificationService notificationService,
-        ILogger<AdminHandoffsController> logger)
+        ILogger<AdminHandoffsController> logger,
+        IConversationMessageStore? messageStore = null)
     {
         _db = db;
         _config = config;
@@ -44,6 +46,7 @@ public class AdminHandoffsController : ControllerBase
         _exchangeRateProvider = exchangeRateProvider;
         _orderRepository = orderRepository;
         _notificationService = notificationService;
+        _messageStore = messageStore;
         _logger = logger;
     }
 
@@ -275,6 +278,27 @@ public class AdminHandoffsController : ControllerBase
         entity.StateJson = JsonSerializer.Serialize(dict);
         entity.UpdatedAtUtc = DateTime.UtcNow;
         await _db.SaveChangesAsync(ct);
+
+        // Phase 1 memory foundation: durable log mirror of operator outbound.
+        // BusinessId comes from the resolved ConversationState. Store is fail-safe.
+        if (_messageStore is not null && entity.BusinessId is Guid bizId)
+        {
+            await _messageStore.AppendAsync(new ConversationMessage
+            {
+                BusinessId = bizId,
+                ConversationId = conversationId,
+                CustomerPhoneE164 = customerPhone,
+                WhatsAppMessageId = null,
+                Direction = "outbound",
+                Sender = "operator",
+                Kind = "text",
+                Body = req.Message,
+                HandoffMode = true, // Operator sends only happen during handoff.
+                ReceivedAtUtc = DateTime.UtcNow,
+                ProcessedAtUtc = DateTime.UtcNow,
+                CreatedAtUtc = DateTime.UtcNow
+            }, ct);
+        }
 
         return Ok(new { sent = true, conversationId, to = customerPhone });
     }

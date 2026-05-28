@@ -55,6 +55,11 @@ public class Business
 
     public bool IsActive { get; set; } = true;
 
+    // Feature flag for ConversationMessages durable log (Phase 1 memory foundation).
+    // Default true; flip to false for per-tenant emergency rollback if log writes
+    // ever start failing or saturating storage.
+    public bool MemoryLogEnabled { get; set; } = true;
+
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
     public List<MenuCategory> MenuCategories { get; set; } = new();

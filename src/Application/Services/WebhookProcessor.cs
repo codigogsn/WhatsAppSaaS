@@ -32,6 +32,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
     private readonly INotificationService? _notificationService;
     private readonly IExchangeRateProvider? _exchangeRateProvider;
     private readonly IVerticalStrategyFactory _verticalStrategyFactory;
+    private readonly IConversationMessageStore? _messageStore;
     private readonly ILogger<WebhookProcessor> _logger;
     private readonly PaymentMobileOptions _paymentMobile;
 
@@ -45,7 +46,8 @@ public sealed class WebhookProcessor : IWebhookProcessor
         IMenuRepository? menuRepository = null,
         INotificationService? notificationService = null,
         IExchangeRateProvider? exchangeRateProvider = null,
-        IVerticalStrategyFactory? verticalStrategyFactory = null)
+        IVerticalStrategyFactory? verticalStrategyFactory = null,
+        IConversationMessageStore? messageStore = null)
     {
         _aiParser = aiParser;
         _whatsAppClient = whatsAppClient;
@@ -55,6 +57,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         _notificationService = notificationService;
         _exchangeRateProvider = exchangeRateProvider;
         _verticalStrategyFactory = verticalStrategyFactory ?? new Application.Strategies.VerticalStrategyFactory();
+        _messageStore = messageStore;
         _logger = logger;
         _paymentMobile = paymentMobile ?? new PaymentMobileOptions();
     }
@@ -177,6 +180,32 @@ public sealed class WebhookProcessor : IWebhookProcessor
                             _logger.LogInformation("DEDUP: ignoring duplicate message {MessageId} in {ConversationId}", msgId, conversationId);
                             continue;
                         }
+                    }
+
+                    // Phase 1 memory foundation: durable per-message log. Best-effort —
+                    // store implementation swallows all failures so message processing
+                    // is never blocked by a log write. Gated by tenant feature flag.
+                    if (_messageStore is not null && businessContext.MemoryLogEnabled)
+                    {
+                        await _messageStore.AppendAsync(new ConversationMessage
+                        {
+                            BusinessId = businessContext.BusinessId,
+                            ConversationId = conversationId,
+                            CustomerPhoneE164 = message.From,
+                            WhatsAppMessageId = string.IsNullOrWhiteSpace(message.Id) ? null : message.Id,
+                            Direction = "inbound",
+                            Sender = "customer",
+                            Kind = MapInboundKind(message.Type),
+                            Body = message.Text?.Body,
+                            MediaId = message.Image?.Id ?? message.Document?.Id,
+                            MimeType = message.Image?.MimeType ?? message.Document?.MimeType,
+                            // HandoffMode reflects state at message arrival; useful for analytics
+                            // distinguishing bot-handled vs operator-handled conversations.
+                            HandoffMode = state.HumanOverride,
+                            ReceivedAtUtc = DateTime.UtcNow,
+                            ProcessedAtUtc = DateTime.UtcNow,
+                            CreatedAtUtc = DateTime.UtcNow
+                        }, cancellationToken);
                     }
 
                     // 0) Human override: admin has taken over — bot is completely silent
@@ -3399,6 +3428,31 @@ public sealed class WebhookProcessor : IWebhookProcessor
             // After this point, unclaiming the dedup record on failure would risk
             // duplicate sends on retry, which is worse than accepting no-retry.
             _sideEffectsCommitted = true;
+
+            // Phase 1 memory foundation: persist bot outbound after a successful
+            // send (failed sends are not logged — we only record what actually
+            // reached the customer). Store is fail-safe internally.
+            if (_messageStore is not null)
+            {
+                await _messageStore.AppendAsync(new ConversationMessage
+                {
+                    BusinessId = businessId,
+                    ConversationId = conversationId,
+                    CustomerPhoneE164 = msg.To,
+                    WhatsAppMessageId = null, // Synchronous WhatsApp send response is not surfaced here.
+                    Direction = "outbound",
+                    Sender = "bot",
+                    Kind = msg.DocumentUrl is not null ? "document"
+                        : msg.LocationRequest ? "location"
+                        : msg.ListMessage is not null ? "interactive"
+                        : (msg.Buttons is { Count: > 0 } ? "interactive" : "text"),
+                    Body = msg.Body,
+                    HandoffMode = false, // Bot outbound implies bot mode.
+                    ReceivedAtUtc = DateTime.UtcNow,
+                    ProcessedAtUtc = DateTime.UtcNow,
+                    CreatedAtUtc = DateTime.UtcNow
+                }, ct);
+            }
         }
         else
         {
@@ -3408,6 +3462,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
                 !string.IsNullOrWhiteSpace(msg.AccessToken));
         }
     }
+
+    // Maps an inbound WhatsApp message Type to our ConversationMessage.Kind taxonomy.
+    // Falls back to "text" so unknown future types still produce a queryable row.
+    private static string MapInboundKind(string? type) => type switch
+    {
+        "image"       => "image",
+        "document"    => "document",
+        "location"    => "location",
+        "interactive" => "interactive",
+        "audio"       => "audio",
+        _             => "text"
+    };
 
     // ──────────────────────────────────────────
     // Helpers

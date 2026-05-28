@@ -74,6 +74,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IMenuRepository, MenuRepository>();
         services.AddScoped<IExtrasRepository, ExtrasRepository>();
         services.AddScoped<IConversationStateStore, ConversationStateStore>();
+        services.AddScoped<IConversationMessageStore, ConversationMessageStore>();
         services.AddScoped<ISignatureValidator, SignatureValidator>();
 
         // ── Admin Analytics (✅ FIX runtime 500) ─────────
