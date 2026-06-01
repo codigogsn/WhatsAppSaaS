@@ -128,7 +128,8 @@ public class BusinessResolver : IBusinessResolver
             ZelleInstructions: biz.ZelleInstructions,
             InteractiveMenuEnabled: biz.InteractiveMenuEnabled,
             OrderInstructions: biz.OrderInstructions,
-            MemoryLogEnabled: biz.MemoryLogEnabled);
+            MemoryLogEnabled: biz.MemoryLogEnabled,
+            HandoffPhoneNumber: biz.HandoffPhoneNumber);
     }
 
     private async Task<BusinessContext?> FindByPhoneNumberIdAsync(string id, CancellationToken ct)
@@ -182,7 +183,9 @@ public class BusinessResolver : IBusinessResolver
             InteractiveMenuEnabled: Col("InteractiveMenuEnabled") is "True" or "true" or "1",
             OrderInstructions: Col("OrderInstructions"),
             // Backward compat: missing column or NULL → default true (matches entity default).
-            MemoryLogEnabled: Col("MemoryLogEnabled") is null or "True" or "true" or "1");
+            MemoryLogEnabled: Col("MemoryLogEnabled") is null or "True" or "true" or "1",
+            // Backward compat: missing column or NULL → null (no per-tenant override).
+            HandoffPhoneNumber: Col("HandoffPhoneNumber"));
     }
 
     public static string? EnvResolve(params string[] keys)

@@ -627,8 +627,24 @@ internal static class Msg
 
     // ── Human handoff ──
 
-    internal static string HandoffInitiated
-        => "Entendido. Tu conversaci\u00f3n fue derivada a un agente humano.\n\nUn miembro de nuestro equipo te atender\u00e1 en breve \ud83d\ude4f";
+    // Default copy used when no per-tenant direct phone number is configured.
+    // Kept exactly byte-for-byte equal to the prior property body so the
+    // null/empty branch produces identical output.
+    private const string HandoffInitiatedDefault =
+        "Entendido. Tu conversaci\u00f3n fue derivada a un agente humano.\n\nUn miembro de nuestro equipo te atender\u00e1 en breve \ud83d\ude4f";
+
+    // When a tenant configures Business.HandoffPhoneNumber, the bot reply
+    // appends the number as a direct contact option. Otherwise emits the
+    // legacy single-paragraph reply unchanged.
+    internal static string HandoffInitiated(string? handoffPhoneNumber = null)
+    {
+        if (string.IsNullOrWhiteSpace(handoffPhoneNumber))
+            return HandoffInitiatedDefault;
+
+        return "Entendido. Tu conversaci\u00f3n fue derivada a un agente humano.\n\n"
+             + "En breve te atender\u00e1 un asesor humano. Tambi\u00e9n puedes comunicarte directamente al:\n\n"
+             + handoffPhoneNumber.Trim();
+    }
 
     internal static string HandoffWaiting
         => "Tu consulta est\u00e1 siendo atendida por nuestro equipo. Te responderemos pronto.";

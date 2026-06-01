@@ -60,6 +60,12 @@ public class Business
     // ever start failing or saturating storage.
     public bool MemoryLogEnabled { get; set; } = true;
 
+    // Per-tenant direct contact number surfaced in the customer-facing human
+    // handoff reply. Null/empty → bot falls back to the generic "te atenderá
+    // en breve" message; when set, the reply appends a "comunicarte
+    // directamente al: …" line with this number.
+    public string? HandoffPhoneNumber { get; set; }
+
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 
     public List<MenuCategory> MenuCategories { get; set; } = new();

@@ -81,6 +81,10 @@ public sealed class WebhookProcessor : IWebhookProcessor
     // null/empty falls back to the generic Msg.MenuPdfPrompt template.
     private string? _orderInstructions;
 
+    // Per-request direct contact number (from Businesses.HandoffPhoneNumber);
+    // null/empty falls back to the default Msg.HandoffInitiated copy.
+    private string? _handoffPhoneNumber;
+
     private string EffectiveWhatToOrder()
         => string.IsNullOrWhiteSpace(_orderInstructions) ? Msg.WhatToOrder : _orderInstructions!;
 
@@ -104,6 +108,11 @@ public sealed class WebhookProcessor : IWebhookProcessor
         _orderInstructions = string.IsNullOrWhiteSpace(businessContext.OrderInstructions)
             ? null
             : businessContext.OrderInstructions;
+
+        // Per-business direct handoff phone (null/empty → use default handoff reply)
+        _handoffPhoneNumber = string.IsNullOrWhiteSpace(businessContext.HandoffPhoneNumber)
+            ? null
+            : businessContext.HandoffPhoneNumber;
 
         // Load business menu from DB; fallback to demo catalog. The isDemo flag
         // gates the demo retry in NormalizeMenuItemName(rawItem) and the demo
@@ -2716,15 +2725,18 @@ public sealed class WebhookProcessor : IWebhookProcessor
         // Seed the operator pane with the customer's trigger message + the
         // bot's deterministic handoff reply, so the console transcript shows
         // real WhatsApp content from the moment the operator opens it.
+        // Resolve handoff text once per call so the chat-log entry and the
+        // outgoing WhatsApp body stay byte-identical.
+        var handoffBody = Msg.HandoffInitiated(businessContext.HandoffPhoneNumber);
         state.HumanChatLog.Add(new HumanChatEntry { Sender = "customer", Text = rawText, Kind = "text", At = nowUtc });
-        state.HumanChatLog.Add(new HumanChatEntry { Sender = "bot", Text = Msg.HandoffInitiated, Kind = "text", At = nowUtc });
+        state.HumanChatLog.Add(new HumanChatEntry { Sender = "bot", Text = handoffBody, Kind = "text", At = nowUtc });
         if (state.HumanChatLog.Count > 50)
             state.HumanChatLog = state.HumanChatLog.Skip(state.HumanChatLog.Count - 50).ToList();
 
         await SendAsync(new OutgoingMessage
         {
             To = customerFrom,
-            Body = Msg.HandoffInitiated,
+            Body = handoffBody,
             PhoneNumberId = phoneNumberId,
             AccessToken = businessContext.AccessToken
         }, businessContext.BusinessId, conversationId, ct);
@@ -2748,7 +2760,7 @@ public sealed class WebhookProcessor : IWebhookProcessor
         return intent switch
         {
             RestaurantIntent.OrderCreate => BuildOrderReply(parsed, state),
-            RestaurantIntent.HumanHandoff => Msg.HandoffInitiated,
+            RestaurantIntent.HumanHandoff => Msg.HandoffInitiated(_handoffPhoneNumber),
             _ => EffectiveWhatToOrder()
         };
     }

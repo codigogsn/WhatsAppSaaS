@@ -489,4 +489,90 @@ public sealed class HumanHandoffTests
         // Handoff should remain active
         _capturedState.HumanHandoffRequested.Should().BeTrue();
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  F. PER-TENANT HandoffPhoneNumber
+    // ═══════════════════════════════════════════════════════════════════
+
+    // F1. Default (no phone configured) — message body byte-identical to
+    // the prior single-paragraph copy. Guarantees zero regression for
+    // tenants that have not set HandoffPhoneNumber.
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Msg_HandoffInitiated_NoPhone_ReturnsLegacyCopy(string? phone)
+    {
+        var body = Msg.HandoffInitiated(phone);
+
+        body.Should().Be(
+            "Entendido. Tu conversación fue derivada a un agente humano.\n\n" +
+            "Un miembro de nuestro equipo te atenderá en breve 🙏");
+    }
+
+    // F2. With phone — message includes the new "comunicarte directamente"
+    // line and the phone number verbatim.
+    [Fact]
+    public void Msg_HandoffInitiated_WithPhone_AppendsDirectContactLine()
+    {
+        var body = Msg.HandoffInitiated("0424-2442456");
+
+        body.Should().Contain("agente humano");
+        body.Should().Contain("asesor humano");
+        body.Should().Contain("comunicarte directamente al:");
+        body.Should().Contain("0424-2442456");
+        // The legacy "en breve" wording is kept so existing keyword assertions
+        // in this file ("humano" / "agente") still hold.
+        body.Should().Contain("En breve te atenderá");
+    }
+
+    // F3. Phone is trimmed before insertion to defend against accidental
+    // whitespace in tenant config.
+    [Fact]
+    public void Msg_HandoffInitiated_TrimsPhone()
+    {
+        var body = Msg.HandoffInitiated("  0424-2442456  ");
+
+        body.Should().Contain("0424-2442456");
+        body.Should().NotContain("  0424-2442456  ");
+    }
+
+    // F4. End-to-end: a tenant with HandoffPhoneNumber set delivers a reply
+    // that contains the number. Exercises BusinessContext propagation and
+    // the EnterHandoffAsync call site.
+    [Fact]
+    public async Task HandoffKeyword_TenantWithHandoffPhone_ReplyIncludesPhone()
+    {
+        var businessWithPhone = _testBusiness with { HandoffPhoneNumber = "0424-2442456" };
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(MakePayload("humano"), businessWithPhone);
+
+        _sentMessages.Should().HaveCountGreaterOrEqualTo(1);
+        _sentMessages[0].Body.Should().Contain("0424-2442456");
+        _sentMessages[0].Body.Should().Contain("comunicarte directamente al:");
+        // Operator console transcript also captures the same body verbatim.
+        _capturedState.HumanChatLog.Should()
+            .Contain(e => e.Sender == "bot" && e.Text.Contains("0424-2442456"));
+    }
+
+    // F5. End-to-end: a tenant without HandoffPhoneNumber delivers the
+    // legacy reply (regression guard for the default branch).
+    [Fact]
+    public async Task HandoffKeyword_TenantWithoutHandoffPhone_ReplyOmitsDirectLine()
+    {
+        var state = new ConversationFields();
+        _stateStoreMock
+            .Setup(x => x.GetOrCreateAsync(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(state);
+
+        await _sut.ProcessAsync(MakePayload("humano"), _testBusiness);
+
+        _sentMessages.Should().HaveCountGreaterOrEqualTo(1);
+        _sentMessages[0].Body.Should().NotContain("comunicarte directamente al:");
+        _sentMessages[0].Body.Should().Contain("Un miembro de nuestro equipo te atender");
+    }
 }

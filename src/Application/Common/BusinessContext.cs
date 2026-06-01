@@ -21,4 +21,5 @@ public sealed record BusinessContext(
     string? ZelleInstructions = null,
     bool InteractiveMenuEnabled = false,
     string? OrderInstructions = null,
-    bool MemoryLogEnabled = true);
+    bool MemoryLogEnabled = true,
+    string? HandoffPhoneNumber = null);

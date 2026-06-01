@@ -441,6 +441,11 @@ public class AppDbContext : DbContext
             b.Property(x => x.MemoryLogEnabled)
                 .IsRequired()
                 .HasDefaultValue(true);
+
+            // Optional per-tenant direct contact number, surfaced verbatim in the
+            // customer-facing human handoff reply. Null/empty disables the line.
+            b.Property(x => x.HandoffPhoneNumber)
+                .HasMaxLength(32);
         });
 
         modelBuilder.Entity<ConversationMessage>(b =>
