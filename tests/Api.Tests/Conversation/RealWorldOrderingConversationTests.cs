@@ -176,7 +176,7 @@ public class RealWorldOrderingConversationTests
         reply.Body.Should().Contain("Hamburguesa Clasica");
         reply.Body.Should().Contain("Coca Cola");
         reply.Body.Should().Contain("Delivery");
-        reply.Body.Should().Contain("$4.00"); // delivery fee
+        reply.Body.Should().Contain("$3.00"); // delivery fee
 
         // Verify prices
         var burger = state.Items.First(i => i.Name == "Hamburguesa Clasica");
@@ -303,7 +303,7 @@ public class RealWorldOrderingConversationTests
 
         reply.Body.Should().Contain("RESUMEN");
         reply.Body.Should().Contain("Delivery");
-        reply.Body.Should().Contain("$4.00"); // delivery fee
+        reply.Body.Should().Contain("$3.00"); // delivery fee
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -636,8 +636,8 @@ public class RealWorldOrderingConversationTests
         deliveryState.DeliveryType = "delivery";
 
         var deliveryReply = WebhookProcessor.BuildOrderReplyFromState(deliveryState);
-        deliveryReply.Body.Should().Contain("Delivery: $4.00");
-        deliveryReply.Body.Should().Contain("$10.50"); // 6.50 + 4.00
+        deliveryReply.Body.Should().Contain("Delivery: $3.00");
+        deliveryReply.Body.Should().Contain("$9.50"); // 6.50 + 3.00
 
         // Pickup order — same item
         var pickupState = new ConversationFields();
@@ -919,10 +919,10 @@ public class RealWorldOrderingConversationTests
 
         var reply = WebhookProcessor.BuildOrderReplyFromState(state);
 
-        // Subtotal = $14.50, delivery = $4.00, total = $18.50
+        // Subtotal = $14.50, delivery = $3.00, total = $17.50
         reply.Body.Should().Contain("$14.50"); // subtotal
-        reply.Body.Should().Contain("$4.00");  // delivery fee
-        reply.Body.Should().Contain("$18.50"); // total
+        reply.Body.Should().Contain("$3.00");  // delivery fee
+        reply.Body.Should().Contain("$17.50"); // total
     }
 
     [Fact]
@@ -1078,9 +1078,9 @@ public class RealWorldOrderingConversationTests
         SimulateObservationAnswer(state, "no");
         var reply = SimulateDeliveryChoice(state, "delivery");
 
-        // At summary — $6.50 + $4.00 delivery = $10.50
+        // At summary — $6.50 + $3.00 delivery = $9.50
         reply.Body.Should().Contain("RESUMEN");
-        reply.Body.Should().Contain("$10.50");
+        reply.Body.Should().Contain("$9.50");
 
         // User edits
         state.DeliveryType = null;
@@ -1099,11 +1099,11 @@ public class RealWorldOrderingConversationTests
         SimulateObservationAnswer(state, "no");
         reply = SimulateDeliveryChoice(state, "delivery");
 
-        // New total: $6.50 + $1.50 + $4.00 = $12.00
+        // New total: $6.50 + $1.50 + $3.00 = $11.00
         reply.Body.Should().Contain("RESUMEN");
         reply.Body.Should().Contain("Hamburguesa Clasica");
         reply.Body.Should().Contain("Coca Cola");
-        reply.Body.Should().Contain("$12.00");
+        reply.Body.Should().Contain("$11.00");
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1265,12 +1265,12 @@ public class RealWorldOrderingConversationTests
         var reply = SimulateDeliveryChoice(state, "delivery");
 
         reply.Body.Should().Contain("RESUMEN");
-        reply.Body.Should().Contain("Delivery: $4.00");
+        reply.Body.Should().Contain("Delivery: $3.00");
 
-        // Subtotal: 8.50 + 3.00 = 11.50; Total: 11.50 + 4.00 = 15.50
+        // Subtotal: 8.50 + 3.00 = 11.50; Total: 11.50 + 3.00 = 14.50
         var total = WebhookProcessor.ComputeOrderTotalUsd(state);
-        total.Should().Be(15.50m);
-        reply.Body.Should().Contain("$15.50");
+        total.Should().Be(14.50m);
+        reply.Body.Should().Contain("$14.50");
     }
 
     // ═══════════════════════════════════════════════════════════
@@ -1310,7 +1310,7 @@ public class RealWorldOrderingConversationTests
             { Name = "Perro Clasico", Quantity = 2, UnitPrice = 4.50m });
 
         state.DeliveryType = "delivery";
-        WebhookProcessor.ComputeOrderTotalUsd(state).Should().Be(13.00m); // 9 + 4
+        WebhookProcessor.ComputeOrderTotalUsd(state).Should().Be(12.00m); // 9 + 3
 
         state.DeliveryType = "pickup";
         WebhookProcessor.ComputeOrderTotalUsd(state).Should().Be(9.00m); // 9 only
@@ -1359,10 +1359,10 @@ public class RealWorldOrderingConversationTests
         SimulateObservationAnswer(state, "no");
         var reply = SimulateDeliveryChoice(state, "delivery");
 
-        // 4*6.50 + 3*4.50 + 2*4.50 + 4*1.50 = 26 + 13.50 + 9 + 6 = 54.50 + 4 delivery = 58.50
+        // 4*6.50 + 3*4.50 + 2*4.50 + 4*1.50 = 26 + 13.50 + 9 + 6 = 54.50 + 3 delivery = 57.50
         var total = WebhookProcessor.ComputeOrderTotalUsd(state);
-        total.Should().Be(58.50m);
-        reply.Body.Should().Contain("$58.50");
+        total.Should().Be(57.50m);
+        reply.Body.Should().Contain("$57.50");
     }
 
     // ═══════════════════════════════════════════════════════════

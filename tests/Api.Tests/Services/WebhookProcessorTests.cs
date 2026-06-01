@@ -356,8 +356,8 @@ public class WebhookProcessorTests
         receipt.Should().Contain("2x Hamburguesa Clasica");
         receipt.Should().Contain("1x Papas Medianas");
         receipt.Should().Contain("Subtotal: $16.50");
-        receipt.Should().Contain("Delivery: $4.00");
-        receipt.Should().Contain("TOTAL A PAGAR: $20.50");
+        receipt.Should().Contain("Delivery: $3.00");
+        receipt.Should().Contain("TOTAL A PAGAR: $19.50");
     }
 
     [Fact]
@@ -517,8 +517,8 @@ public class WebhookProcessorTests
         coca.LineTotal.Should().Be(4.50m);
 
         savedOrder.SubtotalAmount.Should().Be(17.50m);
-        savedOrder.DeliveryFee.Should().Be(4.00m);
-        savedOrder.TotalAmount.Should().Be(21.50m);
+        savedOrder.DeliveryFee.Should().Be(3.00m);
+        savedOrder.TotalAmount.Should().Be(20.50m);
     }
 
     [Fact]
@@ -594,7 +594,7 @@ public class WebhookProcessorTests
 
     // Regression: the pago-móvil "Monto: Bs." line was using items subtotal only,
     // so a delivery order's Bs amount didn't match the receipt's grand total.
-    // With rate=1, subtotal=$17, delivery=$4, the message must show Bs. 21.00, not Bs. 17.00.
+    // With rate=1, subtotal=$17, delivery=$3, the message must show Bs. 20.00, not Bs. 17.00.
     [Fact]
     public async Task PagoMovil_BsAmount_UsesGrandTotalIncludingDelivery()
     {
@@ -624,7 +624,7 @@ public class WebhookProcessorTests
                 new Mock<ILogger<WebhookProcessor>>().Object,
                 exchangeRateProvider: rateProviderMock.Object);
 
-            // Subtotal $17, delivery $4 → grand total $21. With rate 1.0, Bs = 21.00.
+            // Subtotal $17, delivery $3 → grand total $20. With rate 1.0, Bs = 20.00.
             var state = new ConversationFields
             {
                 DeliveryType = "delivery",
@@ -649,8 +649,8 @@ public class WebhookProcessorTests
             var pagoDetailMsg = sentMessages.FirstOrDefault(m => m.Body.Contains("Banesco"));
             pagoDetailMsg.Should().NotBeNull("should send pago-móvil details");
             pagoDetailMsg!.Body.Should().Contain("Bs.", "Bs amount line must be present");
-            pagoDetailMsg.Body.Should().MatchRegex(@"Bs\.\s+21[\.,]0{2}\b",
-                "Bs amount must equal grand total $21 × rate 1.0 = 21.00, not subtotal $17");
+            pagoDetailMsg.Body.Should().MatchRegex(@"Bs\.\s+20[\.,]0{2}\b",
+                "Bs amount must equal grand total $20 × rate 1.0 = 20.00, not subtotal $17");
             pagoDetailMsg.Body.Should().NotMatchRegex(@"Bs\.\s+17[\.,]0{2}\b",
                 "Bs amount must NOT equal subtotal $17 × rate 1.0 (the pre-fix bug)");
         }

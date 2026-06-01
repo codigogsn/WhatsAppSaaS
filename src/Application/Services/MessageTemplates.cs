@@ -404,7 +404,7 @@ internal static class Msg
 
     // ── Order summary with prices (shown before checkout form) ──
 
-    internal const decimal DeliveryFeeUsd = 4.00m;
+    internal const decimal DeliveryFeeUsd = 3.00m;
 
     internal static string OrderSummaryWithTotal(IReadOnlyList<ConversationItemEntry> items, ResolvedRate? bcvRate = null, string? deliveryType = null)
     {
@@ -895,7 +895,7 @@ public static class HandoffMessageBuilder
     // Public re-export of the bot-flow delivery-fee constant so callers
     // outside the Application assembly (e.g. AdminHandoffsController) can
     // validate totals without re-deriving the value.
-    public const decimal DeliveryFeeUsd = 4.00m;
+    public const decimal DeliveryFeeUsd = 3.00m;
 
     /// <summary>
     /// Public re-export of the bot's confirmed-order receipt template. The
